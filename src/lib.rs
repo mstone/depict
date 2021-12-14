@@ -9,18 +9,51 @@ mod tests {
 
 mod data {
     pub struct World {
-
+        names: Vec<String>,
+        directives: Vec<String>,
     }
 }
 
 mod parser {
     use crate::data::*;
     use nom::IResult;
-    use nom::error::VerboseError;
-    use nom::bytes::complete::tag;
+    use nom::error::{VerboseError, context};
+    use nom::branch::{alt};
+    use nom::bytes::complete::{take_while, is_not, tag};
+    use nom::character::{is_space};
+    use nom::character::complete::{char};
+    use nom::combinator::map;
+    use nom::multi::many1;
+    use nom::sequence::preceded;
 
-    pub fn parse(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
-        tag("hello")(s)
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum Syn<I> where I: Clone + Ord + PartialEq {
+        Ident(I),
+        Directive(I),
+    }
+
+    pub fn is_ws(chr: char) -> bool {
+        match chr {
+            ' ' => true,
+            _ => false,
+        }
+    }
+
+    pub fn not_ws(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
+        is_not(" \t")(s)
+    }
+
+    pub fn ident(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
+        map(context("ident", preceded(take_while(is_ws), not_ws)), Syn::<&str>::Ident)(s)
+    }
+
+    pub fn directive(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
+        map(context("directive", preceded(take_while(is_ws), preceded(char('@'), not_ws))), Syn::<&str>::Directive)(s)
+    }
+
+    pub fn parse(s: &str) -> IResult<&str, Vec<Syn<&str>>, VerboseError<&str>> {
+        // many1(tag("hello"))(s)
+        many1(alt((directive, ident)))(s)
     }
 
     // let w = World{};
@@ -32,7 +65,7 @@ mod parser {
 
         #[test]
         fn parse_works() {
-            let s = "hello";
+            let s = " @hello hello";
             let y = super::parse(s);
             { 
                 match y { 
@@ -40,7 +73,7 @@ mod parser {
                     _ => (),
                 }
             }
-            assert_eq!(y, Ok(("", "hello")));
+            assert_eq!(y, Ok(("", vec![super::Syn::<&str>::Directive("hello"), super::Syn::<&str>::Ident("hello")])));
         }
     }
 }
