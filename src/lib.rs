@@ -67,11 +67,8 @@ mod parser {
         fn parse_works() {
             let s = " @hello hello";
             let y = super::parse(s);
-            { 
-                match y { 
-                    Err(nom::Err::Error(ref y2)) => println!("{}", convert_error(s, y2.clone())),
-                    _ => (),
-                }
+            if let Err(nom::Err::Error(ref y2)) = y {
+                println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![super::Syn::<&str>::Directive("hello"), super::Syn::<&str>::Ident("hello")])));
         }
