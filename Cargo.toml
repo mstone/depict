@@ -7,3 +7,11 @@ edition = "2021"
 
 [dependencies]
 nom = "7"
+
+[lib]
+name = "diagrams"
+path = "src/lib.rs"
+
+[[bin]]
+name = "diagrams-bin"
+path = "src/bin.rs"

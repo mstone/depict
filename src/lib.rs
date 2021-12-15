@@ -14,16 +14,16 @@ mod data {
     }
 }
 
-mod parser {
+pub mod parser {
     // use crate::data::*;
     use nom::IResult;
     use nom::error::{VerboseError, context};
     use nom::branch::{alt};
-    use nom::bytes::complete::{take_while, is_not};
+    use nom::bytes::complete::{take_while, take_while1, is_not, is_a};
     // use nom::character::{is_space};
     use nom::character::complete::{char, one_of};
-    use nom::combinator::map;
-    use nom::multi::many1;
+    use nom::combinator::{map, not, peek};
+    use nom::multi::{many0, many1};
     use nom::sequence::{preceded, terminated, separated_pair, tuple};
 
     #[derive(Clone, Debug, PartialEq)]
@@ -36,22 +36,44 @@ mod parser {
     pub fn is_ws(chr: char) -> bool {
         match chr {
             ' ' => true,
-            '\n' => true,
             '\t' => true,
             _ => false,
         }
     }
 
-    pub fn not_ws(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
-        is_not(" \t\n")(s)
+    pub fn is_wst(chr: char) -> bool {
+        match chr {
+            ' ' => true,
+            '\t' => true,
+            '\n' => true,
+            '\r' => true,
+            '.' => true,
+            _ => false,
+        }
+    }
+
+    pub fn nl(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
+        is_a("\r\n.")(s)
+    }
+
+    pub fn ws(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
+        take_while(is_ws)(s)
+    }
+
+    pub fn ws1(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
+        take_while1(is_ws)(s)
     }
 
     pub fn normal(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
-        is_not(" \t\n:@.")(s)
+        is_not(" \t\n\r:@.")(s)
     }
 
     pub fn ident(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
-        map(context("ident", preceded(take_while(is_ws), normal)), Syn::<&str>::Ident)(s)
+        map(context("ident", normal), Syn::<&str>::Ident)(s)
+    }
+
+    pub fn guarded_ident(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
+        map(context("guarded_ident", terminated(normal, not(char(':')))), Syn::<&str>::Ident)(s)
     }
 
     pub fn directive(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
@@ -59,13 +81,12 @@ mod parser {
             context(
                 "directive", 
                 tuple((
-                    take_while(is_ws), 
                     char('@'), 
                     normal,
-                    many1(ident)
+                    many1(preceded(take_while(is_wst), guarded_ident))
                 ))
             ), 
-            |(_, _, v1, v2)| Syn::<&str>::Directive(v1, v2)
+            |(_, v1, v2)| Syn::<&str>::Directive(v1, v2)
         )(s)
     }
 
@@ -75,23 +96,27 @@ mod parser {
                 "fact", 
                 tuple(
                     (
-                        take_while(is_ws), 
                         ident,
                         char(':'),
                         alt((
-                            terminated(many1(fact), one_of(".\n")),
-                            many1(ident),
+                            many1(preceded(tuple((ws, char('\n'), ws1)), fact)), // ws1, for indentation
+                            many1(preceded(ws, fact)),
+                            many0(preceded(ws, guarded_ident)), // many0, for empty facts.
                         )),
                     )
                 )
             ),
-            |(_, v1, _, v2)| Syn::<&str>::Fact(Box::new(v1), v2)
+            |(v1, _, v2)| Syn::<&str>::Fact(Box::new(v1), v2)
         )(s)
     }
 
     pub fn parse(s: &str) -> IResult<&str, Vec<Syn<&str>>, VerboseError<&str>> {
         // many1(tag("hello"))(s)
-        many1(alt((directive, fact, ident)))(s)
+        terminated(many1(alt((
+            preceded(take_while(is_wst), directive),
+            preceded(take_while(is_wst), fact),
+            // ident
+        ))), take_while(is_wst))(s)
     }
 
     // let w = World{};
@@ -103,7 +128,7 @@ mod parser {
 
         #[test]
         fn parse_works() {
-            let s = " @hello hello";
+            let s = "@hello hello";
             let y = super::parse(s);
             if let Err(nom::Err::Error(ref y2)) = y {
                 println!("{}", convert_error(s, y2.clone()))
@@ -137,19 +162,25 @@ mod parser {
 
         #[test]
         fn nested_fact_works() {
-            let s = "hello: bar: baz.";
+            let s = "hello: bar: baz bar2: baz2";
             let y = super::parse(s);
             if let Err(nom::Err::Error(ref y2)) = y {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
-                    Box::new(super::Syn::<&str>::Ident("hello")), 
+                    Box::new(super::Syn::<&str>::Ident("hello")),
                     vec![
                         super::Syn::<&str>::Fact(
-                            Box::new(super::Syn::<&str>::Ident("bar")), 
+                            Box::new(super::Syn::<&str>::Ident("bar")),
                             vec![
                                 super::Syn::<&str>::Ident("baz")
+                            ]
+                        ),
+                        super::Syn::<&str>::Fact(
+                            Box::new(super::Syn::<&str>::Ident("bar2")),
+                            vec![
+                                super::Syn::<&str>::Ident("baz2")
                             ]
                         )
                     ]
@@ -159,17 +190,17 @@ mod parser {
 
         #[test]
         fn expanded_fact_works() {
-            let s = "hello:\n\tbar: baz\n";
+            let s = "hello:\n\tbar: baz";
             let y = super::parse(s);
             if let Err(nom::Err::Error(ref y2)) = y {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
-                    Box::new(super::Syn::<&str>::Ident("hello")), 
+                    Box::new(super::Syn::<&str>::Ident("hello")),
                     vec![
                         super::Syn::<&str>::Fact(
-                            Box::new(super::Syn::<&str>::Ident("bar")), 
+                            Box::new(super::Syn::<&str>::Ident("bar")),
                             vec![
                                 super::Syn::<&str>::Ident("baz")
                             ]
