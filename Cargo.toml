@@ -15,3 +15,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "parse"
 path = "src/parse.rs"
+
+[[bin]]
+name = "dot"
+path = "src/dot.rs"

@@ -21,16 +21,23 @@ pub mod parser {
     use nom::branch::{alt};
     use nom::bytes::complete::{take_while, take_while1, take_while_m_n, is_not, is_a};
     // use nom::character::{is_space};
-    use nom::character::complete::{char, one_of};
-    use nom::combinator::{map, not, peek};
+    use nom::character::complete::{char};
+    use nom::combinator::{map, not};
     use nom::multi::{many0, many1};
-    use nom::sequence::{preceded, terminated, separated_pair, tuple};
+    use nom::sequence::{preceded, terminated, tuple};
+
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Ident<I>(pub I);
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Directive<I>(pub I, pub Vec<Ident<I>>);
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum Syn<I> where I: Clone + Ord + PartialEq {
-        Ident(I),
-        Directive(I, Vec<Self>),
-        Fact(Box<Self>, Vec<Self>)
+        Ident(Ident<I>),
+        Directive(Directive<I>),
+        Fact(Ident<I>, Vec<Self>)
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -66,15 +73,15 @@ pub mod parser {
         is_not(" \n\r:@.")(s)
     }
 
-    pub fn ident(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
-        map(context("ident", normal), Syn::<&str>::Ident)(s)
+    pub fn ident(s: &str) -> IResult<&str, Ident<&str>, VerboseError<&str>> {
+        map(context("ident", normal), Ident::<&str>)(s)
     }
 
-    pub fn guarded_ident(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
-        map(context("guarded_ident", terminated(normal, not(char(':')))), Syn::<&str>::Ident)(s)
+    pub fn guarded_ident(s: &str) -> IResult<&str, Ident<&str>, VerboseError<&str>> {
+        map(context("guarded_ident", terminated(normal, not(char(':')))), Ident::<&str>)(s)
     }
 
-    pub fn directive(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
+    pub fn directive(s: &str) -> IResult<&str, Directive<&str>, VerboseError<&str>> {
         map(
             context(
                 "directive", 
@@ -84,7 +91,7 @@ pub mod parser {
                     many1(preceded(take_while(is_wst), guarded_ident))
                 ))
             ), 
-            |(_, v1, v2)| Syn::<&str>::Directive(v1, v2)
+            |(_, v1, v2)| Directive(v1, v2)
         )(s)
     }
 
@@ -101,12 +108,12 @@ pub mod parser {
                             alt((
                                 many1(preceded(tuple((ws, char('\n'), take_while_m_n(n, n, is_ws), ws)), fact(indent+1))), // for indentation
                                 many1(preceded(ws, fact(indent))),
-                                many0(preceded(ws, guarded_ident)), // many0, for empty facts.
+                                many0(preceded(ws, map(guarded_ident, Syn::<&str>::Ident))), // many0, for empty facts.
                             )),
                         )
                     )
                 ),
-                |(v1, _, v2)| Syn::<&str>::Fact(Box::new(v1), v2)
+                |(v1, _, v2)| Syn::<&str>::Fact(v1, v2)
             )(s)
         }
     }
@@ -114,7 +121,7 @@ pub mod parser {
     pub fn parse(s: &str) -> IResult<&str, Vec<Syn<&str>>, VerboseError<&str>> {
         // many1(tag("hello"))(s)
         terminated(many1(alt((
-            preceded(take_while(is_wst), directive),
+            preceded(take_while(is_wst), map(directive, Syn::<&str>::Directive)),
             preceded(take_while(is_wst), fact(0)),
             // ident
         ))), take_while(is_wst))(s)
