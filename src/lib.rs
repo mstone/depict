@@ -19,7 +19,7 @@ pub mod parser {
     use nom::IResult;
     use nom::error::{VerboseError, context};
     use nom::branch::{alt};
-    use nom::bytes::complete::{take_while, take_while1, is_not, is_a};
+    use nom::bytes::complete::{take_while, take_while1, take_while_m_n, is_not, is_a};
     // use nom::character::{is_space};
     use nom::character::complete::{char, one_of};
     use nom::combinator::{map, not, peek};
@@ -36,7 +36,6 @@ pub mod parser {
     pub fn is_ws(chr: char) -> bool {
         match chr {
             ' ' => true,
-            '\t' => true,
             _ => false,
         }
     }
@@ -44,7 +43,6 @@ pub mod parser {
     pub fn is_wst(chr: char) -> bool {
         match chr {
             ' ' => true,
-            '\t' => true,
             '\n' => true,
             '\r' => true,
             '.' => true,
@@ -65,7 +63,7 @@ pub mod parser {
     }
 
     pub fn normal(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
-        is_not(" \t\n\r:@.")(s)
+        is_not(" \n\r:@.")(s)
     }
 
     pub fn ident(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
@@ -90,31 +88,34 @@ pub mod parser {
         )(s)
     }
 
-    pub fn fact(s: &str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
-        map(
-            context(
-                "fact", 
-                tuple(
-                    (
-                        ident,
-                        char(':'),
-                        alt((
-                            many1(preceded(tuple((ws, char('\n'), ws1)), fact)), // ws1, for indentation
-                            many1(preceded(ws, fact)),
-                            many0(preceded(ws, guarded_ident)), // many0, for empty facts.
-                        )),
+    pub fn fact(indent: usize) -> impl Fn(&str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
+        let n = (indent + 1) * 4;
+        move |s: &str| {
+            map(
+                context(
+                    "fact",
+                    tuple(
+                        (
+                            ident,
+                            char(':'),
+                            alt((
+                                many1(preceded(tuple((ws, char('\n'), take_while_m_n(n, n, is_ws), ws)), fact(indent+1))), // for indentation
+                                many1(preceded(ws, fact(indent))),
+                                many0(preceded(ws, guarded_ident)), // many0, for empty facts.
+                            )),
+                        )
                     )
-                )
-            ),
-            |(v1, _, v2)| Syn::<&str>::Fact(Box::new(v1), v2)
-        )(s)
+                ),
+                |(v1, _, v2)| Syn::<&str>::Fact(Box::new(v1), v2)
+            )(s)
+        }
     }
 
     pub fn parse(s: &str) -> IResult<&str, Vec<Syn<&str>>, VerboseError<&str>> {
         // many1(tag("hello"))(s)
         terminated(many1(alt((
             preceded(take_while(is_wst), directive),
-            preceded(take_while(is_wst), fact),
+            preceded(take_while(is_wst), fact(0)),
             // ident
         ))), take_while(is_wst))(s)
     }
