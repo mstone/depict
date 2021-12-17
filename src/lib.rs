@@ -15,16 +15,16 @@ pub mod parser {
     pub struct Ident<I>(pub I);
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct Directive<I>(pub Ident<I>, pub Vec<Ident<I>>);
+    pub struct Directive<I>(pub I, pub Vec<I>);
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct Fact<I>(pub Ident<I>, pub Vec<Self>);
+    pub struct Fact<I>(pub I, pub Vec<Self>);
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum Syn<I> where I: Clone + Ord + PartialEq {
         Ident(Ident<I>),
-        Directive(Directive<I>),
-        Fact(Fact<I>),
+        Directive(Directive<Ident<I>>),
+        Fact(Fact<Ident<I>>),
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -68,7 +68,7 @@ pub mod parser {
         map(context("guarded_ident", terminated(normal, not(char(':')))), Ident::<&str>)(s)
     }
 
-    pub fn directive(s: &str) -> IResult<&str, Directive<&str>, VerboseError<&str>> {
+    pub fn directive(s: &str) -> IResult<&str, Directive<Ident<&str>>, VerboseError<&str>> {
         map(
             context(
                 "directive", 
@@ -82,7 +82,7 @@ pub mod parser {
         )(s)
     }
 
-    pub fn fact(indent: usize) -> impl Fn(&str) -> IResult<&str, Fact<&str>, VerboseError<&str>> {
+    pub fn fact(indent: usize) -> impl Fn(&str) -> IResult<&str, Fact<Ident<&str>>, VerboseError<&str>> {
         let n = (indent + 1) * 4;
         move |s: &str| {
             map(

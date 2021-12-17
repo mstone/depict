@@ -7,8 +7,8 @@ use nom::error::convert_error;
 
 type Syn<'a> = diagrams::parser::Syn::<&'a str>;
 type Ident<'a> = diagrams::parser::Ident<&'a str>;
-type Directive<'a> = diagrams::parser::Directive<&'a str>;
-type Fact<'a> = diagrams::parser::Fact<&'a str>;
+type Directive<'a> = diagrams::parser::Directive<Ident<'a>>;
+type Fact<'a> = diagrams::parser::Fact<Ident<'a>>;
    
 pub fn filter_directives<'a>(v: &'a Vec<Syn>) -> Vec<&'a Directive<'a>> {
     v
@@ -36,9 +36,19 @@ pub struct Path<I> {
     percept: I,
 }
 
+pub struct Draw<I> {
+    name: I,
+}
+
+pub struct Drawing<I> {
+    names: Vec<I>,
+}
+
 pub enum Item<I> {
     Process(Process<I>),
     Path(Path<I>),
+    Draw(Draw<I>),
+    Drawing(Drawing<I>),
 }
 
 // pub fn resolve<'a>(v: &'a Vec<Syn>) -> ??? {
