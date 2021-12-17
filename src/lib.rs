@@ -1,19 +1,3 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-}
-
-mod data {
-    pub struct World {
-        names: Vec<String>,
-        directives: Vec<String>,
-    }
-}
-
 pub mod parser {
     // use crate::data::*;
     use nom::IResult;
@@ -31,13 +15,16 @@ pub mod parser {
     pub struct Ident<I>(pub I);
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct Directive<I>(pub I, pub Vec<Ident<I>>);
+    pub struct Directive<I>(pub Ident<I>, pub Vec<Ident<I>>);
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Fact<I>(pub Ident<I>, pub Vec<Self>);
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum Syn<I> where I: Clone + Ord + PartialEq {
         Ident(Ident<I>),
         Directive(Directive<I>),
-        Fact(Ident<I>, Vec<Self>)
+        Fact(Fact<I>),
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -87,7 +74,7 @@ pub mod parser {
                 "directive", 
                 tuple((
                     char('@'), 
-                    normal,
+                    map(normal, Ident),
                     many1(preceded(take_while(is_wst), guarded_ident))
                 ))
             ), 
@@ -95,7 +82,7 @@ pub mod parser {
         )(s)
     }
 
-    pub fn fact(indent: usize) -> impl Fn(&str) -> IResult<&str, Syn<&str>, VerboseError<&str>> {
+    pub fn fact(indent: usize) -> impl Fn(&str) -> IResult<&str, Fact<&str>, VerboseError<&str>> {
         let n = (indent + 1) * 4;
         move |s: &str| {
             map(
@@ -108,12 +95,12 @@ pub mod parser {
                             alt((
                                 many1(preceded(tuple((ws, char('\n'), take_while_m_n(n, n, is_ws), ws)), fact(indent+1))), // for indentation
                                 many1(preceded(ws, fact(indent))),
-                                many0(preceded(ws, map(guarded_ident, Syn::<&str>::Ident))), // many0, for empty facts.
+                                many0(preceded(ws, map(guarded_ident, |i| Fact(i, vec![])))), // many0, for empty facts.
                             )),
                         )
                     )
                 ),
-                |(v1, _, v2)| Syn::<&str>::Fact(v1, v2)
+                |(v1, _, v2)| Fact(v1, v2)
             )(s)
         }
     }
@@ -122,7 +109,7 @@ pub mod parser {
         // many1(tag("hello"))(s)
         terminated(many1(alt((
             preceded(take_while(is_wst), map(directive, Syn::<&str>::Directive)),
-            preceded(take_while(is_wst), fact(0)),
+            preceded(take_while(is_wst), map(fact(0), Syn::<&str>::Fact)),
             // ident
         ))), take_while(is_wst))(s)
     }
@@ -143,10 +130,12 @@ pub mod parser {
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Directive(
-                    "hello", 
-                    vec![
-                        super::Syn::<&str>::Ident("hello")
-                    ]
+                    super::Directive(
+                        super::Ident("hello"), 
+                        vec![
+                            super::Ident("hello")
+                        ]
+                    )
                 )
             ])));
         }
@@ -160,10 +149,15 @@ pub mod parser {
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
-                    Box::new(super::Syn::<&str>::Ident("hello")), 
-                    vec![
-                        super::Syn::<&str>::Ident("bar")
-                    ]
+                    super::Fact(
+                        super::Ident("hello"), 
+                        vec![
+                            super::Fact(
+                                super::Ident("bar"),
+                                vec![],
+                            )
+                        ]
+                    )
                 ),
             ])));
         }
@@ -177,43 +171,56 @@ pub mod parser {
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
-                    Box::new(super::Syn::<&str>::Ident("hello")),
-                    vec![
-                        super::Syn::<&str>::Fact(
-                            Box::new(super::Syn::<&str>::Ident("bar")),
-                            vec![
-                                super::Syn::<&str>::Ident("baz")
-                            ]
-                        ),
-                        super::Syn::<&str>::Fact(
-                            Box::new(super::Syn::<&str>::Ident("bar2")),
-                            vec![
-                                super::Syn::<&str>::Ident("baz2")
-                            ]
-                        )
-                    ]
+                    super::Fact(
+                        super::Ident("hello"),
+                        vec![
+                            super::Fact(
+                                super::Ident("bar"),
+                                vec![
+                                    super::Fact(
+                                        super::Ident("baz"),
+                                        vec![],
+                                    )
+                                ]
+                            ),
+                            super::Fact(
+                                super::Ident("bar2"),
+                                vec![
+                                    super::Fact(
+                                        super::Ident("baz2"),
+                                        vec![],
+                                    )
+                                ]
+                            )
+                        ]
+                    )
                 ),
             ])));
         }
 
         #[test]
         fn expanded_fact_works() {
-            let s = "hello:\n\tbar: baz";
+            let s = "hello:\n    bar: baz";
             let y = super::parse(s);
             if let Err(nom::Err::Error(ref y2)) = y {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
-                    Box::new(super::Syn::<&str>::Ident("hello")),
-                    vec![
-                        super::Syn::<&str>::Fact(
-                            Box::new(super::Syn::<&str>::Ident("bar")),
-                            vec![
-                                super::Syn::<&str>::Ident("baz")
-                            ]
-                        )
-                    ]
+                    super::Fact(
+                        super::Ident("hello"),
+                        vec![
+                            super::Fact(
+                                super::Ident("bar"),
+                                vec![
+                                    super::Fact(
+                                        super::Ident("baz"),
+                                        vec![],
+                                    )
+                                ]
+                            )
+                        ]
+                    )
                 ),
             ])));
         }

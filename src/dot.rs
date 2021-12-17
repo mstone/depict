@@ -1,5 +1,4 @@
 use diagrams::parser::*;
-use std::fmt::Debug;
 use std::fs::read_to_string;
 use std::env::args;
 use std::io;
@@ -9,19 +8,47 @@ use nom::error::convert_error;
 type Syn<'a> = diagrams::parser::Syn::<&'a str>;
 type Ident<'a> = diagrams::parser::Ident<&'a str>;
 type Directive<'a> = diagrams::parser::Directive<&'a str>;
+type Fact<'a> = diagrams::parser::Fact<&'a str>;
    
-pub fn filter_directives(v: Vec<Syn>) -> Vec<Directive> {
+pub fn filter_directives<'a>(v: &'a Vec<Syn>) -> Vec<&'a Directive<'a>> {
     v
         .iter()
-        .filter_map(|ref e| if let Syn::Directive(d) = e { Some(d) } else { None })
-        .cloned()
+        .filter_map(|ref e| if let Syn::Directive(ref d) = e { Some(d) } else { None })
         .collect()
 }
+
+pub fn filter_draw<'a>(v: &'a Vec<Syn>) -> Vec<&'a Fact<'a>> {
+    v
+        .iter()
+        .filter_map(|ref e| if let Syn::Fact(ref f) = e { Some(f) } else { None })
+        .collect()
+}
+
+pub struct Process<I> {
+    name: I,
+    controls: Vec<Path<I>>,
+    senses: Vec<Path<I>>,
+}
+
+pub struct Path<I> {
+    name: I,
+    action: I,
+    percept: I,
+}
+
+pub enum Item<I> {
+    Process(Process<I>),
+    Path(Path<I>),
+}
+
+// pub fn resolve<'a>(v: &'a Vec<Syn>) -> ??? {
+
+// }
 
 pub fn render(v: Vec<Syn>) {
     println!("ok\n\n");
 
-    let ds = filter_directives(v);
+    let ds = filter_directives(&v);
     println!("directives:\n{:#?}\n\n", ds);
     // use directives to identify objects
     // use facts to figure out directions + labels?
@@ -30,12 +57,14 @@ pub fn render(v: Vec<Syn>) {
     //   render nodes
     //   render edges
     //   footer
-    for d in ds {
-        if d.0 == "compact" {
-            println!("COMPACT\n{:#?}", d.1)
-        }
-    }
+    let mut compact: &Vec<Ident> = &ds.iter().find(|d| d.0 == Ident("compact")).unwrap().1;
+    println!("COMPACT\n{:#?}", compact)
 
+    // for id in compact {
+    //     match resolve(&v, id) {
+
+    //     }
+    // }
 }
 
 pub fn main() -> io::Result<()> {
