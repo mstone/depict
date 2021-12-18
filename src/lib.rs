@@ -18,7 +18,10 @@ pub mod parser {
     pub struct Directive<I>(pub I, pub Vec<I>);
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct Fact<I>(pub I, pub Vec<Self>);
+    pub enum Fact<I> {
+        Atom(I),
+        Fact(I, Vec<Self>)
+    }
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum Syn<I> where I: Clone + Ord + PartialEq {
@@ -95,12 +98,12 @@ pub mod parser {
                             alt((
                                 many1(preceded(tuple((ws, char('\n'), take_while_m_n(n, n, is_ws), ws)), fact(indent+1))), // for indentation
                                 many1(preceded(ws, fact(indent))),
-                                many0(preceded(ws, map(guarded_ident, |i| Fact(i, vec![])))), // many0, for empty facts.
+                                many0(preceded(ws, map(guarded_ident, |i| Fact::<Ident<&str>>::Atom(i)))), // many0, for empty facts.
                             )),
                         )
                     )
                 ),
-                |(v1, _, v2)| Fact(v1, v2)
+                |(v1, _, v2)| Fact::<Ident<&str>>::Fact(v1, v2)
             )(s)
         }
     }

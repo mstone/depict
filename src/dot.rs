@@ -20,7 +20,7 @@ pub fn filter_directives<'a>(v: &'a Vec<Syn>) -> Vec<&'a Directive<'a>> {
 pub fn filter_draw<'a>(v: &'a Vec<Syn>) -> impl Iterator<Item = &'a Fact<'a>> {
     v
         .iter()
-        .filter_map(|ref e| if let Syn::Fact(Fact(Ident("draw"), f)) = e { Some(f) } else { None })
+        .filter_map(|ref e| if let Syn::Fact(Fact::Fact(Ident("draw"), f)) = e { Some(f) } else { None })
         .flatten()
 }
 
