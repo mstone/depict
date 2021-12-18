@@ -17,11 +17,11 @@ pub fn filter_directives<'a>(v: &'a Vec<Syn>) -> Vec<&'a Directive<'a>> {
         .collect()
 }
 
-pub fn filter_draw<'a>(v: &'a Vec<Syn>) -> Vec<&'a Fact<'a>> {
+pub fn filter_draw<'a>(v: &'a Vec<Syn>) -> impl Iterator<Item = &'a Fact<'a>> {
     v
         .iter()
-        .filter_map(|ref e| if let Syn::Fact(ref f) = e { Some(f) } else { None })
-        .collect()
+        .filter_map(|ref e| if let Syn::Fact(Fact(Ident("draw"), f)) = e { Some(f) } else { None })
+        .flatten()
 }
 
 pub struct Process<I> {
@@ -58,8 +58,9 @@ pub enum Item<I> {
 pub fn render(v: Vec<Syn>) {
     println!("ok\n\n");
 
-    let ds = filter_directives(&v);
-    println!("directives:\n{:#?}\n\n", ds);
+    let ds = filter_draw(&v);
+    let ds2 = ds.collect::<Vec<&Fact>>();
+    println!("draw:\n{:#?}\n\n", ds2);
     // use directives to identify objects
     // use facts to figure out directions + labels?
     // print out dot repr?
@@ -67,8 +68,8 @@ pub fn render(v: Vec<Syn>) {
     //   render nodes
     //   render edges
     //   footer
-    let mut compact: &Vec<Ident> = &ds.iter().find(|d| d.0 == Ident("compact")).unwrap().1;
-    println!("COMPACT\n{:#?}", compact)
+    // let mut compact: &Vec<Ident> = &ds.find(|d| d == Ident("compact")).unwrap().1;
+    // println!("COMPACT\n{:#?}", compact)
 
     // for id in compact {
     //     match resolve(&v, id) {
