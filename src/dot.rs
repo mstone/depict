@@ -65,9 +65,16 @@ pub fn resolve<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E
     }
 }
 
+pub fn unwrap_atom<'a>(a: &'a Fact<'a>) -> Option<&'a str> {
+    match a {
+        Fact::Atom(Ident(i)) => Some(*i),
+        _ => None,
+    }
+}
+
 pub fn first_ident<'a, I: Iterator<Item = &'a Fact<'a>>>(mut v: I) -> Option<&'a str> {
     v
-        .find_map(|r| match r { Fact::Atom(Ident(i)) => Some(*i), _ => None, })
+        .find_map(unwrap_atom)
 }
 
 pub fn render(v: Vec<Syn>) {
@@ -91,14 +98,22 @@ pub fn render(v: Vec<Syn>) {
                 Fact::Fact(Ident("compact"), items) => {
                     for item in items {
                         let resolved_item = resolve(v.iter(), item);
-                        // let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
-                        // println!("{:?} {:?}", item, resolved_item.collect::<Vec<&Fact>>());
-
                         let query = Fact::Atom(Ident("name"));
                         let resolved_name = resolve(resolved_item, &query);
-                        // println!("rn: {:?}", resolved_name.collect::<Vec<&Fact>>());
-
-                        let name = first_ident(resolved_name).unwrap();
+                        let name = first_ident(resolved_name).unwrap_or(
+                            item.unwrap_atom().unwrap()
+                        );
+                        println!("{}", name);
+                    }
+                },
+                Fact::Fact(Ident("coalesce"), items) => {
+                    for item in items {
+                        let resolved_item = resolve(v.iter(), item);
+                        let query = Fact::Atom(Ident("name"));
+                        let resolved_name = resolve(resolved_item, &query);
+                        let name = first_ident(resolved_name).unwrap_or(
+                            item.unwrap_atom().unwrap()
+                        );
                         println!("{}", name);
                     }
                 },
