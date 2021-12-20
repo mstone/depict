@@ -24,10 +24,21 @@ pub mod parser {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum Syn<I> where I: Clone + Ord + PartialEq {
+    pub enum Syn<I> where I: Clone + std::fmt::Debug + PartialEq {
         Ident(Ident<I>),
         Directive(Directive<Ident<I>>),
         Fact(Fact<Ident<I>>),
+    }
+
+    impl<'a, I: Clone + std::fmt::Debug + PartialEq> TryFrom<&'a Syn<I>> for &'a Fact<Ident<I>> {
+        type Error = ();
+
+        fn try_from(value: &'a Syn<I>) -> Result<Self, ()> {
+            match value {
+                Syn::Fact(f) => Ok(f),
+                _ => Err(())
+            }
+        }
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -152,12 +163,11 @@ pub mod parser {
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
-                    super::Fact(
+                    super::Fact::Fact(
                         super::Ident("hello"), 
                         vec![
-                            super::Fact(
+                            super::Fact::Atom(
                                 super::Ident("bar"),
-                                vec![],
                             )
                         ]
                     )
@@ -174,24 +184,22 @@ pub mod parser {
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
-                    super::Fact(
+                    super::Fact::Fact(
                         super::Ident("hello"),
                         vec![
-                            super::Fact(
+                            super::Fact::Fact(
                                 super::Ident("bar"),
                                 vec![
-                                    super::Fact(
+                                    super::Fact::Atom(
                                         super::Ident("baz"),
-                                        vec![],
                                     )
                                 ]
                             ),
-                            super::Fact(
+                            super::Fact::Fact(
                                 super::Ident("bar2"),
                                 vec![
-                                    super::Fact(
+                                    super::Fact::Atom(
                                         super::Ident("baz2"),
-                                        vec![],
                                     )
                                 ]
                             )
@@ -210,15 +218,14 @@ pub mod parser {
             }
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
-                    super::Fact(
+                    super::Fact::Fact(
                         super::Ident("hello"),
                         vec![
-                            super::Fact(
+                            super::Fact::Fact(
                                 super::Ident("bar"),
                                 vec![
-                                    super::Fact(
+                                    super::Fact::Atom(
                                         super::Ident("baz"),
-                                        vec![],
                                     )
                                 ]
                             )
