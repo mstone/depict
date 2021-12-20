@@ -1,4 +1,5 @@
 use diagrams::parser::*;
+use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::env::args;
 use std::io;
@@ -19,9 +20,9 @@ type Fact<'a> = diagrams::parser::Fact<Ident<'a>>;
 
 // pub fn filter_fact<'a>(v: &'a Vec<Syn>, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
 // pub fn filter_fact<'a, I: Iterator<Item = &'a Syn<'a>>>(v: I, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
-pub fn filter_fact<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E>, E>(v: I, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
+pub fn filter_fact<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
     v
-        .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i2, f)) if i == i2 => Some(f), _ => None, })
+        .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i, f)) if q == i => Some(f), _ => None, })
         .flatten()
 }
 
@@ -72,13 +73,36 @@ pub fn unwrap_atom<'a>(a: &'a Fact<'a>) -> Option<&'a str> {
     }
 }
 
+pub fn to_ident<'a>(a: &'a Fact<'a>) -> &'a Ident<'a> {
+    match a {
+        Fact::Atom(i) => i,
+        Fact::Fact(i, _fs) => i,
+    }
+}
+
 pub fn first_ident<'a, I: Iterator<Item = &'a Fact<'a>>>(mut v: I) -> Option<&'a str> {
     v
         .find_map(unwrap_atom)
 }
 
+pub fn find_parent<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Ident<'a>> {
+    v
+        .filter_map(move |item| 
+            match item.try_into() {
+                Ok(Fact::Fact(i, fs)) => {
+                    let mut candidates = filter_fact(fs.iter(), q1);
+                    candidates.find(|c| match c {
+                        Fact::Atom(a) if a == q2 => true,
+                        _ => false,
+                    }).map(|_| i)
+                },
+                _ => None,
+            }
+        )
+}
+
 pub fn render(v: Vec<Syn>) {
-    println!("ok\n\n");
+    // println!("ok\n\n");
 
     let ds = filter_fact(v.iter(), &Ident("draw"));
     // let ds2 = ds.collect::<Vec<&Fact>>();
@@ -101,20 +125,37 @@ pub fn render(v: Vec<Syn>) {
                         let query = Fact::Atom(Ident("name"));
                         let resolved_name = resolve(resolved_item, &query);
                         let name = first_ident(resolved_name).unwrap_or(
-                            item.unwrap_atom().unwrap()
+                            unwrap_atom(item).unwrap()
                         );
-                        println!("{}", name);
+                        println!("{} [label=\"{}\"];", unwrap_atom(item).unwrap(), name);
                     }
                 },
                 Fact::Fact(Ident("coalesce"), items) => {
+                    let mut h = HashMap::new();
+                    let action_query = Fact::Atom(Ident("action"));
+
                     for item in items {
                         let resolved_item = resolve(v.iter(), item);
-                        let query = Fact::Atom(Ident("name"));
-                        let resolved_name = resolve(resolved_item, &query);
-                        let name = first_ident(resolved_name).unwrap_or(
-                            item.unwrap_atom().unwrap()
+
+                        // let src_query = Fact::Atom(Ident(""))  // "x where q \in x.actuates"
+                            // handle via unification? via a parser on facts??? via customs search routines?
+                            // via some kind of relational hackery?
+                        let resolved_src = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next().unwrap().0;
+                        let resolved_tgt = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next().unwrap().0;
+                        // println!("{:?}", resolved_src);
+
+                        let resolved_action = resolve(resolved_item, &action_query);
+                        let action = first_ident(resolved_action).unwrap_or(
+                            unwrap_atom(item).unwrap()
                         );
-                        println!("{}", name);
+                        h.entry((resolved_src, resolved_tgt))
+                            .or_insert(vec![])
+                            .push(action)
+                    }
+                    
+                    for ((src, tgt), actions) in h.iter() { 
+                        let rendered_actions = actions.as_slice().join("\\n");
+                        println!("{} -> {} [label=\"{}\"];", src, tgt, rendered_actions);
                     }
                 },
                 _ => {},
@@ -144,7 +185,7 @@ pub fn render(v: Vec<Syn>) {
 pub fn main() -> io::Result<()> {
     for path in args().skip(1) {
         let contents = read_to_string(path)?;
-        println!("{}\n\n", &contents);
+        // println!("{}\n\n", &contents);
         let v = parse(&contents[..]);
         match v {
             Err(nom::Err::Error(v2)) => {

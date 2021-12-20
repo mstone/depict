@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-nom = "7"
 auto_enums = "0.7"
+nom = "7"
 
 [lib]
 name = "diagrams"
