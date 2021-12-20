@@ -9,28 +9,36 @@ pub mod parser {
     use nom::combinator::{map, not};
     use nom::multi::{many0, many1};
     use nom::sequence::{preceded, terminated, tuple};
+    use std::hash::Hash;
+    use std::fmt::Display;
 
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub struct Ident<I>(pub I);
 
-    #[derive(Clone, Debug, PartialEq)]
+    impl<I: Display> Display for Ident<I> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub struct Directive<I>(pub I, pub Vec<I>);
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub enum Fact<I> {
         Atom(I),
         Fact(I, Vec<Self>)
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub enum Syn<I> where I: Clone + std::fmt::Debug + PartialEq {
         Ident(Ident<I>),
         Directive(Directive<Ident<I>>),
         Fact(Fact<Ident<I>>),
     }
 
-    impl<'a, I: Clone + std::fmt::Debug + PartialEq> TryFrom<&'a Syn<I>> for &'a Fact<Ident<I>> {
+    impl<'a, I: Clone + std::fmt::Debug + Eq + Hash + PartialEq> TryFrom<&'a Syn<I>> for &'a Fact<Ident<I>> {
         type Error = ();
 
         fn try_from(value: &'a Syn<I>) -> Result<Self, ()> {

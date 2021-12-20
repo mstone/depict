@@ -117,22 +117,46 @@ pub fn render(v: Vec<Syn>) {
 
         println!("{}", "digraph {");
 
+        let action_query = Fact::Atom(Ident("action"));
+        let name_query = Fact::Atom(Ident("name"));
+
         for hint in res {
             match hint {
                 Fact::Fact(Ident("compact"), items) => {
+                    let mut h = HashMap::new();
+
                     for item in items {
                         let resolved_item = resolve(v.iter(), item);
-                        let query = Fact::Atom(Ident("name"));
-                        let resolved_name = resolve(resolved_item, &query);
+                        let resolved_name = resolve(resolved_item, &name_query);
                         let name = first_ident(resolved_name).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
-                        println!("{} [label=\"{}\"];", unwrap_atom(item).unwrap(), name);
+                        println!("{} [label=\"{}\",shape=rect];", unwrap_atom(item).unwrap(), name);
+
+                        let resolved_src = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
+                        let resolved_tgt = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
+                        let resolved_item = resolve(v.iter(), item);
+                        let resolved_action = resolve(resolved_item, &action_query);
+                        let action = first_ident(resolved_action).unwrap_or(
+                            unwrap_atom(item).unwrap()
+                        );
+                        
+                        h.entry((resolved_src, resolved_tgt))
+                            .or_insert(vec![])
+                            .push((unwrap_atom(item).unwrap(), action))
+                    }
+
+                    for ((src, tgt), mediators) in h.iter() { 
+                        if let (Some(s), Some(t)) = (src, tgt) {
+                            for (med, action) in mediators {
+                                println!("{} -> {} [label=\"{}\"];", s, med, action);
+                                println!("{} -> {};", med, t);
+                            }
+                        }
                     }
                 },
                 Fact::Fact(Ident("coalesce"), items) => {
                     let mut h = HashMap::new();
-                    let action_query = Fact::Atom(Ident("action"));
 
                     for item in items {
                         let resolved_item = resolve(v.iter(), item);
