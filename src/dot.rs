@@ -65,6 +65,11 @@ pub fn resolve<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E
     }
 }
 
+pub fn first_ident<'a, I: Iterator<Item = &'a Fact<'a>>>(mut v: I) -> Option<&'a str> {
+    v
+        .find_map(|r| match r { Fact::Atom(Ident(i)) => Some(*i), _ => None, })
+}
+
 pub fn render(v: Vec<Syn>) {
     println!("ok\n\n");
 
@@ -91,7 +96,10 @@ pub fn render(v: Vec<Syn>) {
 
                         let query = Fact::Atom(Ident("name"));
                         let resolved_name = resolve(resolved_item, &query);
-                        println!("rn: {:?}", resolved_name.collect::<Vec<&Fact>>());
+                        // println!("rn: {:?}", resolved_name.collect::<Vec<&Fact>>());
+
+                        let name = first_ident(resolved_name).unwrap();
+                        println!("{}", name);
                     }
                 },
                 _ => {},
