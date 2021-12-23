@@ -11,7 +11,7 @@ type Syn<'a> = diagrams::parser::Syn::<&'a str>;
 type Ident<'a> = diagrams::parser::Ident<&'a str>;
 type Directive<'a> = diagrams::parser::Directive<Ident<'a>>;
 type Fact<'a> = diagrams::parser::Fact<Ident<'a>>;
-   
+
 // pub fn filter_directives<'a, I: Iterator<Item = Syn<'a>>>(v: I) -> Vec<&'a Directive<'a>> {
 //     v
 //         .filter_map(|e| if let Syn::Directive(d) = e { Some(d) } else { None })
@@ -87,7 +87,7 @@ pub fn first_ident<'a, I: Iterator<Item = &'a Fact<'a>>>(mut v: I) -> Option<&'a
 
 pub fn find_parent<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Ident<'a>> {
     v
-        .filter_map(move |item| 
+        .filter_map(move |item|
             match item.try_into() {
                 Ok(Fact::Fact(i, fs)) => {
                     let mut candidates = filter_fact(fs.iter(), q1);
@@ -112,41 +112,52 @@ pub fn render(v: Vec<Syn>) {
         // println!("draw:\n{:#?}\n\n", draw);
 
         let res = resolve(v.iter(), draw);
-        
+
         // println!("resolution: {:?}\n", res);
 
         println!("{}", "digraph {");
+        println!("{}", "graph [splines=ortho, nodesep=1];");
 
         let action_query = Fact::Atom(Ident("action"));
+        let percept_query = Fact::Atom(Ident("percept"));
         let name_query = Fact::Atom(Ident("name"));
 
         for hint in res {
             match hint {
                 Fact::Fact(Ident("compact"), items) => {
-                    let mut h = HashMap::new();
+                    let mut h_acts = HashMap::new();
+                    let mut h_sens = HashMap::new();
 
                     for item in items {
-                        let resolved_item = resolve(v.iter(), item);
-                        let resolved_name = resolve(resolved_item, &name_query);
+                        let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
+                        let resolved_name = resolve(resolved_item.iter().map(|v| *v), &name_query);
                         let name = first_ident(resolved_name).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
                         println!("{} [label=\"{}\",shape=rect];", unwrap_atom(item).unwrap(), name);
 
-                        let resolved_src = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
-                        let resolved_tgt = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
-                        let resolved_item = resolve(v.iter(), item);
-                        let resolved_action = resolve(resolved_item, &action_query);
+                        let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
+                        let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
+                        let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
+                        let resolved_action = resolve(resolved_item.iter().map(|v| *v), &action_query);
                         let action = first_ident(resolved_action).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
-                        
-                        h.entry((resolved_src, resolved_tgt))
+                        let resolved_percept = resolve(resolved_item.iter().map(|v| *v), &percept_query);
+                        let percept = first_ident(resolved_percept).unwrap_or(
+                            unwrap_atom(item).unwrap()
+                        );
+
+                        h_acts.entry((resolved_actuates, resolved_hosts))
                             .or_insert(vec![])
-                            .push((unwrap_atom(item).unwrap(), action))
+                            .push((unwrap_atom(item).unwrap(), action));
+
+                        h_sens.entry((resolved_senses, resolved_hosts))
+                            .or_insert(vec![])
+                            .push((unwrap_atom(item).unwrap(), percept));
                     }
 
-                    for ((src, tgt), mediators) in h.iter() { 
+                    for ((src, tgt), mediators) in h_acts.iter() {
                         if let (Some(s), Some(t)) = (src, tgt) {
                             for (med, action) in mediators {
                                 println!("{} -> {} [label=\"{}\"];", s, med, action);
@@ -154,32 +165,60 @@ pub fn render(v: Vec<Syn>) {
                             }
                         }
                     }
+                    for ((src, tgt), mediators) in h_sens.iter() {
+                        if let (Some(s), Some(t)) = (src, tgt) {
+                            for (med, percept) in mediators {
+                                println!("{} -> {} [dir=back,label=\"{}\"];", s, med, percept);
+                                println!("{} -> {} [dir=back];", med, t);
+                            }
+                        }
+                    }
                 },
                 Fact::Fact(Ident("coalesce"), items) => {
-                    let mut h = HashMap::new();
+                    let mut h_acts = HashMap::new();
+                    let mut h_sens = HashMap::new();
 
                     for item in items {
-                        let resolved_item = resolve(v.iter(), item);
+                        let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
 
                         // let src_query = Fact::Atom(Ident(""))  // "x where q \in x.actuates"
                             // handle via unification? via a parser on facts??? via customs search routines?
                             // via some kind of relational hackery?
-                        let resolved_src = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next().unwrap().0;
-                        let resolved_tgt = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next().unwrap().0;
+                        let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
+                        let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
+                        let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
                         // println!("{:?}", resolved_src);
 
-                        let resolved_action = resolve(resolved_item, &action_query);
+                        let resolved_action = resolve(resolved_item.iter().map(|v| *v), &action_query);
                         let action = first_ident(resolved_action).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
-                        h.entry((resolved_src, resolved_tgt))
+                        let resolved_percept = resolve(resolved_item.iter().map(|v| *v), &percept_query);
+                        let percept = first_ident(resolved_percept).unwrap_or(
+                            unwrap_atom(item).unwrap()
+                        );
+
+                        h_acts.entry((resolved_actuates, resolved_hosts))
                             .or_insert(vec![])
-                            .push(action)
+                            .push(action);
+
+                        h_sens.entry((resolved_senses, resolved_hosts))
+                            .or_insert(vec![])
+                            .push(percept);
                     }
-                    
-                    for ((src, tgt), actions) in h.iter() { 
-                        let rendered_actions = actions.as_slice().join("\\n");
-                        println!("{} -> {} [label=\"{}\"];", src, tgt, rendered_actions);
+
+                    for ((src, tgt), actions) in h_acts.iter() {
+                        if let (Some(s), Some(t)) = (src, tgt) {
+                            let rendered_actions = actions.as_slice().join("\\n");
+                            println!("{} -> {} [label=\"{}\"];", s, t, rendered_actions);
+                        }
+                    }
+
+                    for ((src, tgt), percepts) in h_sens.iter() {
+                        if let (Some(s), Some(t)) = (src, tgt) {
+                            let rendered_percepts = percepts.as_slice().join("\\n");
+                            println!("{} -> {} [dir=back,label=\"{}\"];", t, s, rendered_percepts);
+                        }
                     }
                 },
                 _ => {},
