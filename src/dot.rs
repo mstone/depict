@@ -9,7 +9,6 @@ use auto_enums::auto_enum;
 
 type Syn<'a> = diagrams::parser::Syn::<&'a str>;
 type Ident<'a> = diagrams::parser::Ident<&'a str>;
-type Directive<'a> = diagrams::parser::Directive<Ident<'a>>;
 type Fact<'a> = diagrams::parser::Fact<Ident<'a>>;
 
 // pub fn filter_directives<'a, I: Iterator<Item = Syn<'a>>>(v: I) -> Vec<&'a Directive<'a>> {
@@ -24,33 +23,6 @@ pub fn filter_fact<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Err
     v
         .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i, f)) if q == i => Some(f), _ => None, })
         .flatten()
-}
-
-pub struct Process<I> {
-    name: I,
-    controls: Vec<Path<I>>,
-    senses: Vec<Path<I>>,
-}
-
-pub struct Path<I> {
-    name: I,
-    action: I,
-    percept: I,
-}
-
-pub struct Draw<I> {
-    name: I,
-}
-
-pub struct Drawing<I> {
-    names: Vec<I>,
-}
-
-pub enum Item<I> {
-    Process(Process<I>),
-    Path(Path<I>),
-    Draw(Draw<I>),
-    Drawing(Drawing<I>),
 }
 
 // pub fn resolve<'a>(v: &'a Vec<Syn>, r: &'a Fact<'a>) -> Vec<&'a Fact<'a>> {
@@ -116,7 +88,7 @@ pub fn render(v: Vec<Syn>) {
         // println!("resolution: {:?}\n", res);
 
         println!("{}", "digraph {");
-        println!("{}", "graph [splines=ortho, nodesep=1];");
+        // println!("{}", "graph [splines=ortho, nodesep=1];");
 
         let action_query = Fact::Atom(Ident("action"));
         let percept_query = Fact::Atom(Ident("percept"));
