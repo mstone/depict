@@ -322,6 +322,7 @@ pub mod render {
     pub fn as_string<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident, default: String) -> String {
         let default = vec![Fact::Atom(crate::parser::Ident(&default))];
         let mut subfacts = v
+            .into_iter()
             .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i, f)) if q == i => Some(f), _ => None, })
             .collect::<Vec<&Vec<Fact>>>();
         if subfacts.is_empty() {

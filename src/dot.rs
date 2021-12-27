@@ -36,7 +36,7 @@ pub fn render(v: Vec<Syn>) {
 
                     for item in items {
                         let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
-                        let resolved_name = resolve(resolved_item.iter().map(|v| *v), &name_query);
+                        let resolved_name = resolve(resolved_item.iter().copied(), &name_query);
                         let name = first_ident(resolved_name).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
@@ -45,11 +45,11 @@ pub fn render(v: Vec<Syn>) {
                         let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
                         let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
                         let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
-                        let resolved_action = resolve(resolved_item.iter().map(|v| *v), &action_query);
+                        let resolved_action = resolve(resolved_item.iter().copied(), &action_query);
                         let action = first_ident(resolved_action).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
-                        let resolved_percept = resolve(resolved_item.iter().map(|v| *v), &percept_query);
+                        let resolved_percept = resolve(resolved_item.iter().copied(), &percept_query);
                         let percept = first_ident(resolved_percept).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
@@ -95,11 +95,11 @@ pub fn render(v: Vec<Syn>) {
                         let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
                         // println!("{:?}", resolved_src);
 
-                        let resolved_action = resolve(resolved_item.iter().map(|v| *v), &action_query);
+                        let resolved_action = resolve(resolved_item.iter().copied(), &action_query);
                         let action = first_ident(resolved_action).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
-                        let resolved_percept = resolve(resolved_item.iter().map(|v| *v), &percept_query);
+                        let resolved_percept = resolve(resolved_item.iter().copied(), &percept_query);
                         let percept = first_ident(resolved_percept).unwrap_or(
                             unwrap_atom(item).unwrap()
                         );
