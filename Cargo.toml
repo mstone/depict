@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 auto_enums = "0.7"
+indoc = "1.0"
 nom = "7"
 
 [lib]
@@ -20,3 +21,7 @@ path = "src/parse.rs"
 [[bin]]
 name = "dot"
 path = "src/dot.rs"
+
+[[bin]]
+name = "tikz"
+path = "src/tikz.rs"

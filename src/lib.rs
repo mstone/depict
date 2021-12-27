@@ -93,13 +93,13 @@ pub mod parser {
     pub fn directive(s: &str) -> IResult<&str, Directive<Ident<&str>>, VerboseError<&str>> {
         map(
             context(
-                "directive", 
+                "directive",
                 tuple((
-                    char('@'), 
+                    char('@'),
                     map(normal, Ident),
                     many1(preceded(take_while(is_wst), guarded_ident))
                 ))
-            ), 
+            ),
             |(_, v1, v2)| Directive(v1, v2)
         )(s)
     }
@@ -153,7 +153,7 @@ pub mod parser {
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Directive(
                     super::Directive(
-                        super::Ident("hello"), 
+                        super::Ident("hello"),
                         vec![
                             super::Ident("hello")
                         ]
@@ -172,7 +172,7 @@ pub mod parser {
             assert_eq!(y, Ok(("", vec![
                 super::Syn::<&str>::Fact(
                     super::Fact::Fact(
-                        super::Ident("hello"), 
+                        super::Ident("hello"),
                         vec![
                             super::Fact::Atom(
                                 super::Ident("bar"),
@@ -241,6 +241,128 @@ pub mod parser {
                     )
                 ),
             ])));
+        }
+    }
+}
+
+pub mod render {
+    use auto_enums::auto_enum;
+
+    pub trait Render {
+        fn header();
+        fn footer();
+    }
+
+    pub type Syn<'a> = crate::parser::Syn::<&'a str>;
+    pub type Ident<'a> = crate::parser::Ident<&'a str>;
+    pub type Fact<'a> = crate::parser::Fact<Ident<'a>>;
+
+    // pub fn filter_directives<'a, I: Iterator<Item = Syn<'a>>>(v: I) -> Vec<&'a Directive<'a>> {
+    //     v
+    //         .filter_map(|e| if let Syn::Directive(d) = e { Some(d) } else { None })
+    //         .collect()
+    // }
+
+    // pub fn filter_fact<'a>(v: &'a Vec<Syn>, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
+    // pub fn filter_fact<'a, I: Iterator<Item = &'a Syn<'a>>>(v: I, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
+    pub fn filter_fact<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
+        v
+            .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i, f)) if q == i => Some(f), _ => None, })
+            .flatten()
+    }
+
+    // pub fn resolve<'a>(v: &'a Vec<Syn>, r: &'a Fact<'a>) -> Vec<&'a Fact<'a>> {
+    #[auto_enum(Iterator)]
+    pub fn resolve<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E>, E>(v: I, r: &'a Fact<'a>) -> impl Iterator<Item = &'a Fact<'a>> {
+        match r {
+            Fact::Atom(i) => {
+                return filter_fact(v, i);
+            },
+            Fact::Fact(_i, fs) => {
+                return fs.iter();
+            },
+        }
+    }
+
+    pub fn unwrap_atom<'a>(a: &'a Fact<'a>) -> Option<&'a str> {
+        match a {
+            Fact::Atom(crate::parser::Ident(i)) => Some(*i),
+            _ => None,
+        }
+    }
+
+    pub fn to_ident<'a>(a: &'a Fact<'a>) -> &'a Ident<'a> {
+        match a {
+            Fact::Atom(i) => i,
+            Fact::Fact(i, _fs) => i,
+        }
+    }
+
+    pub fn first_ident<'a, I: Iterator<Item = &'a Fact<'a>>>(mut v: I) -> Option<&'a str> {
+        v
+            .find_map(unwrap_atom)
+    }
+
+    pub fn find_parent<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Ident<'a>> {
+        v
+            .filter_map(move |item|
+                match item.try_into() {
+                    Ok(Fact::Fact(i, fs)) => {
+                        let mut candidates = filter_fact(fs.iter(), q1);
+                        candidates.find(|c| match c {
+                            Fact::Atom(a) if a == q2 => true,
+                            _ => false,
+                        }).map(|_| i)
+                    },
+                    _ => None,
+                }
+            )
+    }
+
+    pub fn as_string<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident, default: String) -> String {
+        let default = vec![Fact::Atom(crate::parser::Ident(&default))];
+        let mut subfacts = v
+            .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i, f)) if q == i => Some(f), _ => None, })
+            .collect::<Vec<&Vec<Fact>>>();
+        if subfacts.is_empty() {
+            subfacts.push(&default);
+        }
+        subfacts
+            .iter()
+            .map(|f| f
+                .iter()
+                .map(|ia| match ia {
+                    Fact::Atom(a2) => a2.0,
+                    Fact::Fact(ref i2, _f2) => i2.0,
+                })
+                .collect::<Vec<&str>>()
+                .join(" "))
+            .collect::<Vec<String>>()
+            .join(" ")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{render::{as_string}, parser::{Ident, parse}};
+
+        #[test]
+        fn as_string_works() {
+            let y: String = "baz baz2".into();
+            let s = "bar: baz bar: baz2";
+            let p = parse(s);
+            let q = p.unwrap();
+            let r = q.1.iter();
+            assert_eq!(y, as_string(r, &Ident("bar"), "".into()));
+        }
+
+        #[test]
+        fn as_string_default_works() {
+            let y: String = "quux".into();
+            let s = "bar: baz bar: baz2";
+            let p = parse(s);
+            let q = p.unwrap();
+            let r = q.1.iter();
+            assert_eq!(y, as_string(r, &Ident("foo"), "quux".into()))
         }
     }
 }

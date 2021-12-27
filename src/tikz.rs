@@ -1,11 +1,18 @@
 use diagrams::parser::{Ident, parse};
-use diagrams::render::{Fact, Syn, filter_fact, resolve, first_ident, unwrap_atom, find_parent, to_ident};
+use diagrams::render::{Fact, Syn, filter_fact, resolve, unwrap_atom, find_parent, to_ident, as_string};
 use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::env::args;
 use std::io;
 use std::process::exit;
 use nom::error::convert_error;
+use indoc::indoc;
+
+pub fn tikz_escape(s: &str) -> String {
+    s
+        .replace("$", "\\$")
+        .replace("\\n", "\\\\")
+}
 
 pub fn render(v: Vec<Syn>) {
     // println!("ok\n\n");
@@ -21,12 +28,17 @@ pub fn render(v: Vec<Syn>) {
 
         // println!("resolution: {:?}\n", res);
 
-        println!("{}", "digraph {");
+        println!("{}", indoc!(r#"
+            \documentclass[tikz,border=5mm]{standalone} {
+            \usetikzlibrary{graphs,graphdrawing,quotes}
+            \usegdlibrary{layered}
+            \begin{document}
+            \tikz[align=left] \graph [layered layout, edge quotes={auto}, sibling distance=2cm, level distance=2cm, nodes={draw}] {"#));
         // println!("{}", "graph [splines=ortho, nodesep=1];");
 
-        let action_query = Fact::Atom(Ident("action"));
-        let percept_query = Fact::Atom(Ident("percept"));
-        let name_query = Fact::Atom(Ident("name"));
+        let action_query = Ident("action");
+        let percept_query = Ident("percept");
+        let name_query = Ident("name");
 
         for hint in res {
             match hint {
@@ -36,23 +48,14 @@ pub fn render(v: Vec<Syn>) {
 
                     for item in items {
                         let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
-                        let resolved_name = resolve(resolved_item.iter().map(|v| *v), &name_query);
-                        let name = first_ident(resolved_name).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
-                        println!("{} [label=\"{}\",shape=rect];", unwrap_atom(item).unwrap(), name);
+                        let name = as_string(resolved_item.iter().map(|v| *v), &name_query, unwrap_atom(item).unwrap().into());
+                        println!(r#"{}/{};"#, unwrap_atom(item).unwrap(), tikz_escape(&name));
 
                         let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
                         let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
                         let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
-                        let resolved_action = resolve(resolved_item.iter().map(|v| *v), &action_query);
-                        let action = first_ident(resolved_action).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
-                        let resolved_percept = resolve(resolved_item.iter().map(|v| *v), &percept_query);
-                        let percept = first_ident(resolved_percept).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
+                        let action = as_string(resolved_item.iter().map(|v| *v), &action_query, unwrap_atom(item).unwrap().into());
+                        let percept = as_string(resolved_item.iter().map(|v| *v), &percept_query, unwrap_atom(item).unwrap().into());
 
                         h_acts.entry((resolved_actuates, resolved_hosts))
                             .or_insert(vec![])
@@ -66,16 +69,16 @@ pub fn render(v: Vec<Syn>) {
                     for ((src, tgt), mediators) in h_acts.iter() {
                         if let (Some(s), Some(t)) = (src, tgt) {
                             for (med, action) in mediators {
-                                println!("{} -> {} [label=\"{}\"];", s, med, action);
-                                println!("{} -> {};", med, t);
+                                println!(r#"({}) ->["{}"] ({});"#, s, tikz_escape(action), med);
+                                println!(r#"({}) -> ({});"#, med, t);
                             }
                         }
                     }
                     for ((src, tgt), mediators) in h_sens.iter() {
                         if let (Some(s), Some(t)) = (src, tgt) {
                             for (med, percept) in mediators {
-                                println!("{} -> {} [dir=back,label=\"{}\"];", s, med, percept);
-                                println!("{} -> {} [dir=back];", med, t);
+                                println!(r#"({}) <-["{}"] ({});"#, s, tikz_escape(percept), med);
+                                println!(r#"({}) <- ({});"#, med, t);
                             }
                         }
                     }
@@ -95,14 +98,8 @@ pub fn render(v: Vec<Syn>) {
                         let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
                         // println!("{:?}", resolved_src);
 
-                        let resolved_action = resolve(resolved_item.iter().map(|v| *v), &action_query);
-                        let action = first_ident(resolved_action).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
-                        let resolved_percept = resolve(resolved_item.iter().map(|v| *v), &percept_query);
-                        let percept = first_ident(resolved_percept).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
+                        let action = as_string(resolved_item.iter().map(|v| *v), &action_query, unwrap_atom(item).unwrap().into());
+                        let percept = as_string(resolved_item.iter().map(|v| *v), &percept_query, unwrap_atom(item).unwrap().into());
 
                         h_acts.entry((resolved_actuates, resolved_hosts))
                             .or_insert(vec![])
@@ -116,14 +113,14 @@ pub fn render(v: Vec<Syn>) {
                     for ((src, tgt), actions) in h_acts.iter() {
                         if let (Some(s), Some(t)) = (src, tgt) {
                             let rendered_actions = actions.as_slice().join("\\n");
-                            println!("{} -> {} [label=\"{}\"];", s, t, rendered_actions);
+                            println!(r#"({}) ->["{}"] ({});"#, s, tikz_escape(&rendered_actions), t);
                         }
                     }
 
                     for ((src, tgt), percepts) in h_sens.iter() {
                         if let (Some(s), Some(t)) = (src, tgt) {
                             let rendered_percepts = percepts.as_slice().join("\\n");
-                            println!("{} -> {} [dir=back,label=\"{}\"];", t, s, rendered_percepts);
+                            println!(r#"({}) <-["{}"'] ({});"#, s, tikz_escape(&rendered_percepts), t);
                         }
                     }
                 },
@@ -131,7 +128,7 @@ pub fn render(v: Vec<Syn>) {
             }
         }
 
-        println!("{}", "}");
+        println!("{}", "};\n\\end{document}");
     }
     // use top-level "draw" fact to identify inline or top-level drawings to draw
     // resolve top-level drawings + use inline drawings to identify objects to draw to make particular drawings
