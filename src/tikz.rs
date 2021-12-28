@@ -48,14 +48,14 @@ pub fn render(v: Vec<Syn>) {
 
                     for item in items {
                         let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
-                        let name = as_string(resolved_item.iter().copied(), &name_query, unwrap_atom(item).unwrap().into());
+                        let name = as_string(&resolved_item, &name_query, unwrap_atom(item).unwrap().into());
                         println!(r#"{}/{};"#, unwrap_atom(item).unwrap(), tikz_escape(&name));
 
                         let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
                         let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
                         let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
-                        let action = as_string(resolved_item.iter().copied(), &action_query, unwrap_atom(item).unwrap().into());
-                        let percept = as_string(resolved_item.iter().copied(), &percept_query, unwrap_atom(item).unwrap().into());
+                        let action = as_string(&resolved_item, &action_query, unwrap_atom(item).unwrap().into());
+                        let percept = as_string(&resolved_item, &percept_query, unwrap_atom(item).unwrap().into());
 
                         h_acts.entry((resolved_actuates, resolved_hosts))
                             .or_insert(vec![])
@@ -98,8 +98,8 @@ pub fn render(v: Vec<Syn>) {
                         let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
                         // println!("{:?}", resolved_src);
 
-                        let action = as_string(resolved_item.iter().copied(), &action_query, unwrap_atom(item).unwrap().into());
-                        let percept = as_string(resolved_item.iter().copied(), &percept_query, unwrap_atom(item).unwrap().into());
+                        let action = as_string(&resolved_item, &action_query, unwrap_atom(item).unwrap().into());
+                        let percept = as_string(&resolved_item, &percept_query, unwrap_atom(item).unwrap().into());
 
                         h_acts.entry((resolved_actuates, resolved_hosts))
                             .or_insert(vec![])

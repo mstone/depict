@@ -49,6 +49,12 @@ pub mod parser {
         }
     }
 
+    impl<'a, I> From<&&'a Fact<Ident<I>>> for &'a Fact<Ident<I>> {
+        fn from(value: &&'a Fact<Ident<I>>) -> Self {
+            *value
+        }
+    }
+
     pub fn is_ws(chr: char) -> bool {
         match chr {
             ' ' => true,
@@ -319,7 +325,7 @@ pub mod render {
             )
     }
 
-    pub fn as_string<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident, default: String) -> String {
+    pub fn as_string<'a, I: IntoIterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident, default: String) -> String {
         let default = vec![Fact::Atom(crate::parser::Ident(&default))];
         let mut subfacts = v
             .into_iter()
