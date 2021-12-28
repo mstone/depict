@@ -113,14 +113,14 @@ pub fn render(v: Vec<Syn>) {
                     for ((src, tgt), actions) in h_acts.iter() {
                         if let (Some(s), Some(t)) = (src, tgt) {
                             let rendered_actions = actions.as_slice().join("\\n");
-                            println!(r#"({}) ->["{}"] ({});"#, s, tikz_escape(&rendered_actions), t);
+                            println!(r#"({}) ->["{}", head anchor=60, tail anchor=60] ({});"#, s, tikz_escape(&rendered_actions), t);
                         }
                     }
 
                     for ((src, tgt), percepts) in h_sens.iter() {
                         if let (Some(s), Some(t)) = (src, tgt) {
                             let rendered_percepts = percepts.as_slice().join("\\n");
-                            println!(r#"({}) <-["{}"'] ({});"#, s, tikz_escape(&rendered_percepts), t);
+                            println!(r#"({}) <-["{}"', head anchor=120, tail anchor=240] ({});"#, s, tikz_escape(&rendered_percepts), t);
                         }
                     }
                 },
