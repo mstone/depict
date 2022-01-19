@@ -309,6 +309,17 @@ pub mod render {
             .find_map(unwrap_atom)
     }
 
+    /// Given a database `v`, returns facts of type `q1` about the entity identified by `q2`.
+    /// 
+    /// Example: 
+    /// 
+    /// Suppose person: actuates: lever. Then
+    /// 
+    /// ```rust
+    /// let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next(); 
+    /// ```
+    /// 
+    /// Then `resolved_actuates == Some(Ident("lever"))`.
     pub fn find_parent<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Ident<'a>> {
         v
             .filter_map(move |item|

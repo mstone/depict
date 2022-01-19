@@ -26,6 +26,7 @@
 
             buildInputs = [
               rust-bin.stable.latest.rust
+              texlive.combined.scheme-full
             ] ++ (if isShell then [
               entr
               wasm-pack
@@ -34,7 +35,9 @@
                 lockFile = ./Cargo.lock;
                 inherit pkgs;
               }).cargoHome
-            ]);
+            ]) ++ final.lib.optionals stdenv.isDarwin [
+              darwin.apple_sdk.frameworks.AppKit
+            ];
 
             buildPhase = ''
               cargo build --frozen --offline

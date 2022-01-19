@@ -7,8 +7,10 @@ edition = "2021"
 
 [dependencies]
 auto_enums = "0.7"
+druid = "0.7"
 indoc = "1.0"
 nom = "7"
+petgraph = "0.6"
 
 [lib]
 name = "diagrams"
@@ -21,6 +23,10 @@ path = "src/parse.rs"
 [[bin]]
 name = "dot"
 path = "src/dot.rs"
+
+[[bin]]
+name = "druid"
+path = "src/druid.rs"
 
 [[bin]]
 name = "tikz"
