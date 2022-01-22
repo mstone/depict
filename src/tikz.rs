@@ -1,6 +1,6 @@
 use diagrams::parser::{Ident, parse};
 use diagrams::render::{Fact, Syn, filter_fact, resolve, unwrap_atom, find_parent, to_ident, as_string};
-use petgraph::EdgeDirection::Incoming;
+use petgraph::EdgeDirection::{Incoming, Outgoing};
 use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
 use std::fs::read_to_string;
@@ -122,17 +122,17 @@ pub fn render(v: Vec<Syn>) {
                         
                         if let Some(actuator) = resolved_actuates {
                             let actuator_vix = or_insert(&mut vert, &mut v_nodes, actuator.0);
-                            vert.add_edge(v_ix, actuator_vix, "actuates");
+                            vert.add_edge(actuator_vix, v_ix, "actuates");
                         }
 
                         if let Some(sensor) = resolved_senses {
                             let sensor_vix = or_insert(&mut vert, &mut v_nodes, sensor.0);
-                            vert.add_edge(v_ix, sensor_vix, "senses");
+                            vert.add_edge(sensor_vix, v_ix, "senses");
                         }
 
                         if let Some(client) = resolved_hosts {
                             let client_vix = or_insert(&mut vert, &mut v_nodes, client.0);
-                            vert.add_edge(client_vix, v_ix, "rides");
+                            vert.add_edge(v_ix, client_vix, "rides");
                         }
                     }
                 },
@@ -178,56 +178,96 @@ pub fn render(v: Vec<Syn>) {
                 .push((*vx, *wx));
         }
 
+        let mut h_rank = HashMap::new();
         // paths_from_roots
         //     .sort_by_key(|(vx, wx, wgt)| { *wgt });
         // println!("PATHS");
         for (rank, paths) in paths_by_rank.iter() {
             for (n, (vx, wx)) in paths.iter().enumerate() {
-                let _vl = vert.node_weight(*vx).unwrap();
+                let vl = vert.node_weight(*vx).unwrap();
                 let wl = vert.node_weight(*wx).unwrap();
                 let name = h_name.get(wl).unwrap();
-                let vpos = 1.5 * (*rank as f64);
+                let vpos = -1.5 * (*rank as f64);
                 let hpos = 3.5 * (n as f64);
-                // println!("  {} -> {}: {}", vl, wl, wgt);
+
+                h_rank.insert(wl, n);
+                println!("% GRR  {:?} {} -> {} {:?}: {}", vx, vl, wl, wx, rank);
                 println!(indoc!(r#"
                     \node[minimum width = 2.5cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
                     wl, hpos, vpos, name);
             }
         }
 
+        // eprintln!("{:?}", Dot::new(&vert));
+
         for vx in vert.node_indices() {
             let src = vert.node_weight(vx).unwrap();
+            // let style = h_styl.get(src).unwrap();
             // if let Some(&&"coalesced") = h_styl.get(src) {
-                let mut nbrs = vert.neighbors(vx).detach();
+                let mut sorted_nbrs = BTreeMap::new();
+                let mut nbrs = vert.neighbors_directed(vx, Outgoing).detach();
                 while let Some((ex, wx)) = nbrs.next(&vert) {
                     let dst = vert.node_weight(wx).unwrap();
                     let edge = vert.edge_weight(ex).unwrap();
-                    println!(indoc!(r#"
-                        \draw [-{{Latex[]}},postaction={{decorate}}] ($({}.south west)!\lc!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!\lc!({}.north east)$);"#),
-                        dst, dst, edge, src, src    
-                    )
+                    let dst_hrank = h_rank.get(dst).unwrap();
+                    println!("% ARGH {:?} {} {:?} {:?} {} {} {}", vx, src, ex, wx, dst, edge, dst_hrank);
+                    sorted_nbrs
+                        .entry(dst_hrank)
+                        .or_insert(vec![])
+                        .push((dst, edge));
+                }
+
+                let num_bundles = sorted_nbrs.len() as f64;
+                let arrow_position = |bundle_rank: usize, adj: f64| {
+                    (((bundle_rank as f64) + 1.0) / ((num_bundles as f64) + 1.0)) + adj
+                };
+                for (n, (_hrank, edges)) in sorted_nbrs.iter().enumerate() {
+                    for (dst, edge) in edges {
+                        match **edge {
+                            "actuates" => {
+                                println!("% {} {} -> {}, {}", n, src, dst, edge);
+                                println!(indoc!(r#"
+                                    \draw [-{{Latex[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!\lc!({}.north east)$);"#),
+                                    src, arrow_position(n, -0.05), src, edge, dst, dst    
+                                );
+                            },
+                            "senses" => {
+                                println!(indoc!(r#"
+                                    \draw [{{Latex[]-}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=south west, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!\rc!({}.north east)$);"#),
+                                    src, arrow_position(n, 0.05), src, edge, dst, dst    
+                                );
+                            },
+                            _ => {
+                                println!(indoc!(r#"
+                                    \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!0.5!({}.north east)$);"#),
+                                    src, arrow_position(n, 0.0), src, edge, dst, dst    
+                                );
+                            },
+                        };
+                    }
                 }
             // }
         }
 
-        let l = -3;
-        let r = 12;
-        let t = 7;
-        let b = -1;
+        // let l = -3;
+        // let r = 12;
+        // let t = 7;
+        // let b = -1;
+        // println!(indoc!(r#"
+        //     \scope[on background layer]
+        //     \draw[help lines,very thin,step=1] ({}.2,{}.2) grid ({}.2,{}.2);
+        //     \foreach \x in {{{},...,{}}} {{
+        //     \foreach \y in {{{},...,{}}} {{
+        //         \draw [fill, black] (\x, \y) circle (0.5pt); 
+        //         \node[scale=0.5, anchor=south east] at (\x, \y) {{\x,\y}};
+        //     }}
+        //     }}
+        //     \endscope
+        // "#), l, b, r, t, l, r, b, t);
         println!(indoc!(r#"
-            \scope[on background layer]
-            \draw[help lines,very thin,step=1] ({}.2,{}.2) grid ({}.2,{}.2);
-            \foreach \x in {{{},...,{}}} {{
-            \foreach \y in {{{},...,{}}} {{
-                \draw [fill, black] (\x, \y) circle (0.5pt); 
-                \node[scale=0.5, anchor=south east] at (\x, \y) {{\x,\y}};
-            }}
-            }}
-            \endscope
-
             }}
             \end{{document}}
-        "#), l, b, r, t, l, r, b, t);
+        "#));
 
         // println!("{}", "\n\n\n");
         // println!("{:?}", Dot::new(&vert));
