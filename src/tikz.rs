@@ -77,6 +77,7 @@ pub fn render(v: Vec<Syn>) {
 
         let action_query = Ident("action");
         let percept_query = Ident("percept");
+        // let host_query = Ident("host");
         let name_query = Ident("name");
 
         let mut vert = Graph::<&str, &str>::new();
@@ -95,9 +96,6 @@ pub fn render(v: Vec<Syn>) {
                 Fact::Fact(Ident(style), items) => {
                     for item in items {
                         let item_ident = unwrap_atom(item).unwrap();
-                        let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
-                        // let _h_ix = or_insert(&mut horz, &h_nodes, item_ident);
-                        
                         let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
                         let name = as_string(&resolved_item, &name_query, item_ident.into());
                         // println!(r#"{}/{};"#, unwrap_atom(item).unwrap(), tikz_escape(&name));
@@ -106,8 +104,9 @@ pub fn render(v: Vec<Syn>) {
                         let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
                         let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
                         let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
-                        let action = as_string(&resolved_item, &action_query, unwrap_atom(item).unwrap().into());
-                        let percept = as_string(&resolved_item, &percept_query, unwrap_atom(item).unwrap().into());
+                        let action = as_string(&resolved_item, &action_query, item_ident.into());
+                        let percept = as_string(&resolved_item, &percept_query, item_ident.into());
+                        // let host = as_string(&resolved_item, &host_query, item_ident.into());
 
                         h_styl.insert(item_ident, style);
                         h_name.insert(item_ident, name);
@@ -119,21 +118,52 @@ pub fn render(v: Vec<Syn>) {
                         h_sens.entry((resolved_senses, resolved_hosts))
                             .or_insert(vec![])
                             .push((item_ident, percept));
+
+                        match *style {
+                            "compact" => {
+                                let _v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                            },
+                            "coalesce" => {
+                                if let (Some(actuator), Some(process)) = (resolved_actuates, resolved_hosts) {
+                                    let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
+                                    let process_ix = or_insert(&mut vert, &mut v_nodes, process.0);
+                                    vert.add_edge(controller_ix, process_ix, "actuates"); // controls?
+                                }
+                                if let (Some(sensor), Some(process)) = (resolved_senses, resolved_hosts) {
+                                    let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor.0);
+                                    let process_ix = or_insert(&mut vert, &mut v_nodes, process.0);
+                                    vert.add_edge(controller_ix, process_ix, "senses"); // reads?
+                                }
+                            },
+                            "embed" => {
+                                let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                            },
+                            "parallel" => {
+                                let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                                // let _h_ix = or_insert(&mut horz, &h_nodes, item_ident);
+                            
+                                if let Some(actuator) = resolved_actuates {
+                                    let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
+                                    vert.add_edge(controller_ix, v_ix, "actuates");
+                                }
+        
+                                if let Some(sensor) = resolved_senses {
+                                    let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor.0);
+                                    vert.add_edge(controller_ix, v_ix, "senses");
+                                }
+        
+                                if let Some(platform) = resolved_hosts {
+                                    let platform_ix = or_insert(&mut vert, &mut v_nodes, platform.0);
+                                    vert.add_edge(v_ix, platform_ix, "rides");
+                                }
+                            },
+                            _ => {
+                                unimplemented!("{}", style);
+                            }
+                        }
                         
-                        if let Some(actuator) = resolved_actuates {
-                            let actuator_vix = or_insert(&mut vert, &mut v_nodes, actuator.0);
-                            vert.add_edge(actuator_vix, v_ix, "actuates");
-                        }
 
-                        if let Some(sensor) = resolved_senses {
-                            let sensor_vix = or_insert(&mut vert, &mut v_nodes, sensor.0);
-                            vert.add_edge(sensor_vix, v_ix, "senses");
-                        }
-
-                        if let Some(client) = resolved_hosts {
-                            let client_vix = or_insert(&mut vert, &mut v_nodes, client.0);
-                            vert.add_edge(v_ix, client_vix, "rides");
-                        }
+                        eprintln!("READ {} {} {:?} {:?} {:?}", item_ident, style, resolved_actuates, resolved_senses, resolved_hosts)
                     }
                 },
                 _ => {},
@@ -178,6 +208,7 @@ pub fn render(v: Vec<Syn>) {
                 .push((*vx, *wx));
         }
 
+        let mut v_rank = HashMap::new();
         let mut h_rank = HashMap::new();
         // paths_from_roots
         //     .sort_by_key(|(vx, wx, wgt)| { *wgt });
@@ -190,6 +221,7 @@ pub fn render(v: Vec<Syn>) {
                 let vpos = -1.5 * (*rank as f64);
                 let hpos = 3.5 * (n as f64);
 
+                v_rank.insert(wl, *rank);
                 h_rank.insert(wl, n);
                 println!("% GRR  {:?} {} -> {} {:?}: {}", vx, vl, wl, wx, rank);
                 println!(indoc!(r#"
@@ -203,50 +235,78 @@ pub fn render(v: Vec<Syn>) {
         for vx in vert.node_indices() {
             let src = vert.node_weight(vx).unwrap();
             // let style = h_styl.get(src).unwrap();
-            // if let Some(&&"coalesced") = h_styl.get(src) {
-                let mut sorted_nbrs = BTreeMap::new();
-                let mut nbrs = vert.neighbors_directed(vx, Outgoing).detach();
-                while let Some((ex, wx)) = nbrs.next(&vert) {
-                    let dst = vert.node_weight(wx).unwrap();
-                    let edge = vert.edge_weight(ex).unwrap();
-                    let dst_hrank = h_rank.get(dst).unwrap();
-                    println!("% ARGH {:?} {} {:?} {:?} {} {} {}", vx, src, ex, wx, dst, edge, dst_hrank);
-                    sorted_nbrs
-                        .entry(dst_hrank)
-                        .or_insert(vec![])
-                        .push((dst, edge));
-                }
+            let mut sorted_out_nbrs = BTreeMap::new();
+            let mut sorted_in_nbrs = BTreeMap::new();
+            let mut out_nbrs = vert.neighbors_directed(vx, Outgoing).detach();
+            while let Some((ex, wx)) = out_nbrs.next(&vert) {
+                let dst = vert.node_weight(wx).unwrap();
+                let edge = vert.edge_weight(ex).unwrap();
+                let dst_hrank = h_rank.get(dst).unwrap();
+                println!("% OUT {:?} {} {:?} {:?} {} {} {}", vx, src, ex, wx, dst, edge, dst_hrank);
+                sorted_out_nbrs
+                    .entry(dst_hrank)
+                    .or_insert(vec![])
+                    .push((wx, dst, edge));
+            }
+            
 
-                let num_bundles = sorted_nbrs.len() as f64;
-                let arrow_position = |bundle_rank: usize, adj: f64| {
-                    (((bundle_rank as f64) + 1.0) / ((num_bundles as f64) + 1.0)) + adj
-                };
-                for (n, (_hrank, edges)) in sorted_nbrs.iter().enumerate() {
-                    for (dst, edge) in edges {
-                        match **edge {
-                            "actuates" => {
-                                println!("% {} {} -> {}, {}", n, src, dst, edge);
-                                println!(indoc!(r#"
-                                    \draw [-{{Latex[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!\lc!({}.north east)$);"#),
-                                    src, arrow_position(n, -0.05), src, edge, dst, dst    
-                                );
-                            },
-                            "senses" => {
-                                println!(indoc!(r#"
-                                    \draw [{{Latex[]-}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=south west, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!\rc!({}.north east)$);"#),
-                                    src, arrow_position(n, 0.05), src, edge, dst, dst    
-                                );
-                            },
-                            _ => {
-                                println!(indoc!(r#"
-                                    \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!0.5!({}.north east)$);"#),
-                                    src, arrow_position(n, 0.0), src, edge, dst, dst    
-                                );
-                            },
-                        };
+            let num_out_bundles = sorted_out_nbrs.len() as f64;
+            let arrow_position = |bundle_rank: usize, adj: f64| {
+                let br = bundle_rank as f64;
+                let nob = num_out_bundles as f64;
+                ((br + 1.0) / (nob + 1.0)) + (adj / nob)
+            };
+            for (n, (_hrank, edges)) in sorted_out_nbrs.iter().enumerate() {
+                for (wx, dst, edge) in edges {
+                    let mut in_nbrs = vert.neighbors_directed(*wx, Incoming).detach();
+                    while let Some((ex, ux)) = in_nbrs.next(&vert) {
+                        let src2 = vert.node_weight(ux).unwrap();
+                        let edge2 = vert.edge_weight(ex).unwrap();
+                        let src2_vrank = v_rank.get(src2).unwrap();
+                        let src2_hrank = h_rank.get(src2).unwrap();
+                        println!("% IN2 {:?} {} {:?} {:?} {} {} {}", ux, src2, ex, wx, dst, edge2, src2_hrank);
+                        sorted_in_nbrs
+                            .entry((src2_hrank, src2_vrank))
+                            .or_insert(vec![])
+                            .push((ux, src2, edge2));
                     }
+                    let num_in_bundles = sorted_in_nbrs.len() as f64;
+                    let arrow_position2 = |bundle_rank: usize, adj: f64| {
+                        let br = bundle_rank as f64;
+                        let nib = num_in_bundles as f64;
+                        ((br + 1.0) / (nib + 1.0)) + (adj / nib)
+                    };
+                    let m = sorted_in_nbrs
+                        .iter()
+                        .enumerate()
+                        .find(|(m, (_rank2, edges2))| 
+                            edges2
+                                .iter()
+                                .find(|(ux, _, _)| *ux == vx)
+                                .is_some()).unwrap().0;
+                    println!("% ARR {} {} -> {}, {}, {}", n, src, dst, edge, m);
+                    match **edge {
+                        "actuates" => {
+                            println!(indoc!(r#"
+                                \draw [-{{Latex[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+                                src, arrow_position(n, -0.05), src, edge, dst, arrow_position2(m, -0.05), dst    
+                            );
+                        },
+                        "senses" => {
+                            println!(indoc!(r#"
+                                \draw [{{Latex[]-}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=south west, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+                                src, arrow_position(n, 0.05), src, edge, dst, arrow_position2(m, 0.05), dst    
+                            );
+                        },
+                        _ => {
+                            println!(indoc!(r#"
+                                \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+                                src, arrow_position(n, 0.0), src, edge, dst, arrow_position2(m, 0.0), dst    
+                            );
+                        },
+                    };
                 }
-            // }
+            }
         }
 
         // let l = -3;

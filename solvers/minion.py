@@ -1,0 +1,28 @@
+nx = 3
+ny = 3
+edges = [(0,0,1),(0,1,0)]
+print("MINION 3")
+print()
+print("**VARIABLES**")
+print(f"BOOL x[2,{nx},{ny}]")
+print(f"BOOL c[{nx},{ny},{nx},{ny}]")
+print("BOUND csum {0..1000}")
+print()
+print("**SEARCH**")
+print("MINIMISING csum")
+# print("PRINT ALL")
+print("PRINT [[csum]]")
+print("PRINT [[x]]")
+print()
+print("**CONSTRAINTS**")
+for l, n in enumerate([nx, ny]):
+    print("\n".join([f"sumleq([x[{l},{a},{b}], x[{l},{b},{a}]],1)" for a in range(n) for b in range(n) if a != b]))
+    print("\n".join([f"sumgeq([x[{l},{a},{b}], x[{l},{b},{a}]],1)" for a in range(n) for b in range(n) if a != b]))
+    print("\n".join([f"sumleq([x[{l},{c},{b}], x[{l},{b},{a}], -1],x[{l},{c},{a}])" for a in range(n) for b in range(n) for c in range(n) if a != b and b != c and a != c]))
+print("\n".join([f"sumgeq([c[{a},{b},{c},{d}],x[{k},{c},{a}],x[{k+1},{b},{d}]],1)" for (k, a, c) in edges for (l, b, d) in edges if k == l and (a,c) != (b,d)]))
+print("\n".join([f"sumgeq([c[{a},{b},{c},{d}],x[{k},{a},{c}],x[{k+1},{d},{b}]],1)" for (k, a, c) in edges for (l, b, d) in edges if k == l and (a,c) != (b,d)]))
+print()
+print("sumleq([c[_,_,_,_]],csum)")
+print("sumgeq([c[_,_,_,_]],csum)")
+print()
+print("**EOF**")
