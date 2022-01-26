@@ -5,11 +5,12 @@ use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
 use std::fs::read_to_string;
 use std::env::args;
-use std::io;
-use std::process::exit;
+use std::io::{self, Write};
+use std::process::{exit, Command, Stdio};
+use ndarray::{Array, Array3};
 use nom::error::convert_error;
 use indoc::indoc;
-use petgraph::graph::{Graph, DefaultIx, NodeIndex, EdgeReference};
+use petgraph::graph::{Graph, DefaultIx, NodeIndex, EdgeReference, EdgeIndex};
 use petgraph::dot::{Dot};
 use petgraph::visit::{NodeFiltered};
 use petgraph::algo::floyd_warshall::floyd_warshall;
@@ -35,6 +36,12 @@ pub fn or_insert<'a, 'g, 'h>(g: &'g mut Graph<&'a str, &'a str>, h: &'h mut Hash
 //         g.edges_directed(ix, Incoming).next().is_none()
 //     });
 // }
+
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum NodeHRank {
+    Real(NodeIndex),
+    Fake(EdgeIndex),
+}
 
 pub fn render(v: Vec<Syn>) {
     // println!("ok\n\n");
@@ -188,7 +195,7 @@ pub fn render(v: Vec<Syn>) {
         // println!("{:?}", Dot::new(&vert));
         // println!("{}", "\n\n\n");
 
-        let paths = floyd_warshall(&vert, |_ex| { -1 }).unwrap();
+        let paths = floyd_warshall(&vert, |_ex| { -1 as i32 }).unwrap();
         let mut paths_from_roots = paths
             .iter()
             .filter_map(|((vx, wx), wgt)| {
@@ -208,17 +215,168 @@ pub fn render(v: Vec<Syn>) {
                 .push((*vx, *wx));
         }
 
+        let mut vx_rank = HashMap::new();
+        let mut hx_rank = HashMap::new();
+        for (rank, paths) in paths_by_rank.iter() {
+            for (n, (_vx, wx)) in paths.iter().enumerate() {
+                vx_rank.insert(*wx, *rank);
+                hx_rank.insert(*wx, n);
+            }
+        }
+
+        let mut locs_by_level = BTreeMap::new();
+        for (rank, paths) in paths_by_rank.iter() {
+            let l = rank;
+            let n = paths.len();
+            for a in 0..(n-1) {
+                locs_by_level.entry(*l).or_insert(vec![]).push(a);
+            }
+        }
+
+        let mut hops_by_level = BTreeMap::new();
+        for ex in vert.edge_indices() {
+            let el = vert.edge_weight(ex).unwrap();
+            match *el {
+                "actuates" | "senses" | "rides" => {
+                    let (vx, wx) = vert.edge_endpoints(ex).unwrap();
+                    let vvr = *vx_rank.get(&vx).unwrap();
+                    let wvr = *vx_rank.get(&wx).unwrap();
+                    let vhr = *hx_rank.get(&vx).unwrap();
+                    let whr = *hx_rank.get(&wx).unwrap();
+                    
+                    let mut mhrs = vec![vhr];
+                    for mid_level in (vvr+1)..(wvr) {
+                        let mhr = locs_by_level.get(&mid_level).map_or(0, |v| v.len());
+                        locs_by_level.entry(mid_level).or_insert(vec![]).push(mhr);
+                        mhrs.push(mhr);
+                    }
+                    mhrs.push(whr);
+                    
+                    for lvl in vvr..(wvr as i32) {
+                        let mx = (lvl as i32 - vvr as i32) as usize;
+                        let nx = (lvl as i32 + 1 - vvr as i32) as usize;
+                        let mhr = mhrs[mx];
+                        let nhr = mhrs[nx];
+                        hops_by_level
+                            .entry(lvl)
+                            .or_insert(vec![])
+                            .push((lvl, mhr, nhr, ex));
+                    }
+                },
+                _ => {},
+            }
+        }
+
+        let max_level = hops_by_level.keys().max().unwrap();
+        let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
+
+        let mut csp = String::new();
+        csp.push_str("MINION 3\n");
+        csp.push_str("**VARIABLES**\n");
+        csp.push_str(&format!("BOOL x[{},{},{}]\n", max_level, max_width, max_width));
+        csp.push_str(&format!("BOOL c[{},{},{},{},{}]\n", max_level, max_width, max_width, max_width, max_width));
+        csp.push_str("BOUND csum {0..1000}\n");
+        csp.push_str("\n**SEARCH**\n");
+        csp.push_str("MINIMISING csum\n");
+        // csp.push_str("PRINT ALL");
+        csp.push_str("PRINT [[csum]]\n");
+        csp.push_str("PRINT [[x]]\n");
+        csp.push_str("\n**CONSTRAINTS**\n");
+        for (rank, paths) in paths_by_rank.iter() {
+            let l = rank;
+            let n = paths.len();
+            for a in 0..(n-1) {
+                for b in 0..(n-1) {
+                    if a != b {
+                        csp.push_str(&format!("sumleq([x[{l},{a},{b}], x[{l},{b},{a}]],1)\n", l=l, a=a, b=b));
+                        csp.push_str(&format!("sumgeq([x[{l},{a},{b}], x[{l},{b},{a}]],1)\n", l=l, a=a, b=b));
+                        for c in 0..(n-1) {
+                            if b != c && a != c {
+                                csp.push_str(&format!("sumleq([x[{l},{c},{b}], x[{l},{b},{a}], -1],x[{l},{c},{a}])\n", l=l, a=a, b=b, c=c));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (k, hops) in hops_by_level.iter() {
+            if *k < max_level-1 {
+                for (_lvl, a, c, _ex) in hops {
+                    for (_lvl2, b, d, _fx)  in hops {
+                        if (a,c) != (b,d) {
+                            csp.push_str(&format!("sumgeq([c[{k},{a},{b},{c},{d}],x[{k},{c},{a}],x[{j},{b},{d}]],1)\n", a=a, b=b, c=c, d=d, k=k, j=k+1));
+                            csp.push_str(&format!("sumgeq([c[{k},{a},{b},{c},{d}],x[{k},{a},{c}],x[{j},{d},{b}]],1)\n", a=a, b=b, c=c, d=d, k=k, j=k+1));
+                        }
+                    }
+                }
+            }
+        }
+        csp.push_str("\nsumleq([c[_,_,_,_,_]],csum)\n");
+        csp.push_str("sumgeq([c[_,_,_,_,_]],csum)\n");
+        csp.push_str("\n\n**EOF**");
+
+        eprintln!("{}", csp);
+
+
+        // std::process::exit(0);
+
+        let mut minion = Command::new("/Users/mstone/src/minion/result/bin/minion");
+        minion
+            .arg("-printsolsonly")
+            .arg("-printonlyoptimal")
+            .arg("-timelimit")
+            .arg("1")
+            .arg("--")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        let mut child = minion.spawn()
+            .expect("failed to execute minion");
+        let mut stdin = child.stdin.as_mut().unwrap();
+        stdin.write_all(csp.as_bytes()).expect("failed to write csp");
+        drop(stdin);
+
+        let output = child
+            .wait_with_output()
+            .expect("failed to wait on child");
+
+        let outs = std::str::from_utf8(&output.stdout[..]).unwrap();
+
+        // eprintln!("{}", outs);
+
+        let lines = outs.split("\n").collect::<Vec<_>>();
+        let crossing_number = lines[lines.len()-3]
+            .trim()
+            .parse::<i32>()
+            .expect("unable to parse crossing number");
+        let soln = lines[lines.len()-2]
+            .split(" ")
+            .filter_map(|s| s.parse::<i32>().ok())
+            .collect::<Vec<_>>();
+        
+        eprintln!("{:?}, {:?}\n{:?}", crossing_number, soln, lines);
+
+        let mut perm = Array3::<i32>::zeros((*max_level as usize, max_width, max_width));
+        for (n, ix) in perm.iter_mut().enumerate() {
+            *ix = soln[n];
+        }
+
+        eprintln!("{:?}", perm);
+
+        // turn the data into hranks.
+        std::process::exit(0);
+
         let mut v_rank = HashMap::new();
         let mut h_rank = HashMap::new();
         // paths_from_roots
         //     .sort_by_key(|(vx, wx, wgt)| { *wgt });
         // println!("PATHS");
         for (rank, paths) in paths_by_rank.iter() {
-            for (n, (vx, wx)) in paths.iter().enumerate() {
+            for (vx, wx) in paths.iter() {
                 let vl = vert.node_weight(*vx).unwrap();
                 let wl = vert.node_weight(*wx).unwrap();
                 let name = h_name.get(wl).unwrap();
                 let vpos = -1.5 * (*rank as f64);
+                let n = 0;
                 let hpos = 3.5 * (n as f64);
 
                 v_rank.insert(wl, *rank);
