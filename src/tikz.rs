@@ -539,6 +539,32 @@ pub fn render(v: Vec<Syn>) {
 
         for cer in condensed.edge_references() {
             for (vl, wl, ew) in cer.weight().iter() {
+                let mut v_ers = vert.edges_directed(v_nodes[vl], Outgoing).into_iter().collect::<Vec<_>>();
+                let mut w_ers = vert.edges_directed(v_nodes[wl], Incoming).into_iter().collect::<Vec<_>>();
+                v_ers.sort_by_key(|er| {
+                    let dst = vert.node_weight(er.target()).unwrap();
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(dst)];
+                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+                    (shr, -(svr as i32))
+                });
+                let v_outs = v_ers
+                    .iter()
+                    .map(|er| { (vl, vert.node_weight(er.target()).unwrap(), er.weight()) })
+                    .collect::<Vec<_>>();
+                w_ers.sort_by_key(|er| {
+                    let src = vert.node_weight(er.source()).unwrap();
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(src)];
+                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+                    (shr, -(svr as i32))
+                });
+                let w_ins = w_ers
+                    .iter()
+                    .map(|er| { (vert.node_weight(er.source()).unwrap(), wl, er.weight()) })
+                    .collect::<Vec<_>>();
+                let arr_src_pos = v_outs.iter().position(|e| { *e == (vl, wl, ew) }).unwrap();
+                let arr_dst_pos = w_ins.iter().position(|e| { *e == (vl, wl, ew) }).unwrap();
+                let arr_src_frac = (arr_src_pos as f64 + 1.0) / (v_outs.len() as f64 + 1.0);
+                let arr_dst_frac = (arr_dst_pos as f64 + 1.0) / (w_ins.len() as f64 + 1.0);
                 let hops = &hops_by_edge[&(*vl, *wl)];
                 eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
                 match hops.len() {
@@ -546,7 +572,7 @@ pub fn render(v: Vec<Syn>) {
                     1 => {
                         println!(indoc!(r#"
                             \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                            vl, 0.5, vl, ew, wl, 0.5, wl    
+                            vl, arr_src_frac, vl, ew, wl, arr_dst_frac, wl    
                         );
                     },
                     2 => {
@@ -554,11 +580,11 @@ pub fn render(v: Vec<Syn>) {
                         let (ovr, ohr) = (lvl+1, nhr);
                         println!(indoc!(r#"
                             \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
-                            vl, 0.5, vl, ew, ovr, ohr, wl, 0.5, wl    
+                            vl, arr_src_frac, vl, ew, ovr, ohr, wl, arr_dst_frac, wl    
                         );
                     },
                     max_levels => {
-                        print!(indoc!(r#"\draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), vl, 0.5, vl);
+                        print!(indoc!(r#"\draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), vl, arr_src_frac, vl);
                         let mid = max_levels / 2;
                         for (n, hop) in hops.iter().enumerate() {
                             if n < max_levels-1 {
@@ -575,7 +601,7 @@ pub fn render(v: Vec<Syn>) {
                                 }
                             }
                         }
-                        println!(indoc!(r#" -- ($({}.north west)!{}!({}.north east)$);"#), wl, 0.5, wl);
+                        println!(indoc!(r#" -- ($({}.north west)!{}!({}.north east)$);"#), wl, arr_dst_frac, wl);
                     },
                 }
             }
