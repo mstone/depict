@@ -5,14 +5,15 @@ use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
 use std::fs::read_to_string;
 use std::env::args;
+use std::hash::Hash;
 use std::io::{self, Write};
 use std::process::{exit, Command, Stdio};
-use ndarray::{Array, Array3};
+use ndarray::{Array, Array2};
 use nom::error::convert_error;
 use indoc::indoc;
 use petgraph::graph::{Graph, DefaultIx, NodeIndex, EdgeReference, EdgeIndex};
 use petgraph::dot::{Dot};
-use petgraph::visit::{NodeFiltered};
+use petgraph::visit::{NodeFiltered, EdgeRef, IntoEdgeReferences};
 use petgraph::algo::floyd_warshall::floyd_warshall;
 
 pub fn tikz_escape(s: &str) -> String {
@@ -21,8 +22,8 @@ pub fn tikz_escape(s: &str) -> String {
         .replace("\\n", "\\\\")
 }
 
-pub fn or_insert<'a, 'g, 'h>(g: &'g mut Graph<&'a str, &'a str>, h: &'h mut HashMap<&'a str, NodeIndex<DefaultIx>>, v: &'a str) -> NodeIndex<DefaultIx> {
-    let e = h.entry(v);
+pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V) -> NodeIndex where V: Eq + Hash + Clone {
+    let e = h.entry(v.clone());
     let ix = match e {
         Entry::Vacant(ve) => ve.insert(g.add_node(v.clone())),
         Entry::Occupied(ref oe) => oe.get(),
@@ -177,30 +178,33 @@ pub fn render(v: Vec<Syn>) {
             }
         }
 
+        let mut condensed = Graph::<NodeIndex, Vec<(NodeIndex, NodeIndex, EdgeIndex)>>::new();
+        let mut condensed_vxmap = HashMap::new();
+        for vx in vert.node_indices() {
+            let mut dsts = HashMap::new();
+            for ex in vert.edges_directed(vx, Outgoing) {
+                let wx = ex.target();
+                dsts.entry(wx).or_insert(vec![]).push((ex.source(), ex.target(), ex.id()));
+            }
+            
+            let cvx = or_insert(&mut condensed, &mut condensed_vxmap, vx);
+            for (wx, exs) in dsts {
+                let cwx = or_insert(&mut condensed, &mut condensed_vxmap, wx);
+                condensed.add_edge(cvx, cwx, exs);
+            }
+        }
+
         // find graph roots
         // in a digraph, the roots are nodes with in-degree 0
-        let roots = vert.externals(Incoming).collect::<Vec<NodeIndex<DefaultIx>>>();
+        let roots = condensed.externals(Incoming).collect::<Vec<NodeIndex<DefaultIx>>>();
         // println!("ROOTS {:?}", roots);
 
-        // let rvert = vert.filter_map(|_vx, vw| {Some(vw)}, |_ex, ew| {
-        //     match *ew {
-        //         "actuates" | "rides" => Some(ew),
-        //         _ => None,
-        //     }
-        // });
-
-        // println!("RVERT {:?}", rvert);
-
-        // println!("{}", "\n\n\n");
-        // println!("{:?}", Dot::new(&vert));
-        // println!("{}", "\n\n\n");
-
-        let paths = floyd_warshall(&vert, |_ex| { -1 as i32 }).unwrap();
+        let paths = floyd_warshall(&condensed, |_ex| { -1 as i32 }).unwrap();
         let mut paths_from_roots = paths
             .iter()
             .filter_map(|((vx, wx), wgt)| {
                 if *wgt <= 0 && roots.contains(vx) {
-                    Some((*vx, *wx, -(*wgt)))
+                    Some((*vx, *wx, -(*wgt) as usize))
                 } else {
                     None
                 }
@@ -215,6 +219,8 @@ pub fn render(v: Vec<Syn>) {
                 .push((*vx, *wx));
         }
 
+        eprintln!("PATHS_BY_RANK: {:#?}", paths_by_rank);
+
         let mut vx_rank = HashMap::new();
         let mut hx_rank = HashMap::new();
         for (rank, paths) in paths_by_rank.iter() {
@@ -228,71 +234,93 @@ pub fn render(v: Vec<Syn>) {
         for (rank, paths) in paths_by_rank.iter() {
             let l = rank;
             let n = paths.len();
-            for a in 0..(n-1) {
+            for a in 0..n {
                 locs_by_level.entry(*l).or_insert(vec![]).push(a);
             }
         }
 
+        eprintln!("LOCS_BY_LEVEL V1: {:#?}", locs_by_level);
+
         let mut hops_by_level = BTreeMap::new();
-        for ex in vert.edge_indices() {
-            let el = vert.edge_weight(ex).unwrap();
-            match *el {
-                "actuates" | "senses" | "rides" => {
-                    let (vx, wx) = vert.edge_endpoints(ex).unwrap();
-                    let vvr = *vx_rank.get(&vx).unwrap();
-                    let wvr = *vx_rank.get(&wx).unwrap();
-                    let vhr = *hx_rank.get(&vx).unwrap();
-                    let whr = *hx_rank.get(&wx).unwrap();
-                    
-                    let mut mhrs = vec![vhr];
-                    for mid_level in (vvr+1)..(wvr) {
-                        let mhr = locs_by_level.get(&mid_level).map_or(0, |v| v.len());
-                        locs_by_level.entry(mid_level).or_insert(vec![]).push(mhr);
-                        mhrs.push(mhr);
-                    }
-                    mhrs.push(whr);
-                    
-                    for lvl in vvr..(wvr as i32) {
-                        let mx = (lvl as i32 - vvr as i32) as usize;
-                        let nx = (lvl as i32 + 1 - vvr as i32) as usize;
-                        let mhr = mhrs[mx];
-                        let nhr = mhrs[nx];
-                        hops_by_level
-                            .entry(lvl)
-                            .or_insert(vec![])
-                            .push((lvl, mhr, nhr, ex));
-                    }
-                },
-                _ => {},
+        for ex in condensed.edge_references() {
+            let (vx, wx) = (ex.source(), ex.target());
+            let vvr = *vx_rank.get(&vx).unwrap();
+            let wvr = *vx_rank.get(&wx).unwrap();
+            let vhr = *hx_rank.get(&vx).unwrap();
+            let whr = *hx_rank.get(&wx).unwrap();
+            
+            let mut mhrs = vec![vhr];
+            for mid_level in (vvr+1)..(wvr) {
+                let mhr = locs_by_level.get(&mid_level).map_or(0, |v| v.len());
+                locs_by_level.entry(mid_level).or_insert(vec![]).push(mhr);
+                mhrs.push(mhr);
+            }
+            mhrs.push(whr);
+            
+            for lvl in vvr..wvr {
+                let mx = (lvl as i32 - vvr as i32) as usize;
+                let nx = (lvl as i32 + 1 - vvr as i32) as usize;
+                let mhr = mhrs[mx];
+                let nhr = mhrs[nx];
+                hops_by_level
+                    .entry(lvl)
+                    .or_insert(vec![])
+                    .push((lvl, vx, wx, ex, mhr, nhr));
             }
         }
+        eprintln!("LOCS_BY_LEVEL V2: {:#?}", locs_by_level);
 
-        let max_level = hops_by_level.keys().max().unwrap();
+        eprintln!("CONDENSED GRAPH: {:#?}", condensed
+            .edge_references()
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|er| {
+                let (vx, wx) = (er.source(), er.target());
+                (vx, wx, er.id(), er.weight())
+            })
+            .collect::<Vec<_>>()
+        );
+        eprintln!("HOPS_BY_LEVEL: {:#?}", hops_by_level);
+        // std::process::exit(0);
+
+        let max_level = *hops_by_level.keys().max().unwrap();
         let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
+
+        eprintln!("max_level: {}, max_width: {}", max_level, max_width);
 
         let mut csp = String::new();
         csp.push_str("MINION 3\n");
         csp.push_str("**VARIABLES**\n");
-        csp.push_str(&format!("BOOL x[{},{},{}]\n", max_level, max_width, max_width));
-        csp.push_str(&format!("BOOL c[{},{},{},{},{}]\n", max_level, max_width, max_width, max_width, max_width));
         csp.push_str("BOUND csum {0..1000}\n");
+        for (rank, locs) in locs_by_level.iter() {
+            csp.push_str(&format!("BOOL x{}[{},{}]\n", rank, locs.len(), locs.len()));
+        }
+        for rank in 0..locs_by_level.len() - 1 {
+            let w1 = locs_by_level[&rank].len();
+            let w2 = locs_by_level[&(rank+1)].len();
+            csp.push_str(&format!("BOOL c{}[{},{},{},{}]\n", rank, w1, w2, w1, w2));
+        }
         csp.push_str("\n**SEARCH**\n");
         csp.push_str("MINIMISING csum\n");
         // csp.push_str("PRINT ALL");
         csp.push_str("PRINT [[csum]]\n");
-        csp.push_str("PRINT [[x]]\n");
+        // csp.push_str("PRINT [[x]]\n");
+        for (rank, _) in locs_by_level.iter() {
+            csp.push_str(&format!("PRINT [[x{}]]\n", rank));
+        }
         csp.push_str("\n**CONSTRAINTS**\n");
-        for (rank, paths) in paths_by_rank.iter() {
+        for (rank, locs) in locs_by_level.iter() {
             let l = rank;
-            let n = paths.len();
-            for a in 0..(n-1) {
-                for b in 0..(n-1) {
+            let n = locs.len();
+            // let n = max_width;
+            for a in 0..n {
+                for b in 0..n {
                     if a != b {
-                        csp.push_str(&format!("sumleq([x[{l},{a},{b}], x[{l},{b},{a}]],1)\n", l=l, a=a, b=b));
-                        csp.push_str(&format!("sumgeq([x[{l},{a},{b}], x[{l},{b},{a}]],1)\n", l=l, a=a, b=b));
-                        for c in 0..(n-1) {
+                        csp.push_str(&format!("sumleq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                        csp.push_str(&format!("sumgeq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                        for c in 0..(n) {
                             if b != c && a != c {
-                                csp.push_str(&format!("sumleq([x[{l},{c},{b}], x[{l},{b},{a}], -1],x[{l},{c},{a}])\n", l=l, a=a, b=b, c=c));
+                                csp.push_str(&format!("sumleq([x{l}[{c},{b}], x{l}[{b},{a}], -1],x{l}[{c},{a}])\n", l=l, a=a, b=b, c=c));
                             }
                         }
                     }
@@ -301,18 +329,34 @@ pub fn render(v: Vec<Syn>) {
         }
         for (k, hops) in hops_by_level.iter() {
             if *k < max_level-1 {
-                for (_lvl, a, c, _ex) in hops {
-                    for (_lvl2, b, d, _fx)  in hops {
+                for (_lvl, _vx, _wx, _ex, a, c) in hops {
+                    for (_lvl2, _vx2, _wx2, _ex2, b, d)  in hops {
                         if (a,c) != (b,d) {
-                            csp.push_str(&format!("sumgeq([c[{k},{a},{b},{c},{d}],x[{k},{c},{a}],x[{j},{b},{d}]],1)\n", a=a, b=b, c=c, d=d, k=k, j=k+1));
-                            csp.push_str(&format!("sumgeq([c[{k},{a},{b},{c},{d}],x[{k},{a},{c}],x[{j},{d},{b}]],1)\n", a=a, b=b, c=c, d=d, k=k, j=k+1));
+                            csp.push_str(&format!("sumgeq([c{k}[{a},{c},{b},{d}],x{j}[{c},{a}],x{j}[{b},{d}]],1)\n", a=a, b=b, c=c, d=d, k=k, j=k+1));
+                            csp.push_str(&format!("sumgeq([c{k}[{a},{c},{b},{d}],x{j}[{a},{c}],x{j}[{d},{b}]],1)\n", a=a, b=b, c=c, d=d, k=k, j=k+1));
+                            csp.push_str(&format!("sumleq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
+                            csp.push_str(&format!("sumgeq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
                         }
                     }
                 }
             }
         }
-        csp.push_str("\nsumleq([c[_,_,_,_,_]],csum)\n");
-        csp.push_str("sumgeq([c[_,_,_,_,_]],csum)\n");
+        csp.push_str("\nsumleq([");
+        for rank in 0..max_level-1 {
+            if rank > 0 {
+                csp.push_str(",");
+            }
+            csp.push_str(&format!("c{}[_,_,_,_]", rank));
+        }
+        csp.push_str("],csum)\n");
+        csp.push_str("sumgeq([");
+        for rank in 0..max_level-1 {
+            if rank > 0 {
+                csp.push_str(",");
+            }
+            csp.push_str(&format!("c{}[_,_,_,_]", rank));
+        }
+        csp.push_str("],csum)\n");
         csp.push_str("\n\n**EOF**");
 
         eprintln!("{}", csp);
@@ -324,8 +368,8 @@ pub fn render(v: Vec<Syn>) {
         minion
             .arg("-printsolsonly")
             .arg("-printonlyoptimal")
-            .arg("-timelimit")
-            .arg("1")
+            // .arg("-timelimit")
+            // .arg("30")
             .arg("--")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped());
@@ -341,131 +385,145 @@ pub fn render(v: Vec<Syn>) {
 
         let outs = std::str::from_utf8(&output.stdout[..]).unwrap();
 
-        // eprintln!("{}", outs);
+        eprintln!("{}", outs);
 
         let lines = outs.split("\n").collect::<Vec<_>>();
-        let crossing_number = lines[lines.len()-3]
+        eprintln!("cn line: {}", lines[2]);
+        
+
+        let crossing_number = lines[2]
             .trim()
             .parse::<i32>()
             .expect("unable to parse crossing number");
-        let soln = lines[lines.len()-2]
-            .split(" ")
-            .filter_map(|s| s.parse::<i32>().ok())
-            .collect::<Vec<_>>();
-        
-        eprintln!("{:?}, {:?}\n{:?}", crossing_number, soln, lines);
 
-        let mut perm = Array3::<i32>::zeros((*max_level as usize, max_width, max_width));
-        for (n, ix) in perm.iter_mut().enumerate() {
-            *ix = soln[n];
+        // std::process::exit(0);
+        
+        let solns = &lines[3..lines.len()];
+        
+        eprintln!("{:?}\n{:?}\n{:?}", lines, solns, crossing_number);
+
+        let mut perm = Vec::<Array2<i32>>::new();
+        for (rank, locs) in locs_by_level.iter() {
+            let mut arr = Array2::<i32>::zeros((locs.len(), locs.len()));
+            let mut parsed_solns = solns[*rank]
+                .split(" ")
+                .filter_map(|s| {
+                    s
+                        .trim()
+                        .parse::<i32>()
+                        .ok()
+                })
+                .collect::<Vec<_>>();
+            for (n, ix) in arr.iter_mut().enumerate() {
+                *ix = parsed_solns[n];
+            }
+            perm.push(arr);
         }
 
-        eprintln!("{:?}", perm);
+        for (n, p) in perm.iter().enumerate() {
+            eprintln!("{}:\n{:?}\n", n, p)
+        };
 
         // turn the data into hranks.
         std::process::exit(0);
 
-        let mut v_rank = HashMap::new();
-        let mut h_rank = HashMap::new();
-        // paths_from_roots
-        //     .sort_by_key(|(vx, wx, wgt)| { *wgt });
-        // println!("PATHS");
-        for (rank, paths) in paths_by_rank.iter() {
-            for (vx, wx) in paths.iter() {
-                let vl = vert.node_weight(*vx).unwrap();
-                let wl = vert.node_weight(*wx).unwrap();
-                let name = h_name.get(wl).unwrap();
-                let vpos = -1.5 * (*rank as f64);
-                let n = 0;
-                let hpos = 3.5 * (n as f64);
+        // let mut v_rank = HashMap::new();
+        // let mut h_rank = HashMap::new();
+        // // paths_from_roots
+        // //     .sort_by_key(|(vx, wx, wgt)| { *wgt });
+        // // println!("PATHS");
+        // for (rank, paths) in paths_by_rank.iter() {
+        //     for (n, (vx, wx)) in paths.iter().enumerate() {
+        //         let vpos = -1.5 * (*rank as f64);
+        //         // let n = 0;
+        //         // let hpos = 3.5 * (n as f64);
 
-                v_rank.insert(wl, *rank);
-                h_rank.insert(wl, n);
-                println!("% GRR  {:?} {} -> {} {:?}: {}", vx, vl, wl, wx, rank);
-                println!(indoc!(r#"
-                    \node[minimum width = 2.5cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
-                    wl, hpos, vpos, name);
-            }
-        }
+        //         v_rank.insert(wx, *rank);
+        //         h_rank.insert(wx, n);
+        //         // println!("% GRR  {:?} {} -> {} {:?}: {}", vx, vl, wl, wx, rank);
+        //         // println!(indoc!(r#"
+        //             // \node[minimum width = 2.5cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
+        //             // wl, hpos, vpos, name);
+        //     }
+        // }
 
-        // eprintln!("{:?}", Dot::new(&vert));
+        // // eprintln!("{:?}", Dot::new(&vert));
 
-        for vx in vert.node_indices() {
-            let src = vert.node_weight(vx).unwrap();
-            // let style = h_styl.get(src).unwrap();
-            let mut sorted_out_nbrs = BTreeMap::new();
-            let mut sorted_in_nbrs = BTreeMap::new();
-            let mut out_nbrs = vert.neighbors_directed(vx, Outgoing).detach();
-            while let Some((ex, wx)) = out_nbrs.next(&vert) {
-                let dst = vert.node_weight(wx).unwrap();
-                let edge = vert.edge_weight(ex).unwrap();
-                let dst_hrank = h_rank.get(dst).unwrap();
-                println!("% OUT {:?} {} {:?} {:?} {} {} {}", vx, src, ex, wx, dst, edge, dst_hrank);
-                sorted_out_nbrs
-                    .entry(dst_hrank)
-                    .or_insert(vec![])
-                    .push((wx, dst, edge));
-            }
+        // for vx in vert.node_indices() {
+        //     let src = vert.node_weight(vx).unwrap();
+        //     // let style = h_styl.get(src).unwrap();
+        //     let mut sorted_out_nbrs = BTreeMap::new();
+        //     let mut sorted_in_nbrs = BTreeMap::new();
+        //     let mut out_nbrs = vert.neighbors_directed(vx, Outgoing).detach();
+        //     while let Some((ex, wx)) = out_nbrs.next(&vert) {
+        //         let edge = vert.edge_weight(ex).unwrap();
+        //         let dst_hrank = h_rank.get(&wx).unwrap();
+        //         println!("% OUT {:?} {} {:?} {:?} {} {}", vx, src, ex, wx, edge, dst_hrank);
+        //         sorted_out_nbrs
+        //             .entry(dst_hrank)
+        //             .or_insert(vec![])
+        //             .push((wx, edge));
+        //     }
             
 
-            let num_out_bundles = sorted_out_nbrs.len() as f64;
-            let arrow_position = |bundle_rank: usize, adj: f64| {
-                let br = bundle_rank as f64;
-                let nob = num_out_bundles as f64;
-                ((br + 1.0) / (nob + 1.0)) + (adj / nob)
-            };
-            for (n, (_hrank, edges)) in sorted_out_nbrs.iter().enumerate() {
-                for (wx, dst, edge) in edges {
-                    let mut in_nbrs = vert.neighbors_directed(*wx, Incoming).detach();
-                    while let Some((ex, ux)) = in_nbrs.next(&vert) {
-                        let src2 = vert.node_weight(ux).unwrap();
-                        let edge2 = vert.edge_weight(ex).unwrap();
-                        let src2_vrank = v_rank.get(src2).unwrap();
-                        let src2_hrank = h_rank.get(src2).unwrap();
-                        println!("% IN2 {:?} {} {:?} {:?} {} {} {}", ux, src2, ex, wx, dst, edge2, src2_hrank);
-                        sorted_in_nbrs
-                            .entry((src2_hrank, src2_vrank))
-                            .or_insert(vec![])
-                            .push((ux, src2, edge2));
-                    }
-                    let num_in_bundles = sorted_in_nbrs.len() as f64;
-                    let arrow_position2 = |bundle_rank: usize, adj: f64| {
-                        let br = bundle_rank as f64;
-                        let nib = num_in_bundles as f64;
-                        ((br + 1.0) / (nib + 1.0)) + (adj / nib)
-                    };
-                    let m = sorted_in_nbrs
-                        .iter()
-                        .enumerate()
-                        .find(|(m, (_rank2, edges2))| 
-                            edges2
-                                .iter()
-                                .find(|(ux, _, _)| *ux == vx)
-                                .is_some()).unwrap().0;
-                    println!("% ARR {} {} -> {}, {}, {}", n, src, dst, edge, m);
-                    match **edge {
-                        "actuates" => {
-                            println!(indoc!(r#"
-                                \draw [-{{Latex[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                                src, arrow_position(n, -0.05), src, edge, dst, arrow_position2(m, -0.05), dst    
-                            );
-                        },
-                        "senses" => {
-                            println!(indoc!(r#"
-                                \draw [{{Latex[]-}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=south west, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                                src, arrow_position(n, 0.05), src, edge, dst, arrow_position2(m, 0.05), dst    
-                            );
-                        },
-                        _ => {
-                            println!(indoc!(r#"
-                                \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                                src, arrow_position(n, 0.0), src, edge, dst, arrow_position2(m, 0.0), dst    
-                            );
-                        },
-                    };
-                }
-            }
-        }
+        //     let num_out_bundles = sorted_out_nbrs.len() as f64;
+        //     let arrow_position = |bundle_rank: usize, adj: f64| {
+        //         let br = bundle_rank as f64;
+        //         let nob = num_out_bundles as f64;
+        //         ((br + 1.0) / (nob + 1.0)) + (adj / nob)
+        //     };
+        //     for (n, (_hrank, edges)) in sorted_out_nbrs.iter().enumerate() {
+        //         for (wx, edge) in edges {
+        //             let mut in_nbrs = vert.neighbors_directed(*wx, Incoming).detach();
+        //             while let Some((ex, ux)) = in_nbrs.next(&vert) {
+        //                 let edge2 = vert.edge_weight(ex).unwrap();
+        //                 let src2_vrank = v_rank.get(&ux).unwrap();
+        //                 let src2_hrank = h_rank.get(&ux).unwrap();
+        //                 println!("% IN2 {:?} {:?} {:?} {} {}", ux, ex, wx, edge2, src2_hrank);
+        //                 sorted_in_nbrs
+        //                     .entry((src2_hrank, src2_vrank))
+        //                     .or_insert(vec![])
+        //                     .push((ux, edge2));
+        //             }
+        //             let num_in_bundles = sorted_in_nbrs.len() as f64;
+        //             let arrow_position2 = |bundle_rank: usize, adj: f64| {
+        //                 let br = bundle_rank as f64;
+        //                 let nib = num_in_bundles as f64;
+        //                 ((br + 1.0) / (nib + 1.0)) + (adj / nib)
+        //             };
+        //             let m = sorted_in_nbrs
+        //                 .iter()
+        //                 .enumerate()
+        //                 .find(|(m, (_rank2, edges2))| 
+        //                     edges2
+        //                         .iter()
+        //                         .find(|(ux, _)| *ux == vx)
+        //                         .is_some()).unwrap().0;
+        //             // println!("% ARR {} {} -> {}, {}, {}", n, src, edge, m);
+        //             let dst = 
+        //             match **edge {
+        //                 "actuates" => {
+        //                     println!(indoc!(r#"
+        //                         \draw [-{{Latex[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+        //                         src, arrow_position(n, -0.05), src, edge, dst, arrow_position2(m, -0.05), dst    
+        //                     );
+        //                 },
+        //                 "senses" => {
+        //                     println!(indoc!(r#"
+        //                         \draw [{{Latex[]-}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=south west, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+        //                         src, arrow_position(n, 0.05), src, edge, dst, arrow_position2(m, 0.05), dst    
+        //                     );
+        //                 },
+        //                 _ => {
+        //                     println!(indoc!(r#"
+        //                         \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+        //                         src, arrow_position(n, 0.0), src, edge, dst, arrow_position2(m, 0.0), dst    
+        //                     );
+        //                 },
+        //             };
+        //         }
+        //     }
+        // }
 
         // let l = -3;
         // let r = 12;
