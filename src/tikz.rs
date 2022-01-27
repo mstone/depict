@@ -304,6 +304,7 @@ pub fn render(v: Vec<Syn>) {
 
         eprintln!("CONDENSED GRAPH: {:#?}", sorted_condensed_edges);
 
+        let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
         for (vl, wl, _) in sorted_condensed_edges.iter() {
             let vvr = *vx_rank.get(*vl).unwrap();
@@ -332,6 +333,10 @@ pub fn render(v: Vec<Syn>) {
                     .entry(lvl)
                     .or_insert(SortedVec::new())
                     .insert((mhr, nhr, vl, wl, lvl));
+                hops_by_edge
+                    .entry((*vl, *wl))
+                    .or_insert(BTreeMap::new())
+                    .insert(lvl, (mhr, nhr));
             }
         }
         eprintln!("LOCS_BY_LEVEL V2: {:#?}", locs_by_level);
@@ -512,84 +517,67 @@ pub fn render(v: Vec<Syn>) {
         // turn the data into hranks.
         // std::process::exit(0);
 
-        for (vx, vl) in condensed.node_references() {   
-            let (ovr, ohr) = node_to_loc[&Loc::Node(vl)];
-            let shr = solved_locs[&ovr][&ohr];
-            eprintln!("GRR vl {}, ovr {}, ohr {}, shr {}", vl, ovr, ohr, shr);
-            let vpos = -1.5 * (ovr as f64);
+        for (loc, node) in loc_to_node.iter() {   
+            let (ovr, ohr) = loc;
+            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+            let vpos = -1.5 * (*ovr as f64);
             let hpos = 3.5 * (shr as f64);
-            println!(indoc!(r#"
-                \node[minimum width = 2.5cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
-                vl, hpos, vpos, h_name[vl]);
+            match node {
+                Loc::Node(vl) => {
+                    println!(indoc!(r#"
+                        \node[minimum width = 2.5cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
+                        vl, hpos, vpos, h_name[*vl]);
+                },
+                Loc::Hop(_, _) => {
+                    println!(indoc!(r#"
+                    \draw [fill, black] ({}, {}) circle (0.5pt);
+                    \node[](aux_{}_{}) at ({}, {}) {{}};"#), 
+                    hpos, vpos, ovr, ohr, hpos, vpos);
+                },
+            }
         }
 
-        // std::process::exit(0);
-        // // eprintln!("{:?}", Dot::new(&vert));
-
         for cer in condensed.edge_references() {
-            let src = *condensed.node_weight(cer.source()).unwrap();
-            let vx = v_nodes[src];
-
-            let mut out_bundles = cer.weight().iter().map(|(vl,wl,ew)| (vl,wl)).collect::<Vec<_>>();
-            out_bundles.sort();
-            out_bundles.dedup();
-            let num_out_bundles = out_bundles.len();
-            
-            let arrow_position = |bundle_rank: usize, adj: f64| {
-                let br = bundle_rank as f64;
-                let nob = num_out_bundles as f64;
-                ((br + 1.0) / (nob + 1.0)) + (adj / nob)
-            };
-            for (n, edge) in cer.weight().iter().enumerate() {
-                let dst = edge.1;
-                let mut in_nbrs = vert.neighbors_directed(v_nodes[dst], Incoming).detach();
-                let mut sorted_in_nbrs = HashMap::new();
-                while let Some((ex, ux)) = in_nbrs.next(&vert) {
-                    let edge2 = vert.edge_weight(ex).unwrap();
-                    let ul = vert.node_weight(ux).unwrap();
-                    let src2_vrank = node_to_loc[&Loc::Node(ul)].0;
-                    let src2_hrank = solved_locs[&src2_vrank][&node_to_loc[&Loc::Node(ul)].1];
-                    // println!("% IN2 {:?} {:?} {:?} {} {}", ux, ex, dst, edge2, src2_hrank);
-                    sorted_in_nbrs
-                        .entry((src2_hrank, src2_vrank))
-                        .or_insert(vec![])
-                        .push((ux, edge2));
-                }
-                let num_in_bundles = sorted_in_nbrs.len() as f64;
-                let arrow_position2 = |bundle_rank: usize, adj: f64| {
-                    let br = bundle_rank as f64;
-                    let nib = num_in_bundles as f64;
-                    ((br + 1.0) / (nib + 1.0)) + (adj / nib)
-                };
-                let m = sorted_in_nbrs
-                    .iter()
-                    .enumerate()
-                    .find(|(m, (_rank2, edges2))| 
-                        edges2
-                            .iter()
-                            .find(|(ux, _)| *ux == vx)
-                            .is_some()).unwrap().0;
-                // println!("% ARR {} {} -> {}, {}, {}", n, src, edge, m);
-                match edge.2 {
-                    "actuates" => {
-                        println!(indoc!(r#"
-                            \draw [-{{Latex[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                            src, arrow_position(n, -0.05), src, edge.2, dst, arrow_position2(m, -0.05), dst    
-                        );
-                    },
-                    "senses" => {
-                        println!(indoc!(r#"
-                            \draw [{{Latex[]-}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=south west, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                            src, arrow_position(n, 0.05), src, edge.2, dst, arrow_position2(m, 0.05), dst    
-                        );
-                    },
-                    _ => {
+            for (vl, wl, ew) in cer.weight().iter() {
+                let hops = &hops_by_edge[&(*vl, *wl)];
+                eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
+                match hops.len() {
+                    0 => { unreachable!(); }
+                    1 => {
                         println!(indoc!(r#"
                             \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                            src, arrow_position(n, 0.0), src, edge.2, dst, arrow_position2(m, 0.0), dst    
+                            vl, 0.5, vl, ew, wl, 0.5, wl    
                         );
                     },
-                };
+                    2 => {
+                        let (lvl, (mhr, nhr)) = hops.iter().next().unwrap();
+                        let (ovr, ohr) = (lvl+1, nhr);
+                        println!(indoc!(r#"
+                            \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
+                            vl, 0.5, vl, ew, ovr, ohr, wl, 0.5, wl    
+                        );
+                    },
+                    max_levels => {
+                        print!(indoc!(r#"\draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), vl, 0.5, vl);
+                        let mid = max_levels / 2;
+                        for (n, hop) in hops.iter().enumerate() {
+                            if n < max_levels-1 {
+                                let (lvl, (mhr, nhr)) = hop;
+                                let (ovr, ohr) = (lvl+1, nhr);
+                                // let (ovr, ohr) = (lvl, mhr);
+
+                                // println!("% HOP {} {:?}", n, hop);
+                                if n == mid {
+                                    // print!(indoc!(r#" -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at (aux_{}_{})"#), ew, ovr, ohr);
+                                    print!(r#" -- (aux_{}_{})"#, ovr, ohr);
+                                } else {
+                                    print!(r#" -- (aux_{}_{})"#, ovr, ohr);
+                                }
+                            }
+                        }
+                        println!(indoc!(r#" -- ($({}.north west)!{}!({}.north east)$);"#), wl, 0.5, wl);
+                    },
+                }
             }
         }
 
