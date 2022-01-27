@@ -12,6 +12,7 @@ indoc = "1.0"
 ndarray = "0.15"
 nom = "7"
 petgraph = "0.6"
+sorted-vec = "0.7"
 
 [lib]
 name = "diagrams"
