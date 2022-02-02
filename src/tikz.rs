@@ -2,9 +2,12 @@ use diagrams::parser::{Ident, parse};
 use diagrams::render::{Fact, Syn, filter_fact, resolve, unwrap_atom, find_parent, to_ident, as_string};
 use petgraph::EdgeDirection::{Incoming, Outgoing};
 use petgraph::algo::bellman_ford;
+use pyo3::types::{PyModule, IntoPyDict, PyList, PyFloat, PySequence};
 use sorted_vec::SortedVec;
+use thiserror::Error;
 use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
+use std::fmt::Display;
 use std::fs::read_to_string;
 use std::env::args;
 use std::hash::Hash;
@@ -12,11 +15,14 @@ use std::io::{self, Write};
 use std::process::{exit, Command, Stdio};
 use ndarray::{Array2};
 use nom::error::convert_error;
+use numpy::{PyArray1, NotContiguousError, PyReadonlyArray1};
 use indoc::indoc;
 use petgraph::graph::{Graph, DefaultIx, NodeIndex, EdgeReference, EdgeIndex};
 use petgraph::dot::{Dot};
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
 use petgraph::algo::floyd_warshall::floyd_warshall;
+use pyo3::{prelude::*, prepare_freethreaded_python};
+use pyo3::class::basic::CompareOp;
 
 pub fn tikz_escape(s: &str) -> String {
     s
@@ -39,6 +45,37 @@ pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V)
 //         g.edges_directed(ix, Incoming).next().is_none()
 //     });
 // }
+
+pub fn mul<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
+    a.call_method1("__mul__", (b,)).unwrap()
+}
+
+pub fn sub<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
+    a.call_method1("__sub__", (b,)).unwrap()
+}
+
+pub fn add<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
+    a.call_method1("__add__", (b,)).unwrap()
+}
+
+pub fn get<'py>(a: &'py PyAny, b: i32) -> &'py PyAny {
+    a.get_item(b.into_py(a.py())).unwrap()
+}
+
+// #[derive(Error, Debug)]
+// pub enum GetValueError {
+//     #[error("python error")]
+//     PyErr(#[from] PyErr),
+//     #[error("numpy error")]
+//     NotContiguousError(#[from] NotContiguousError)
+// }
+
+pub fn get_value<'py>(a: &'py PyAny) -> PyResult<PyReadonlyArray1<'py, f64>> {
+    Ok(a
+        .getattr("value")?
+        .extract::<&PyArray1<f64>>()?
+        .readonly())
+}
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum NodeHRank {
@@ -513,6 +550,82 @@ pub fn render(v: Vec<Syn>) {
             }
         }
         eprintln!("SOLVED_LOCS: {:#?}", solved_locs);
+        
+        prepare_freethreaded_python();
+        let res: PyResult<(Vec<_>, Vec<_>, Vec<_>, Vec<_>)> = Python::with_gil(|py| {
+            let cp = PyModule::import(py, "cvxpy")?;
+            let builtins = PyModule::import(py, "builtins")?;
+            let var = cp.getattr("Variable")?;
+            let sq = cp.getattr("square")?;
+            let constant = cp.getattr("Constant")?;
+            let problem = cp.getattr("Problem")?;
+            let minimize = cp.getattr("Minimize")?;
+            let o = |a: &PyAny| {a.to_object(py)};
+            let p = |a: PyObject| {a.clone().into_ref(py)};
+            let square = |a: &PyAny| {sq.call1((a,)).unwrap()};
+            let as_constant = |a: i32| { constant.call1((a.into_py(py),)).unwrap() };
+            let hundred: &PyAny = as_constant(100);
+            let thousand: &PyAny = as_constant(1000);
+            let l = var.call((2,), Some([("pos", true)].into_py_dict(py)))?;
+            let r = var.call((2,), Some([("pos", true)].into_py_dict(py)))?;
+            let s = var.call((2,), Some([("pos", true)].into_py_dict(py)))?;
+            let t = var.call((2,), Some([("pos", true)].into_py_dict(py)))?;
+            let eps = var.call((), Some([("pos", true)].into_py_dict(py)))?;
+            use CompareOp::*;
+            let cvec: Vec<&PyAny> = vec![
+                // r.get_item(0)?.call_method1("__ge__", (l.get_item(0)?,))?,
+                get(r, 0).rich_compare(get(l, 0), Ge)?,
+                get(r, 1).rich_compare(get(l, 1), Ge)?,
+
+                get(s, 0).rich_compare(add(get(l, 0), &eps), Ge)?,
+                get(s, 1).rich_compare(add(get(s, 0), &eps), Ge)?,
+                get(s, 1).rich_compare(sub(get(r, 0), &eps), Le)?,
+                get(t, 0).rich_compare(add(get(l, 1), &eps), Ge)?,
+                get(t, 1).rich_compare(add(get(s, 0), &eps), Ge)?,
+                get(t, 1).rich_compare(sub(get(r, 1), &eps), Le)?,                
+
+                get(r, 0).rich_compare(1.0, Le)?,
+                get(r, 1).rich_compare(0.5, Le)?,
+            ];
+            let constr = PyList::new(py, cvec);
+            let s0 = get(&s, 0);
+            let obj = mul(hundred, square(sub(get(s, 0), get(t, 0))));
+            let obj = add(obj, mul(hundred, square(sub(get(s, 0), get(t, 0)))));
+            let obj = add(obj, square(sub(get(r, 1), get(s, 1))));
+            let obj = add(obj, square(sub(get(s, 1), get(s, 0))));
+            let obj = add(obj, square(sub(get(s, 0), get(l, 0))));
+            let obj = sub(obj, mul(thousand, eps));
+            let obj = minimize.call1((obj,))?;
+            eprintln!("OBJECTIVE: {}\n", obj.str()?);
+
+            let prb = problem.call1((obj, constr))?;
+            let is_dcp = prb.call_method1("is_dcp", ())?;
+            eprintln!("IS_DCP: {}\n", is_dcp.str()?);
+
+            prb.call_method1("solve", ())?;
+
+            let lv = get_value(l)?;
+            let lv = lv.as_slice().unwrap();
+
+            let rv = get_value(r)?;
+            let rv = rv.as_slice().unwrap();
+
+            let sv = get_value(s)?;
+            let sv = sv.as_slice().unwrap();
+            
+            let tv = get_value(t)?;
+            let tv = tv.as_slice().unwrap();
+
+            eprintln!("L: {:?}\n", lv);
+            eprintln!("R: {:?}\n", rv);
+            eprintln!("S: {:?}\n", sv);
+            eprintln!("T: {:?}\n", tv);
+
+            Ok((lv.to_vec(), rv.to_vec(), sv.to_vec(), tv.to_vec()))
+        });
+        eprintln!("PY: {:#?}", res);
+
+        std::process::exit(0);
 
         // turn the data into hranks.
         // std::process::exit(0);

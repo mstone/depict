@@ -11,8 +11,11 @@ druid = "0.7"
 indoc = "1.0"
 ndarray = "0.15"
 nom = "7"
+numpy = "0.15"
 petgraph = "0.6"
+pyo3 = "0.15.1"
 sorted-vec = "0.7"
+thiserror = "1.0"
 
 [lib]
 name = "diagrams"

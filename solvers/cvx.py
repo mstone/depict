@@ -28,3 +28,6 @@ prb = cp.Problem(cp.Minimize(obj), constr)
 assert prb.is_dcp()
 prb.solve()
 print(f"l: {l.value}\nr: {r.value}\ns: {s.value}\nt: {t.value}\nε: {eps.value}\n")
+f = [(v-l.value[i]) / (r.value[i] - l.value[i])  for (i,v) in enumerate(s.value)]
+g = [(v-l.value[i]) / (r.value[i] - l.value[i])  for (i,v) in enumerate(t.value)]
+print(f"f: {f}\ng: {g}\n")
