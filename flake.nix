@@ -27,6 +27,7 @@
             buildInputs = [
               rust-bin.stable.latest.rust
               texlive.combined.scheme-full
+              (python39.withPackages (ps: with ps; [cvxpy]))
             ] ++ (if isShell then [
               entr
               wasm-pack

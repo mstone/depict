@@ -530,7 +530,7 @@ pub fn render(v: Vec<Syn>) {
                 },
                 Loc::Hop(_, _) => {
                     println!(indoc!(r#"
-                    \draw [fill, black] ({}, {}) circle (0.5pt);
+                    % \draw [fill, black] ({}, {}) circle (0.5pt);
                     \node[](aux_{}_{}) at ({}, {}) {{}};"#), 
                     hpos, vpos, ovr, ohr, hpos, vpos);
                 },
@@ -579,12 +579,12 @@ pub fn render(v: Vec<Syn>) {
                         let (lvl, (mhr, nhr)) = hops.iter().next().unwrap();
                         let (ovr, ohr) = (lvl+1, nhr);
                         println!(indoc!(r#"
-                            \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
+                            \draw [rounded corners, -{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
                             vl, arr_src_frac, vl, ew, ovr, ohr, wl, arr_dst_frac, wl    
                         );
                     },
                     max_levels => {
-                        print!(indoc!(r#"\draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), vl, arr_src_frac, vl);
+                        print!(indoc!(r#"\draw [rounded corners, -{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), vl, arr_src_frac, vl);
                         let mid = max_levels / 2;
                         for (n, hop) in hops.iter().enumerate() {
                             if n < max_levels-1 {
@@ -595,9 +595,9 @@ pub fn render(v: Vec<Syn>) {
                                 // println!("% HOP {} {:?}", n, hop);
                                 if n == mid {
                                     // print!(indoc!(r#" -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at (aux_{}_{})"#), ew, ovr, ohr);
-                                    print!(r#" -- (aux_{}_{})"#, ovr, ohr);
+                                    print!(r#" -- (aux_{}_{}.center)"#, ovr, ohr);
                                 } else {
-                                    print!(r#" -- (aux_{}_{})"#, ovr, ohr);
+                                    print!(r#" -- (aux_{}_{}.center)"#, ovr, ohr);
                                 }
                             }
                         }
