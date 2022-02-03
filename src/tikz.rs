@@ -68,7 +68,7 @@ pub fn leq<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
     a.rich_compare(b, CompareOp::Le).unwrap()
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Debug)]
 enum Loc<V,E> {
     Node(V),
     Hop(usize, E, E),
@@ -569,8 +569,8 @@ pub fn render(v: Vec<Syn>) {
         let num_locs = all_locs.len();
 
         let mut sol_by_loc = HashMap::new();
-        for (ovr, ohr, shr, loc, n) in all_locs {
-            sol_by_loc.insert((ovr, ohr), (loc, n));
+        for (ovr, ohr, shr, loc, n) in all_locs.iter() {
+            sol_by_loc.insert((*ovr, *ohr), (loc, *n));
         }
 
         let all_nodes = node_to_loc
@@ -838,13 +838,13 @@ pub fn render(v: Vec<Syn>) {
             match node {
                 Loc::Node(vl) => {
                     println!(indoc!(r#"
-                        \node[minimum width = 2.5cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
+                        %\node[minimum width = 2.5cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
                         vl, hpos, vpos, h_name[*vl]);
                 },
                 Loc::Hop(_, _, _) => {
                     println!(indoc!(r#"
                         % \draw [fill, black] ({}, {}) circle (0.5pt);
-                        \node[](aux_{}_{}) at ({}, {}) {{}};"#), 
+                        %\node[](aux_{}_{}) at ({}, {}) {{}};"#), 
                         hpos, vpos, ovr, ohr, hpos, vpos);
                 },
             }
@@ -884,7 +884,7 @@ pub fn render(v: Vec<Syn>) {
                     0 => { unreachable!(); }
                     1 => {
                         println!(indoc!(r#"
-                            \draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+                            %\draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
                             vl, arr_src_frac, vl, ew, wl, arr_dst_frac, wl    
                         );
                     },
@@ -892,12 +892,12 @@ pub fn render(v: Vec<Syn>) {
                         let (lvl, (mhr, nhr)) = hops.iter().next().unwrap();
                         let (ovr, ohr) = (lvl+1, nhr);
                         println!(indoc!(r#"
-                            \draw [rounded corners, -{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
+                            %\draw [rounded corners, -{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
                             vl, arr_src_frac, vl, ew, ovr, ohr, wl, arr_dst_frac, wl    
                         );
                     },
                     max_levels => {
-                        print!(indoc!(r#"\draw [rounded corners, -{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), vl, arr_src_frac, vl);
+                        print!(indoc!(r#"%\draw [rounded corners, -{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), vl, arr_src_frac, vl);
                         let mid = max_levels / 2;
                         for (n, hop) in hops.iter().enumerate() {
                             if n < max_levels-1 {
@@ -919,6 +919,42 @@ pub fn render(v: Vec<Syn>) {
                 }
             }
         }
+
+        for (ovr, ohr, shr, loc, n) in all_locs.iter() {
+            let (_, n) = sol_by_loc[&(*ovr, *ohr)];
+
+            let lpos = ls[n];
+            let rpos = rs[n];
+
+            let vpos = -1.5 * (*ovr as f64) + 0.5;
+            let hpos = 10.0 * (lpos + rpos / 2.0);
+
+            let loc_color = match loc {
+                Loc::Node(_) => "red",
+                Loc::Hop(_, _, _) => "blue",
+            };
+            let loc_str = match loc {
+                Loc::Node(vl) => format!("{}", vl),
+                Loc::Hop(_, vl, wl) => format!("{}{}", vl.chars().nth(0).unwrap(), wl.chars().nth(0).unwrap()),
+            };
+
+            println!(indoc!(r#"\draw [{}] ({}, {}) circle (1pt);"#), loc_color, hpos, vpos);
+            println!(indoc!(r#"\node[scale=0.5, anchor=south west] at ({}, {}) {{{}}};"#), hpos, vpos, loc_str);
+        }
+
+        for ((lvl, mhr, vl, wl), n) in sol_by_hop.iter() {
+            let spos = ss[*n];
+
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+
+            let vpos = -1.5 * (*lvl as f64) - 0.5 + rng.gen_range(0.5..1.0);
+            let hpos = 10.0 * (spos);// + rng.gen_range(0.0..0.25);
+            
+            println!(indoc!(r#"\draw [fill, black] ({}, {}) circle (1pt);"#), hpos, vpos);
+            println!(indoc!(r#"\node[scale=0.5, anchor=south east] at ({}, {}) {{{}{}}};"#), hpos, vpos, vl.chars().nth(0).unwrap(), wl.chars().nth(0).unwrap());
+        }
+
 
         // let l = -3;
         // let r = 12;
