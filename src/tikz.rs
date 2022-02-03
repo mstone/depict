@@ -633,33 +633,35 @@ pub fn render(v: Vec<Syn>) {
             let mut cvec: Vec<&PyAny> = vec![];
             let mut obj = zero;
 
-            for (ovr, ohr) in all_nodes.iter() {
-                let ovr = **ovr; 
+            for (ovr, ohr, shr, loc, n) in all_locs.iter() {
+                let ovr = *ovr; 
                 let ohr = *ohr;
                 let locs = &solved_locs[&ovr];
                 let shr = locs[&ohr];
-                let (loc, n) = sol_by_loc[&(ovr, *ohr)];
-                if loc.is_node() { 
+                let (loc, n) = sol_by_loc[&(ovr, ohr)];
+                // if loc.is_node() { 
                     eprint!("C0: ");
                     cvec.push(geq(get(r,n), get(l,n)));
-                    if *ohr > 0 {
-                        let (locp, np) = sol_by_loc[&(ovr, *ohr-1)];
-                        let shrp = locs[&(*ohr-1)];
+                    if shr > 0 {
+                        let ohrp = locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap();
+                        let (locp, np) = sol_by_loc[&(ovr, ohrp)];
+                        let shrp = locs[&ohrp];
                         cvec.push(geq(get(l, n), get(r, np)));
-                        eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, *ohr-1, np, shrp));
+                        eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
                     }
-                    if *ohr < locs.len()-1 {
-                        let (locn, nn) = sol_by_loc[&(ovr,*ohr+1)];
-                        let shrn = locs[&(*ohr+1)];
+                    if shr < locs.len()-1 {
+                        let ohrn = locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap();
+                        let (locn, nn) = sol_by_loc[&(ovr,ohrn)];
+                        let shrn = locs[&(ohr+1)];
                         cvec.push(leq(get(r,n), get(l,nn)));
-                        eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, *ohr+1, shrn, nn));
+                        eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
                     }
-                    if *ohr == locs.len()-1 {
+                    if shr == locs.len()-1 {
                         cvec.push(leq(get(r,n), one));
                         eprint!("r{:?} <= 1", (ovr, ohr, shr, n));
                     }
                     eprintln!();  
-                }
+                // }
             }
             for (lvl, mhr, nhr, vl, wl, n) in all_hops.iter() {
                 let mut v_ers = vert.edges_directed(v_nodes[vl], Outgoing).into_iter().collect::<Vec<_>>();
