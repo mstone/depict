@@ -583,6 +583,17 @@ pub fn render(v: Vec<Syn>) {
             })
             .collect::<Vec<_>>();
 
+        let all_hops0 = hops_by_level
+            .iter()
+            .flat_map(|h| 
+                h.1.iter().map(|(mhr, nhr, vl, wl, lvl)| {
+                    (*mhr, *nhr, **vl, **wl, *lvl)
+                })
+            ).enumerate()
+            .map(|(n, (mhr, nhr, vl, wl, lvl))| {
+                (lvl, mhr, nhr, vl, wl, n)
+            })
+            .collect::<Vec<_>>();
         let all_hops = hops_by_level
             .iter()
             .flat_map(|h| 
@@ -621,6 +632,7 @@ pub fn render(v: Vec<Syn>) {
             let p = |a: PyObject| {a.clone().into_ref(py)};
             let square = |a: &PyAny| {sq.call1((a,)).unwrap()};
             let as_constant = |a: i32| { constant.call1((a.into_py(py),)).unwrap() };
+            let as_constantf = |a: f64| { constant.call1((a.into_py(py),)).unwrap() };
             let hundred: &PyAny = as_constant(100);
             let thousand: &PyAny = as_constant(1000);
             let ten: &PyAny = as_constant(10);
@@ -630,6 +642,7 @@ pub fn render(v: Vec<Syn>) {
             let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
             let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
             let eps = var.call((), Some([("pos", true)].into_py_dict(py)))?;
+            let sep = as_constantf(0.05);
             let mut cvec: Vec<&PyAny> = vec![];
             let mut obj = zero;
 
@@ -641,7 +654,8 @@ pub fn render(v: Vec<Syn>) {
                 let (loc, n) = sol_by_loc[&(ovr, ohr)];
                 // if loc.is_node() { 
                     eprint!("C0: ");
-                    cvec.push(geq(get(r,n), get(l,n)));
+                    eprint!("r{} >= l{} + S, ", n, n);
+                    cvec.push(geq(get(r,n), add(get(l,n), &sep)));
                     if shr > 0 {
                         let ohrp = locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap();
                         let (locp, np) = sol_by_loc[&(ovr, ohrp)];
@@ -663,7 +677,7 @@ pub fn render(v: Vec<Syn>) {
                     eprintln!();  
                 // }
             }
-            for (lvl, mhr, nhr, vl, wl, n) in all_hops.iter() {
+            for (lvl, mhr, nhr, vl, wl, n) in all_hops0.iter() {
                 let mut v_ers = vert.edges_directed(v_nodes[vl], Outgoing).into_iter().collect::<Vec<_>>();
                 let mut w_ers = vert.edges_directed(v_nodes[wl], Incoming).into_iter().collect::<Vec<_>>();
 
@@ -695,10 +709,8 @@ pub fn render(v: Vec<Syn>) {
                 let bundle_src_pos = v_outs.iter().position(|e| { *e == (vl, wl) }).unwrap();
                 let bundle_dst_pos = w_ins.iter().position(|e| { *e == (vl, wl) }).unwrap();
                 let hops = &hops_by_edge[&(*vl, *wl)];
-                eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
+                eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
                 
-                let (lvl, (mhr, nhr)) = hops.iter().next().unwrap();
-                // let (ovr, ohr) = (lvl+1, nhr);
                 let (_, ln) = sol_by_loc[&(*lvl, *mhr)];
                 let mut ln = ln;
                 let mut rn = ln;
@@ -752,7 +764,7 @@ pub fn render(v: Vec<Syn>) {
 
                 let last_hop = hops.iter().rev().next().unwrap();
                 let (llvl, (lmhr, lnhr)) = last_hop;
-                let (_, lnd) = sol_by_loc[&(*llvl, *lmhr)];
+                let (_, lnd) = sol_by_loc[&(*llvl+1, *lnhr)];
                 let lnd = lnd;
                 let rnd = lnd;
                 
@@ -920,14 +932,17 @@ pub fn render(v: Vec<Syn>) {
             }
         }
 
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
         for (ovr, ohr, shr, loc, n) in all_locs.iter() {
             let (_, n) = sol_by_loc[&(*ovr, *ohr)];
 
             let lpos = ls[n];
             let rpos = rs[n];
 
-            let vpos = -1.5 * (*ovr as f64) + 0.5;
-            let hpos = 10.0 * (lpos + rpos / 2.0);
+            let vpos = -1.5 * (*ovr as f64) + 0.5 - rng.gen_range(0.25..0.75);
+            let hpos = 10.0 * ((lpos + rpos) / 2.0);
             let hposl = 10.0 * lpos;
             let hposr = 10.0 * rpos;
 
@@ -941,16 +956,14 @@ pub fn render(v: Vec<Syn>) {
             };
 
             println!(indoc!(r#"\draw [{}] ({}, {}) circle (1pt);"#), loc_color, hpos, vpos);
-            println!(indoc!(r#"\draw [fill,yellow] ({}, {}) circle (0.5pt);"#), loc_color, hposl, vpos);
-            println!(indoc!(r#"\draw [fill,green] ({}, {}) circle (0.5pt);"#), loc_color, hposr, vpos);
+            println!(indoc!(r#"\draw [fill,violet] ({}, {}) circle (0.5pt);"#) , hposl, vpos);
+            println!(indoc!(r#"\draw [fill,orange] ({}, {}) circle (0.5pt);"#), hposr, vpos);
+            println!(indoc!(r#"\draw [--] ({},{}) -- ({}, {});"#), hposl, vpos, hposr, vpos);
             println!(indoc!(r#"\node[scale=0.5, anchor=south west] at ({}, {}) {{{}}};"#), hpos, vpos, loc_str);
         }
 
         for ((lvl, mhr, vl, wl), n) in sol_by_hop.iter() {
             let spos = ss[*n];
-
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
 
             let vpos = -1.5 * (*lvl as f64) - 0.5 + rng.gen_range(0.5..1.0);
             let hpos = 10.0 * (spos);// + rng.gen_range(0.0..0.25);
