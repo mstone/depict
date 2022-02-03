@@ -928,6 +928,8 @@ pub fn render(v: Vec<Syn>) {
 
             let vpos = -1.5 * (*ovr as f64) + 0.5;
             let hpos = 10.0 * (lpos + rpos / 2.0);
+            let hposl = 10.0 * lpos;
+            let hposr = 10.0 * rpos;
 
             let loc_color = match loc {
                 Loc::Node(_) => "red",
@@ -939,6 +941,8 @@ pub fn render(v: Vec<Syn>) {
             };
 
             println!(indoc!(r#"\draw [{}] ({}, {}) circle (1pt);"#), loc_color, hpos, vpos);
+            println!(indoc!(r#"\draw [fill,yellow] ({}, {}) circle (0.5pt);"#), loc_color, hposl, vpos);
+            println!(indoc!(r#"\draw [fill,green] ({}, {}) circle (0.5pt);"#), loc_color, hposr, vpos);
             println!(indoc!(r#"\node[scale=0.5, anchor=south west] at ({}, {}) {{{}}};"#), hpos, vpos, loc_str);
         }
 
