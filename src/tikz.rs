@@ -560,8 +560,8 @@ pub fn render(v: Vec<Syn>) {
         let num_locs = all_locs.len();
 
         let mut sol_by_loc = HashMap::new();
-        for (ovr, ohr, _shr, loc, n) in all_locs.iter() {
-            sol_by_loc.insert((*ovr, *ohr), (loc, *n));
+        for (ovr, ohr, _shr, _loc, n) in all_locs.iter() {
+            sol_by_loc.insert((*ovr, *ohr), *n);
         }
 
         let all_hops0 = hops_by_level
@@ -629,21 +629,21 @@ pub fn render(v: Vec<Syn>) {
                 let ohr = *ohr;
                 let locs = &solved_locs[&ovr];
                 let shr = locs[&ohr];
-                let (_loc, n) = sol_by_loc[&(ovr, ohr)];
+                let n = sol_by_loc[&(ovr, ohr)];
                 // if loc.is_node() { 
                     eprint!("C0: ");
                     eprint!("r{} >= l{} + S, ", n, n);
                     cvec.push(geq(get(r,n), add(get(l,n), &sep)));
                     if shr > 0 {
                         let ohrp = locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap();
-                        let (_locp, np) = sol_by_loc[&(ovr, ohrp)];
+                        let np = sol_by_loc[&(ovr, ohrp)];
                         let shrp = locs[&ohrp];
                         cvec.push(geq(get(l, n), get(r, np)));
                         eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
                     }
                     if shr < locs.len()-1 {
                         let ohrn = locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap();
-                        let (_locn, nn) = sol_by_loc[&(ovr,ohrn)];
+                        let nn = sol_by_loc[&(ovr,ohrn)];
                         let shrn = locs[&(ohr+1)];
                         cvec.push(leq(get(r,n), get(l,nn)));
                         eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
@@ -689,8 +689,7 @@ pub fn render(v: Vec<Syn>) {
                 let hops = &hops_by_edge[&(*vl, *wl)];
                 eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
                 
-                let (_, ln) = sol_by_loc[&(*lvl, *mhr)];
-                let ln = ln;
+                let ln = sol_by_loc[&(*lvl, *mhr)];
                 let rn = ln;
                 let n = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
                 let nd = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
@@ -744,8 +743,7 @@ pub fn render(v: Vec<Syn>) {
 
                 let last_hop = hops.iter().rev().next().unwrap();
                 let (llvl, (_lmhr, lnhr)) = last_hop;
-                let (_, lnd) = sol_by_loc[&(*llvl+1, *lnhr)];
-                let lnd = lnd;
+                let lnd = sol_by_loc[&(*llvl+1, *lnhr)];
                 let rnd = lnd;
                 
                 // ORDER, SYMMETRY
@@ -824,7 +822,7 @@ pub fn render(v: Vec<Syn>) {
 
         for (loc, node) in loc_to_node.iter() {   
             let (ovr, ohr) = loc;
-            let (_, n) = sol_by_loc[&(*ovr, *ohr)];
+            let n = sol_by_loc[&(*ovr, *ohr)];
 
             let lpos = ls[n];
             let rpos = rs[n];
@@ -862,8 +860,8 @@ pub fn render(v: Vec<Syn>) {
                 let sposv = ss[snv];
                 let sposw = ss[snw];
 
-                let (_, nnv) = sol_by_loc[&(ovr, ohr)];
-                let (_, nnw) = sol_by_loc[&(ovrd, ohrd)];
+                let nnv = sol_by_loc[&(ovr, ohr)];
+                let nnw = sol_by_loc[&(ovrd, ohrd)];
 
                 let lposv = ls[nnv];
                 let lposw = ls[nnw];
@@ -956,7 +954,7 @@ pub fn render(v: Vec<Syn>) {
         let mut rng = rand::thread_rng();
 
         for (ovr, ohr, _shr, loc, _n) in all_locs.iter() {
-            let (_, n) = sol_by_loc[&(*ovr, *ohr)];
+            let n = sol_by_loc[&(*ovr, *ohr)];
 
             let lpos = ls[n];
             let rpos = rs[n];
