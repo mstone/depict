@@ -37,12 +37,6 @@ pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V)
     return *ix;
 }
 
-// pub fn find_roots<'a, 'g>(g: &'g mut Graph<&'a str, &'a str>) -> Vec<NodeIndex<DefaultIx>> {
-//     let nf = NodeFiltered::from_fn(g, |ix| {
-//         g.edges_directed(ix, Incoming).next().is_none()
-//     });
-// }
-
 pub fn mul<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
     a.call_method1("__mul__", (b,)).unwrap()
 }
@@ -73,14 +67,6 @@ pub enum Loc<V,E> {
     Hop(usize, E, E),
 }
 
-// #[derive(Error, Debug)]
-// pub enum GetValueError {
-//     #[error("python error")]
-//     PyErr(#[from] PyErr),
-//     #[error("numpy error")]
-//     NotContiguousError(#[from] NotContiguousError)
-// }
-
 pub fn get_value<'py>(a: &'py PyAny) -> PyResult<PyReadonlyArray1<'py, f64>> {
     Ok(a
         .getattr("value")?
@@ -107,22 +93,6 @@ pub fn render(v: Vec<Syn>) {
             \usetikzlibrary{graphs,graphdrawing,quotes,arrows.meta,calc,backgrounds,decorations.markings}
             \usegdlibrary{layered}
             \begin{document}
-
-            \tikzset{process/.style = { 
-                minimum width = 2cm,
-                draw
-            }}
-            
-            \def\la{0.2} % centered on 0.25, lhs 0.2 evenly divides 5, 10% of 5
-            \def\lb{0.7} % centered on 0.75, rhs 0.8 evenly divides 5
-            \def\lc{0.4} % centered on 0.5
-            \def\ld{0.4}
-            \def\le{0.7}
-            \def\ra{0.3}
-            \def\rb{0.8}
-            \def\rc{0.6} % centered on 0.5, 20% of 2.5
-            \def\rd{0.6}
-            \def\re{0.8}
             
             \tikz[align=left, decoration={markings, mark=at position 0.5 with {\fill[red] (0, 0) circle (1pt);}}] {"#));
         // println!("{}", "graph [splines=ortho, nodesep=1];");
@@ -190,7 +160,6 @@ pub fn render(v: Vec<Syn>) {
                             },
                             "parallel" => {
                                 let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
-                                // let _h_ix = or_insert(&mut horz, &h_nodes, item_ident);
                             
                                 if let Some(actuator) = resolved_actuates {
                                     let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
@@ -442,7 +411,7 @@ pub fn render(v: Vec<Syn>) {
             if *k < max_level {
                 for (u1, v1, ..) in hops.iter() {
                     for (u2, v2, ..)  in hops.iter() {
-                        // if (u1,v1) != (u2,v2) {
+                        // if (u1,v1) != (u2,v2) { // BUG!
                         if u1 != u2 && v1 != v2 {
                             csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u2},{u1}],x{j}[{v1},{v2}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=k+1));
                             csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u1},{u2}],x{j}[{v2},{v1}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=k+1));
@@ -814,10 +783,6 @@ pub fn render(v: Vec<Syn>) {
 
         // std::process::exit(0);
 
-        // turn the data into hranks.
-        // std::process::exit(0);
-
-
         let width_scale = 0.9;
 
         for (loc, node) in loc_to_node.iter() {   
@@ -941,8 +906,6 @@ pub fn render(v: Vec<Syn>) {
                             }
                         }
                         println!(indoc!(r#" -- ($({}.north west)!{}!({}.north east)$);"#), wl, arr_dst_frac, wl);
-                        // println!(indoc!(r#"\path let \p1 = (aux_{}_{}.center) in node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] at (\x1,\y1) {{{}}};"#), 
-                        // mid_ovr, mid_ohr, anchor, ew);
                         println!(indoc!(r#"\node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] (mid_{}_{}_{}) at ($(aux_{}_{})!0.5!(aux_{}_{})$) {{{}}};"#), 
                             anchor, vl, wl, ew, mid_ovr, mid_ohr, mid_ovrd, mid_ohrd, ew);
                     },
@@ -1018,19 +981,6 @@ pub fn render(v: Vec<Syn>) {
     // use top-level "draw" fact to identify inline or top-level drawings to draw
     // resolve top-level drawings + use inline drawings to identify objects to draw to make particular drawings
     // use object facts to figure out directions + labels?
-    // print out dot repr?
-    //   header
-    //   render nodes
-    //   render edges
-    //   footer
-    // let mut compact: &Vec<Ident> = &ds.find(|d| d == Ident("compact")).unwrap().1;
-    // println!("COMPACT\n{:#?}", compact)
-
-    // for id in compact {
-    //     match resolve(&v, id) {
-
-    //     }
-    // }
 }
 
 pub fn main() -> io::Result<()> {
