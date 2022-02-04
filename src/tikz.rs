@@ -88,15 +88,6 @@ pub fn render(v: Vec<Syn>) {
 
         // println!("resolution: {:?}\n", res);
 
-        println!("{}", indoc!(r#"
-            \documentclass[tikz,border=5mm]{standalone}
-            \usetikzlibrary{graphs,graphdrawing,quotes,arrows.meta,calc,backgrounds,decorations.markings}
-            \usegdlibrary{layered}
-            \begin{document}
-            
-            \tikz[align=left, decoration={markings, mark=at position 0.5 with {\fill[red] (0, 0) circle (1pt);}}] {"#));
-        // println!("{}", "graph [splines=ortho, nodesep=1];");
-
         let action_query = Ident("action");
         let percept_query = Ident("percept");
         // let host_query = Ident("host");
@@ -784,6 +775,14 @@ pub fn render(v: Vec<Syn>) {
         // std::process::exit(0);
 
         let width_scale = 0.9;
+        
+        println!("{}", indoc!(r#"
+        \documentclass[tikz,border=5mm]{standalone}
+        \usetikzlibrary{graphs,graphdrawing,quotes,arrows.meta,calc,backgrounds,decorations.markings}
+        \usegdlibrary{layered}
+        \begin{document}
+        
+        \tikz[align=left, decoration={markings, mark=at position 0.5 with {\fill[red] (0, 0) circle (1pt);}}] {"#));
 
         for (loc, node) in loc_to_node.iter() {   
             let (ovr, ohr) = loc;
