@@ -719,6 +719,7 @@ pub fn render(v: Vec<Syn>) {
                 let mut n = n;
                 let mut nd = nd;
 
+                // ORDER, SYMMETRY
                 if bundle_src_pos == 0 {
                     eprint!("C1: ");
                     cvec.push(geq(get(s, n), add(get(l, ln), &eps)));
@@ -751,14 +752,15 @@ pub fn render(v: Vec<Syn>) {
                     obj = add(obj, square(sub(get(s, n), get(r, rn))));
                 }
 
+                // AGREEMENT
                 for (i, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                    if i < hops.len()-1 {
+                    if i < hops.len() {
                         // s, t are really indexed by hops.
                         let n2 = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
                         let nd2 = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
                         n = n2;
                         nd = nd2;
-                        obj = add(obj, mul(hundred, square(sub(get(s,n), get(s,nd)))));
+                        obj = add(obj, mul(thousand, square(sub(get(s,n), get(s,nd)))));
                     }
                 }
 
@@ -768,6 +770,7 @@ pub fn render(v: Vec<Syn>) {
                 let lnd = lnd;
                 let rnd = lnd;
                 
+                // ORDER, SYMMETRY
                 if bundle_dst_pos == 0 {
                     eprint!("C5: ");
                     cvec.push(geq(get(s, nd), add(get(l, lnd), &eps)));
@@ -801,7 +804,8 @@ pub fn render(v: Vec<Syn>) {
                 }
             }
 
-            obj = sub(obj, mul(thousand, eps));
+            // SPACE
+            obj = sub(obj, mul(hundred, eps));
             obj = minimize.call1((obj,))?;
             
             let constr = PyList::new(py, cvec);
@@ -837,6 +841,9 @@ pub fn render(v: Vec<Syn>) {
         // turn the data into hranks.
         // std::process::exit(0);
 
+
+        let width_scale = 0.9;
+
         for (loc, node) in loc_to_node.iter() {   
             let (ovr, ohr) = loc;
             let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
@@ -846,17 +853,22 @@ pub fn render(v: Vec<Syn>) {
             let rpos = rs[n];
 
             let vpos = -1.5 * (*ovr as f64);
-            let hpos = 10.0 * (lpos + rpos / 2.0);
+            let hpos = 10.0 * ((lpos + rpos) / 2.0);
+            let width = 10.0 * width_scale * (rpos - lpos);
+
             match node {
                 Loc::Node(vl) => {
                     println!(indoc!(r#"
-                        %\node[minimum width = 2.5cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
-                        vl, hpos, vpos, h_name[*vl]);
+                        \node[minimum width = {}cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
+                        width, vl, hpos, vpos, h_name[*vl]);
                 },
-                Loc::Hop(_, _, _) => {
+                Loc::Hop(_, vl, wl) => {
+                    let hn = sol_by_hop[&(*ovr, *ohr, **vl, **wl)];
+                    let spos = ss[hn];
+                    let hpos = 10.0 * spos;
                     println!(indoc!(r#"
-                        % \draw [fill, black] ({}, {}) circle (0.5pt);
-                        %\node[](aux_{}_{}) at ({}, {}) {{}};"#), 
+                        \draw [fill, black] ({}, {}) circle (0.5pt);
+                        \node[](aux_{}_{}) at ({}, {}) {{}};"#), 
                         hpos, vpos, ovr, ohr, hpos, vpos);
                 },
             }
@@ -864,69 +876,100 @@ pub fn render(v: Vec<Syn>) {
 
         for cer in condensed.edge_references() {
             for (vl, wl, ew) in cer.weight().iter() {
-                let mut v_ers = vert.edges_directed(v_nodes[vl], Outgoing).into_iter().collect::<Vec<_>>();
-                let mut w_ers = vert.edges_directed(v_nodes[wl], Incoming).into_iter().collect::<Vec<_>>();
-                v_ers.sort_by_key(|er| {
-                    let dst = vert.node_weight(er.target()).unwrap();
-                    let (ovr, ohr) = node_to_loc[&Loc::Node(dst)];
-                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                    (shr, -(svr as i32))
-                });
-                let v_outs = v_ers
-                    .iter()
-                    .map(|er| { (vl, vert.node_weight(er.target()).unwrap(), er.weight()) })
-                    .collect::<Vec<_>>();
-                w_ers.sort_by_key(|er| {
-                    let src = vert.node_weight(er.source()).unwrap();
-                    let (ovr, ohr) = node_to_loc[&Loc::Node(src)];
-                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                    (shr, -(svr as i32))
-                });
-                let w_ins = w_ers
-                    .iter()
-                    .map(|er| { (vert.node_weight(er.source()).unwrap(), wl, er.weight()) })
-                    .collect::<Vec<_>>();
-                let arr_src_pos = v_outs.iter().position(|e| { *e == (vl, wl, ew) }).unwrap();
-                let arr_dst_pos = w_ins.iter().position(|e| { *e == (vl, wl, ew) }).unwrap();
-                let arr_src_frac = (arr_src_pos as f64 + 1.0) / (v_outs.len() as f64 + 1.0);
-                let arr_dst_frac = (arr_dst_pos as f64 + 1.0) / (w_ins.len() as f64 + 1.0);
+                let (ovr, ohr) = node_to_loc[&Loc::Node(vl)];
+                let (ovrd, ohrd) = node_to_loc[&Loc::Node(wl)];
+
+                let snv = sol_by_hop[&(ovr, ohr, *vl, *wl)];
+                let snw = sol_by_hop[&(ovrd, ohrd, *vl, *wl)];
+
+                let sposv = ss[snv];
+                let sposw = ss[snw];
+
+                let (_, nnv) = sol_by_loc[&(ovr, ohr)];
+                let (_, nnw) = sol_by_loc[&(ovrd, ohrd)];
+
+                let lposv = ls[nnv];
+                let lposw = ls[nnw];
+
+                let rposv = rs[nnv];
+                let rposw = rs[nnw];
+
+                let src_width = (rposv - lposv);
+                let dst_width = (rposw - lposw);
+
+                let bundle_src_frac = ((((sposv - lposv) / src_width) - 0.5) / width_scale) + 0.5;
+                let bundle_dst_frac = ((((sposw - lposw) / dst_width) - 0.5) / width_scale) + 0.5;
+
+                let arr_src_frac = match *ew {
+                    "actuates" => (bundle_src_frac) - (0.025 / src_width),
+                    "senses" => (bundle_src_frac) + (0.025 / src_width),
+                    _ => (bundle_src_frac),
+                };
+                let arr_dst_frac = match *ew {
+                    "actuates" => bundle_dst_frac - (0.025 / dst_width),
+                    "senses" => bundle_dst_frac + (0.025 / dst_width),
+                    _ => bundle_dst_frac,
+                };;
+
                 let hops = &hops_by_edge[&(*vl, *wl)];
                 eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
+
+                let dir = match *ew {
+                    "actuates" | "rides" => "-{Stealth[]}",
+                    "senses" => "{Stealth[]}-",
+                    _ => "--",
+                };
+
+                let anchor = match *ew {
+                    "actuates" => "north east",
+                    "senses" => "south west",
+                    _ => "south east",
+                };
+
                 match hops.len() {
                     0 => { unreachable!(); }
                     1 => {
                         println!(indoc!(r#"
-                            %\draw [-{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                            vl, arr_src_frac, vl, ew, wl, arr_dst_frac, wl    
+                            \draw [{}, postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+                            dir, vl, arr_src_frac, vl, anchor, ew, wl, arr_dst_frac, wl    
                         );
                     },
                     2 => {
                         let (lvl, (mhr, nhr)) = hops.iter().next().unwrap();
                         let (ovr, ohr) = (lvl+1, nhr);
                         println!(indoc!(r#"
-                            %\draw [rounded corners, -{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
-                            vl, arr_src_frac, vl, ew, ovr, ohr, wl, arr_dst_frac, wl    
+                            \draw [rounded corners, {},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
+                            dir, vl, arr_src_frac, vl, anchor, ew, ovr, ohr, wl, arr_dst_frac, wl    
                         );
                     },
                     max_levels => {
-                        print!(indoc!(r#"%\draw [rounded corners, -{{Stealth[]}},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), vl, arr_src_frac, vl);
+                        print!(indoc!(r#"\draw [rounded corners, {}, postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), 
+                            dir, vl, arr_src_frac, vl);
                         let mid = max_levels / 2;
+                        let mut mid_ovr = 0;
+                        let mut mid_ohr = 0;
+                        let mut mid_ovrd = 0;
+                        let mut mid_ohrd = 0;
                         for (n, hop) in hops.iter().enumerate() {
                             if n < max_levels-1 {
                                 let (lvl, (mhr, nhr)) = hop;
                                 let (ovr, ohr) = (lvl+1, nhr);
                                 // let (ovr, ohr) = (lvl, mhr);
-
-                                // println!("% HOP {} {:?}", n, hop);
+                                println!("% HOP {} {:?}", n, hop);
+                                print!(r#" -- (aux_{}_{}.center)"#, ovr, ohr);
                                 if n == mid {
-                                    // print!(indoc!(r#" -- node[scale=0.8, anchor=north east, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at (aux_{}_{})"#), ew, ovr, ohr);
-                                    print!(r#" -- (aux_{}_{}.center)"#, ovr, ohr);
-                                } else {
-                                    print!(r#" -- (aux_{}_{}.center)"#, ovr, ohr);
+                                    mid_ovr = *lvl;
+                                    mid_ohr = *mhr;
+                                    mid_ovrd = lvl+1;
+                                    mid_ohrd = *nhr;
                                 }
                             }
                         }
                         println!(indoc!(r#" -- ($({}.north west)!{}!({}.north east)$);"#), wl, arr_dst_frac, wl);
+                        // println!(indoc!(r#"\path let \p1 = (aux_{}_{}.center) in node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] at (\x1,\y1) {{{}}};"#), 
+                        // mid_ovr, mid_ohr, anchor, ew);
+                        println!(indoc!(r#"\node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] (mid_{}_{}_{}) at ($(aux_{}_{})!0.5!(aux_{}_{})$) {{{}}};"#), 
+                            anchor, vl, wl, ew, mid_ovr, mid_ohr, mid_ovrd, mid_ohrd, ew);
                     },
                 }
             }
@@ -955,21 +998,22 @@ pub fn render(v: Vec<Syn>) {
                 Loc::Hop(_, vl, wl) => format!("{}{}", vl.chars().nth(0).unwrap(), wl.chars().nth(0).unwrap()),
             };
 
-            println!(indoc!(r#"\draw [{}] ({}, {}) circle (1pt);"#), loc_color, hpos, vpos);
-            println!(indoc!(r#"\draw [fill,violet] ({}, {}) circle (0.5pt);"#) , hposl, vpos);
-            println!(indoc!(r#"\draw [fill,orange] ({}, {}) circle (0.5pt);"#), hposr, vpos);
-            println!(indoc!(r#"\draw [--] ({},{}) -- ({}, {});"#), hposl, vpos, hposr, vpos);
-            println!(indoc!(r#"\node[scale=0.5, anchor=south west] at ({}, {}) {{{}}};"#), hpos, vpos, loc_str);
+            println!(indoc!(r#"%\draw [{}] ({}, {}) circle (1pt);"#), loc_color, hpos, vpos);
+            println!(indoc!(r#"%\draw [fill,violet] ({}, {}) circle (0.5pt);"#) , hposl, vpos);
+            println!(indoc!(r#"%\draw [fill,orange] ({}, {}) circle (0.5pt);"#), hposr, vpos);
+            println!(indoc!(r#"%\draw [--] ({},{}) -- ({}, {});"#), hposl, vpos, hposr, vpos);
+            println!(indoc!(r#"%\node[scale=0.5, anchor=south west] at ({}, {}) {{{}}};"#), hpos, vpos, loc_str);
         }
 
         for ((lvl, mhr, vl, wl), n) in sol_by_hop.iter() {
             let spos = ss[*n];
 
-            let vpos = -1.5 * (*lvl as f64) - 0.5 + rng.gen_range(0.5..1.0);
+            // let vpos = -1.5 * (*lvl as f64) - 0.5 + rng.gen_range(0.5..1.0);
+            let vpos = -1.5 * (*lvl as f64);
             let hpos = 10.0 * (spos);// + rng.gen_range(0.0..0.25);
             
-            println!(indoc!(r#"\draw [fill, black] ({}, {}) circle (1pt);"#), hpos, vpos);
-            println!(indoc!(r#"\node[scale=0.5, anchor=south east] at ({}, {}) {{{}{}}};"#), hpos, vpos, vl.chars().nth(0).unwrap(), wl.chars().nth(0).unwrap());
+            println!(indoc!(r#"%\draw [fill, black] ({}, {}) circle (1pt);"#), hpos, vpos);
+            println!(indoc!(r#"%\node[scale=0.5, anchor=south east] at ({}, {}) {{{}{}}};"#), hpos, vpos, vl.chars().nth(0).unwrap(), wl.chars().nth(0).unwrap());
         }
 
 
