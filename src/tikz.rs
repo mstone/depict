@@ -1,6 +1,5 @@
 use diagrams::parser::{Ident, parse};
 use diagrams::render::{Fact, Syn, filter_fact, resolve, unwrap_atom, find_parent, to_ident, as_string};
-use is_variant::IsVariant;
 use petgraph::EdgeDirection::{Incoming, Outgoing};
 use petgraph::algo::bellman_ford;
 use pyo3::types::{PyModule, IntoPyDict, PyList};
@@ -16,7 +15,7 @@ use ndarray::{Array2};
 use nom::error::convert_error;
 use numpy::{PyArray1, PyReadonlyArray1};
 use indoc::indoc;
-use petgraph::graph::{Graph, NodeIndex, EdgeIndex};
+use petgraph::graph::{Graph, NodeIndex};
 use petgraph::dot::{Dot};
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
 use pyo3::{prelude::*, prepare_freethreaded_python};
@@ -68,8 +67,8 @@ pub fn leq<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
     a.rich_compare(b, CompareOp::Le).unwrap()
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Debug)]
-enum Loc<V,E> {
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum Loc<V,E> {
     Node(V),
     Hop(usize, E, E),
 }
@@ -87,12 +86,6 @@ pub fn get_value<'py>(a: &'py PyAny) -> PyResult<PyReadonlyArray1<'py, f64>> {
         .getattr("value")?
         .extract::<&PyArray1<f64>>()?
         .readonly())
-}
-
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub enum NodeHRank {
-    Real(NodeIndex),
-    Fake(EdgeIndex),
 }
 
 pub fn render(v: Vec<Syn>) {
@@ -140,10 +133,8 @@ pub fn render(v: Vec<Syn>) {
         let name_query = Ident("name");
 
         let mut vert = Graph::<&str, &str>::new();
-        let mut horz = Graph::<&str, &str>::new();
 
         let mut v_nodes = HashMap::<&str, NodeIndex>::new();
-        let mut h_nodes = HashMap::<&str, NodeIndex>::new();
 
         let mut h_name = HashMap::new();
         let mut h_styl = HashMap::new();
@@ -195,7 +186,7 @@ pub fn render(v: Vec<Syn>) {
                                 }
                             },
                             "embed" => {
-                                let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                                let _v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
                             },
                             "parallel" => {
                                 let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
@@ -272,7 +263,7 @@ pub fn render(v: Vec<Syn>) {
         //     )
         // );
         let root_vx = condensed_vxmap[roots[0]];
-        let paths = bellman_ford(&condensed.map(|vx, vl| vl, |ex, el| -1.0), root_vx).unwrap();
+        let paths = bellman_ford(&condensed.map(|_vx, vl| vl, |_ex, _el| -1.0), root_vx).unwrap();
 
         // let mut paths_from_roots = SortedVec::from_unsorted(
         //     paths
@@ -287,7 +278,7 @@ pub fn render(v: Vec<Syn>) {
         //         }
         //     })
         //     .collect::<Vec<_>>());
-        let mut paths_from_roots = SortedVec::from_unsorted(
+        let paths_from_roots = SortedVec::from_unsorted(
             paths
                 .distances
                 .iter()
@@ -325,7 +316,7 @@ pub fn render(v: Vec<Syn>) {
         let mut locs_by_level = BTreeMap::new();
         for (rank, paths) in paths_by_rank.iter() {
             let l = *rank;
-            for (a, (cvl, cwl)) in paths.iter().enumerate() {
+            for (a, (_cvl, cwl)) in paths.iter().enumerate() {
                 locs_by_level.entry(l).or_insert(vec![]).push(a);
                 loc_to_node.insert((l, a), Loc::Node(cwl));
                 node_to_loc.insert(Loc::Node(cwl), (l, a));
@@ -389,7 +380,7 @@ pub fn render(v: Vec<Syn>) {
 
         let mut g_hops = Graph::<(usize, usize), (usize, &str, &str)>::new();
         let mut g_hops_vx = HashMap::new();
-        for (rank, hops) in hops_by_level.iter() {
+        for (_rank, hops) in hops_by_level.iter() {
             for (mhr, nhr, vl, wl, lvl) in hops.iter() {
                 let gvx = or_insert(&mut g_hops, &mut g_hops_vx, (*lvl, *mhr));
                 let gwx = or_insert(&mut g_hops, &mut g_hops_vx, (lvl+1, *nhr));
@@ -496,7 +487,7 @@ pub fn render(v: Vec<Syn>) {
             .stdout(Stdio::piped());
         let mut child = minion.spawn()
             .expect("failed to execute minion");
-        let mut stdin = child.stdin.as_mut().unwrap();
+        let stdin = child.stdin.as_mut().unwrap();
         stdin.write_all(csp.as_bytes()).expect("failed to write csp");
         drop(stdin);
 
@@ -528,7 +519,7 @@ pub fn render(v: Vec<Syn>) {
         let mut perm = Vec::<Array2<i32>>::new();
         for (rank, locs) in locs_by_level.iter() {
             let mut arr = Array2::<i32>::zeros((locs.len(), locs.len()));
-            let mut parsed_solns = solns[*rank]
+            let parsed_solns = solns[*rank]
                 .split(" ")
                 .filter_map(|s| {
                     s
@@ -550,9 +541,9 @@ pub fn render(v: Vec<Syn>) {
         let mut solved_locs = BTreeMap::new();
         for (n, p) in perm.iter().enumerate() {
             let mut sums = p.rows().into_iter().enumerate().map(|(i, r)| (i, r.sum() as usize)).collect::<Vec<_>>();
-            sums.sort_by_key(|(i,s)| *s);
+            sums.sort_by_key(|(_i,s)| *s);
             eprintln!("row sums: {:?}", sums);
-            for (nhr, (i,s)) in sums.into_iter().enumerate() {
+            for (nhr, (i,_s)) in sums.into_iter().enumerate() {
                 solved_locs.entry(n).or_insert(BTreeMap::new()).insert(i, nhr);
             }
         }
@@ -569,19 +560,9 @@ pub fn render(v: Vec<Syn>) {
         let num_locs = all_locs.len();
 
         let mut sol_by_loc = HashMap::new();
-        for (ovr, ohr, shr, loc, n) in all_locs.iter() {
+        for (ovr, ohr, _shr, loc, n) in all_locs.iter() {
             sol_by_loc.insert((*ovr, *ohr), (loc, *n));
         }
-
-        let all_nodes = node_to_loc
-            .iter()
-            .filter_map(|(loc, (ovr, ohr))| {
-                match loc {
-                    Loc::Node(_) => Some((ovr, ohr)),
-                    _ => None,
-                }
-            })
-            .collect::<Vec<_>>();
 
         let all_hops0 = hops_by_level
             .iter()
@@ -603,7 +584,7 @@ pub fn render(v: Vec<Syn>) {
             )
             .chain(
                 hops_by_edge.iter().map(|((vl, wl), hops)| {
-                        let (lvl, (mhr, nhr)) = hops.iter().rev().next().unwrap();
+                        let (lvl, (_mhr, nhr)) = hops.iter().rev().next().unwrap();
                         (*nhr, std::usize::MAX, *vl, *wl, lvl+1)
                 }) 
             )
@@ -614,7 +595,7 @@ pub fn render(v: Vec<Syn>) {
             .collect::<Vec<_>>();
         
         let mut sol_by_hop = HashMap::new();
-        for (lvl, mhr, nhr, vl, wl, n) in all_hops.iter() {
+        for (lvl, mhr, _nhr, vl, wl, n) in all_hops.iter() {
             sol_by_hop.insert((*lvl, *mhr, *vl, *wl), *n);
         }
         let num_hops = all_hops.len();
@@ -622,20 +603,17 @@ pub fn render(v: Vec<Syn>) {
         prepare_freethreaded_python();
         let res: PyResult<(Vec<_>, Vec<_>, Vec<_>)> = Python::with_gil(|py| {
             let cp = PyModule::import(py, "cvxpy")?;
-            let builtins = PyModule::import(py, "builtins")?;
             let var = cp.getattr("Variable")?;
             let sq = cp.getattr("square")?;
             let constant = cp.getattr("Constant")?;
             let problem = cp.getattr("Problem")?;
             let minimize = cp.getattr("Minimize")?;
-            let o = |a: &PyAny| {a.to_object(py)};
-            let p = |a: PyObject| {a.clone().into_ref(py)};
             let square = |a: &PyAny| {sq.call1((a,)).unwrap()};
             let as_constant = |a: i32| { constant.call1((a.into_py(py),)).unwrap() };
             let as_constantf = |a: f64| { constant.call1((a.into_py(py),)).unwrap() };
             let hundred: &PyAny = as_constant(100);
             let thousand: &PyAny = as_constant(1000);
-            let ten: &PyAny = as_constant(10);
+            let _ten: &PyAny = as_constant(10);
             let one: &PyAny = as_constant(1);
             let zero: &PyAny = as_constant(0);
             let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
@@ -646,26 +624,26 @@ pub fn render(v: Vec<Syn>) {
             let mut cvec: Vec<&PyAny> = vec![];
             let mut obj = zero;
 
-            for (ovr, ohr, shr, loc, n) in all_locs.iter() {
+            for (ovr, ohr, _shr, _loc, _n) in all_locs.iter() {
                 let ovr = *ovr; 
                 let ohr = *ohr;
                 let locs = &solved_locs[&ovr];
                 let shr = locs[&ohr];
-                let (loc, n) = sol_by_loc[&(ovr, ohr)];
+                let (_loc, n) = sol_by_loc[&(ovr, ohr)];
                 // if loc.is_node() { 
                     eprint!("C0: ");
                     eprint!("r{} >= l{} + S, ", n, n);
                     cvec.push(geq(get(r,n), add(get(l,n), &sep)));
                     if shr > 0 {
                         let ohrp = locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap();
-                        let (locp, np) = sol_by_loc[&(ovr, ohrp)];
+                        let (_locp, np) = sol_by_loc[&(ovr, ohrp)];
                         let shrp = locs[&ohrp];
                         cvec.push(geq(get(l, n), get(r, np)));
                         eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
                     }
                     if shr < locs.len()-1 {
                         let ohrn = locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap();
-                        let (locn, nn) = sol_by_loc[&(ovr,ohrn)];
+                        let (_locn, nn) = sol_by_loc[&(ovr,ohrn)];
                         let shrn = locs[&(ohr+1)];
                         cvec.push(leq(get(r,n), get(l,nn)));
                         eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
@@ -677,9 +655,9 @@ pub fn render(v: Vec<Syn>) {
                     eprintln!();  
                 // }
             }
-            for (lvl, mhr, nhr, vl, wl, n) in all_hops0.iter() {
-                let mut v_ers = vert.edges_directed(v_nodes[vl], Outgoing).into_iter().collect::<Vec<_>>();
-                let mut w_ers = vert.edges_directed(v_nodes[wl], Incoming).into_iter().collect::<Vec<_>>();
+            for (lvl, mhr, nhr, vl, wl, _n) in all_hops0.iter() {
+                let v_ers = vert.edges_directed(v_nodes[vl], Outgoing).into_iter().collect::<Vec<_>>();
+                let w_ers = vert.edges_directed(v_nodes[wl], Incoming).into_iter().collect::<Vec<_>>();
 
                 let mut v_dsts = v_ers.iter().map(|er| { *vert.node_weight(er.target()).unwrap() }).collect::<Vec<_>>();
                 let mut w_srcs = w_ers.iter().map(|er| { *vert.node_weight(er.source()).unwrap() }).collect::<Vec<_>>();
@@ -712,8 +690,8 @@ pub fn render(v: Vec<Syn>) {
                 eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
                 
                 let (_, ln) = sol_by_loc[&(*lvl, *mhr)];
-                let mut ln = ln;
-                let mut rn = ln;
+                let ln = ln;
+                let rn = ln;
                 let n = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
                 let nd = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
                 let mut n = n;
@@ -730,7 +708,7 @@ pub fn render(v: Vec<Syn>) {
                     eprint!("C2: ");
                     let (vll, wll) = v_outs[bundle_src_pos-1];
                     let hopsl = &hops_by_edge[&(vll, wll)];
-                    let (lvll, (mhrl, nhrl)) = hopsl.iter().next().unwrap();
+                    let (lvll, (mhrl, _nhrl)) = hopsl.iter().next().unwrap();
                     let nl = sol_by_hop[&(*lvll, *mhrl, vll, wll)];
                     cvec.push(geq(get(s, n), add(get(s, nl), &eps)));
                     eprintln!("s{} >= s{}+ε", n, nl);
@@ -740,7 +718,7 @@ pub fn render(v: Vec<Syn>) {
                     eprint!("C3: ");
                     let (vlr, wlr) = v_outs[bundle_src_pos+1];
                     let hopsr = &hops_by_edge[&(vlr, wlr)];
-                    let (lvlr, (mhrr, nhrr)) = hopsr.iter().next().unwrap();
+                    let (lvlr, (mhrr, _nhrr)) = hopsr.iter().next().unwrap();
                     let nr = sol_by_hop[&(*lvlr, *mhrr, vlr, wlr)];
                     cvec.push(leq(get(s, n), sub(get(s, nr), &eps)));
                     eprintln!("s{} <= s{}-ε", n, nr);
@@ -765,7 +743,7 @@ pub fn render(v: Vec<Syn>) {
                 }
 
                 let last_hop = hops.iter().rev().next().unwrap();
-                let (llvl, (lmhr, lnhr)) = last_hop;
+                let (llvl, (_lmhr, lnhr)) = last_hop;
                 let (_, lnd) = sol_by_loc[&(*llvl+1, *lnhr)];
                 let lnd = lnd;
                 let rnd = lnd;
@@ -781,7 +759,7 @@ pub fn render(v: Vec<Syn>) {
                     eprint!("C6: ");
                     let (vll, wll) = w_ins[bundle_dst_pos-1];
                     let hopsl = &hops_by_edge[&(vll, wll)];
-                    let (lvll, (mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
+                    let (lvll, (_mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
                     let ndl = sol_by_hop[&(lvll+1, *nhrl, vll, wll)];
                     cvec.push(geq(get(s, nd), add(get(s, ndl), &eps)));
                     eprintln!("s{} >= s{}+ε", nd, ndl);
@@ -791,7 +769,7 @@ pub fn render(v: Vec<Syn>) {
                     eprint!("C7: ");
                     let (vlr, wlr) = w_ins[bundle_dst_pos+1];
                     let hopsr = &hops_by_edge[&(vlr, wlr)];
-                    let (lvlr, (mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
+                    let (lvlr, (_mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
                     let ndr = sol_by_hop[&(lvlr+1, *nhrr, vlr, wlr)];
                     cvec.push(leq(get(s, nd), sub(get(s, ndr), &eps)));
                     eprintln!("s{} <= s{}-ε", nd, ndr);
@@ -846,7 +824,6 @@ pub fn render(v: Vec<Syn>) {
 
         for (loc, node) in loc_to_node.iter() {   
             let (ovr, ohr) = loc;
-            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
             let (_, n) = sol_by_loc[&(*ovr, *ohr)];
 
             let lpos = ls[n];
@@ -894,8 +871,8 @@ pub fn render(v: Vec<Syn>) {
                 let rposv = rs[nnv];
                 let rposw = rs[nnw];
 
-                let src_width = (rposv - lposv);
-                let dst_width = (rposw - lposw);
+                let src_width = rposv - lposv;
+                let dst_width = rposw - lposw;
 
                 let bundle_src_frac = ((((sposv - lposv) / src_width) - 0.5) / width_scale) + 0.5;
                 let bundle_dst_frac = ((((sposw - lposw) / dst_width) - 0.5) / width_scale) + 0.5;
@@ -909,7 +886,7 @@ pub fn render(v: Vec<Syn>) {
                     "actuates" => bundle_dst_frac - (0.025 / dst_width),
                     "senses" => bundle_dst_frac + (0.025 / dst_width),
                     _ => bundle_dst_frac,
-                };;
+                };
 
                 let hops = &hops_by_edge[&(*vl, *wl)];
                 eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
@@ -935,7 +912,7 @@ pub fn render(v: Vec<Syn>) {
                         );
                     },
                     2 => {
-                        let (lvl, (mhr, nhr)) = hops.iter().next().unwrap();
+                        let (lvl, (_mhr, nhr)) = hops.iter().next().unwrap();
                         let (ovr, ohr) = (lvl+1, nhr);
                         println!(indoc!(r#"
                             \draw [rounded corners, {},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
@@ -978,7 +955,7 @@ pub fn render(v: Vec<Syn>) {
         use rand::Rng;
         let mut rng = rand::thread_rng();
 
-        for (ovr, ohr, shr, loc, n) in all_locs.iter() {
+        for (ovr, ohr, _shr, loc, _n) in all_locs.iter() {
             let (_, n) = sol_by_loc[&(*ovr, *ohr)];
 
             let lpos = ls[n];
@@ -1005,7 +982,7 @@ pub fn render(v: Vec<Syn>) {
             println!(indoc!(r#"%\node[scale=0.5, anchor=south west] at ({}, {}) {{{}}};"#), hpos, vpos, loc_str);
         }
 
-        for ((lvl, mhr, vl, wl), n) in sol_by_hop.iter() {
+        for ((lvl, _mhr, vl, wl), n) in sol_by_hop.iter() {
             let spos = ss[*n];
 
             // let vpos = -1.5 * (*lvl as f64) - 0.5 + rng.gen_range(0.5..1.0);
