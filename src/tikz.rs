@@ -1,7 +1,7 @@
 use diagrams::parser::{Ident, parse};
 use diagrams::render::{Fact, Syn, filter_fact, resolve, unwrap_atom, find_parent, to_ident, as_string};
 use petgraph::EdgeDirection::{Incoming, Outgoing};
-use petgraph::algo::bellman_ford;
+use petgraph::algo::{floyd_warshall};
 use pyo3::types::{PyModule, IntoPyDict, PyList};
 use sorted_vec::SortedVec;
 use std::collections::{HashMap, BTreeMap};
@@ -206,46 +206,36 @@ pub fn render(v: Vec<Syn>) {
         let roots = SortedVec::from_unsorted(
             condensed
             .externals(Incoming)
-            .map(|vx| *vert.node_weight(vx).unwrap())
+            .map(|vx| *condensed.node_weight(vx).unwrap())
             .collect::<Vec<_>>());
         eprintln!("ROOTS {:?}\n", roots);
 
-        // let paths = floyd_warshall(&condensed, |_ex| { -1 as i32 }).unwrap();
+        let paths_fw = floyd_warshall(&condensed, |_ex| { -1 as i32 }).unwrap();
 
-        // eprintln!("FLOYD-WARSHALL: {:#?}\n", SortedVec::from_unsorted(
-        //     paths
-        //         .iter()
-        //         .map(|((vx, wx), wgt)| {
-        //             let vl = *vert.node_weight(*vx).unwrap();
-        //             let wl = *vert.node_weight(*wx).unwrap();
-        //             (wgt, vl, wl)
-        //         }).collect::<Vec<_>>()
-        //     )
-        // );
-        let root_vx = condensed_vxmap[roots[0]];
-        let paths = bellman_ford(&condensed.map(|_vx, vl| vl, |_ex, _el| -1.0), root_vx).unwrap();
-
-        // let mut paths_from_roots = SortedVec::from_unsorted(
-        //     paths
-        //     .iter()
-        //     .filter_map(|((vx, wx), wgt)| {
-        //         let vl = *vert.node_weight(*vx).unwrap();
-        //         let wl = *vert.node_weight(*wx).unwrap();
-        //         if *wgt <= 0 && roots.contains(&vl) {
-        //             Some((-(*wgt) as usize, vl, wl))
-        //         } else {
-        //             None
-        //         }
-        //     })
-        //     .collect::<Vec<_>>());
-        let paths_from_roots = SortedVec::from_unsorted(
-            paths
-                .distances
+        eprintln!("FLOYD-WARSHALL: {:#?}\n", SortedVec::from_unsorted(
+            paths_fw
                 .iter()
-                .enumerate()
-                .map(|(n, wgt)| {
-                    (-wgt as usize, roots[0], *condensed.node_weight(NodeIndex::new(n)).unwrap())
+                .map(|((vx, wx), wgt)| {
+                    let vl = *condensed.node_weight(*vx).unwrap();
+                    let wl = *condensed.node_weight(*wx).unwrap();
+                    (wgt, vl, wl)
                 }).collect::<Vec<_>>()
+            )
+        );
+
+        let paths_from_roots = SortedVec::from_unsorted(
+            paths_fw
+                .iter()
+                .filter_map(|((vx, wx), wgt)| {
+                    let vl = *condensed.node_weight(*vx).unwrap();
+                    let wl = *condensed.node_weight(*wx).unwrap();
+                    if *wgt <= 0 && roots.contains(&vl) {
+                        Some((-(*wgt) as usize, vl, wl))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
         );
 
         eprintln!("PATHS_FROM_ROOTS: {:#?}", paths_from_roots);
@@ -775,7 +765,6 @@ pub fn render(v: Vec<Syn>) {
         // std::process::exit(0);
 
         let width_scale = 0.9;
-        
         println!("{}", indoc!(r#"
         \documentclass[tikz,border=5mm]{standalone}
         \usetikzlibrary{graphs,graphdrawing,quotes,arrows.meta,calc,backgrounds,decorations.markings}
