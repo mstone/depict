@@ -74,6 +74,110 @@ pub fn get_value<'py>(a: &'py PyAny) -> PyResult<PyReadonlyArray1<'py, f64>> {
         .readonly())
 }
 
+pub fn calculate_vcg<'s>(v: &'s Vec<Syn>, draw: &'s Fact) -> (Graph<&'s str, &'s str>, HashMap<&'s str, NodeIndex>, HashMap<&'s str, String>) {
+    // println!("draw:\n{:#?}\n\n", draw);
+
+    let res = resolve(v.iter(), draw);
+
+    // println!("resolution: {:?}\n", res);
+
+    let action_query = Ident("action");
+    let percept_query = Ident("percept");
+    // let host_query = Ident("host");
+    let name_query = Ident("name");
+
+    let mut vert = Graph::<&str, &str>::new();
+
+    let mut v_nodes = HashMap::<&str, NodeIndex>::new();
+
+    let mut h_name = HashMap::new();
+    let mut h_styl = HashMap::new();
+    let mut h_acts = HashMap::new();
+    let mut h_sens = HashMap::new();
+
+    for hint in res {
+        match hint {
+            Fact::Fact(Ident(style), items) => {
+                for item in items {
+                    let item_ident = unwrap_atom(item).unwrap();
+                    let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
+                    let name = as_string(&resolved_item, &name_query, item_ident.into());
+                    // println!(r#"{}/{};"#, unwrap_atom(item).unwrap(), tikz_escape(&name));
+
+                    // TODO: need to loop here to resolve all the actuates/senses/hosts pairs, not just the first
+                    let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
+                    let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
+                    let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
+                    let action = as_string(&resolved_item, &action_query, item_ident.into());
+                    let percept = as_string(&resolved_item, &percept_query, item_ident.into());
+                    // let host = as_string(&resolved_item, &host_query, item_ident.into());
+
+                    h_styl.insert(item_ident, style);
+                    h_name.insert(item_ident, name);
+
+                    h_acts.entry((resolved_actuates, resolved_hosts))
+                        .or_insert(vec![])
+                        .push((item_ident, action));
+
+                    h_sens.entry((resolved_senses, resolved_hosts))
+                        .or_insert(vec![])
+                        .push((item_ident, percept));
+
+                    match *style {
+                        "compact" => {
+                            let _v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                        },
+                        "coalesce" => {
+                            if let (Some(actuator), Some(process)) = (resolved_actuates, resolved_hosts) {
+                                let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
+                                let process_ix = or_insert(&mut vert, &mut v_nodes, process.0);
+                                vert.add_edge(controller_ix, process_ix, "actuates"); // controls?
+                            }
+                            if let (Some(sensor), Some(process)) = (resolved_senses, resolved_hosts) {
+                                let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor.0);
+                                let process_ix = or_insert(&mut vert, &mut v_nodes, process.0);
+                                vert.add_edge(controller_ix, process_ix, "senses"); // reads?
+                            }
+                        },
+                        "embed" => {
+                            let _v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                        },
+                        "parallel" => {
+                            let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                        
+                            if let Some(actuator) = resolved_actuates {
+                                let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
+                                vert.add_edge(controller_ix, v_ix, "actuates");
+                            }
+    
+                            if let Some(sensor) = resolved_senses {
+                                let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor.0);
+                                vert.add_edge(controller_ix, v_ix, "senses");
+                            }
+    
+                            if let Some(platform) = resolved_hosts {
+                                let platform_ix = or_insert(&mut vert, &mut v_nodes, platform.0);
+                                vert.add_edge(v_ix, platform_ix, "rides");
+                            }
+                        },
+                        _ => {
+                            unimplemented!("{}", style);
+                        }
+                    }
+                    
+
+                    eprintln!("READ {} {} {:?} {:?} {:?}", item_ident, style, resolved_actuates, resolved_senses, resolved_hosts)
+                }
+            },
+            _ => {},
+        }
+    }
+
+    eprintln!("VERT: {:?}", Dot::new(&vert));
+
+    (vert, v_nodes, h_name)
+}
+
 pub fn render(v: Vec<Syn>) {
     // println!("ok\n\n");
 
@@ -82,105 +186,8 @@ pub fn render(v: Vec<Syn>) {
     // println!("draw:\n{:#?}\n\n", ds2);
 
     for draw in ds {
-        // println!("draw:\n{:#?}\n\n", draw);
-
-        let res = resolve(v.iter(), draw);
-
-        // println!("resolution: {:?}\n", res);
-
-        let action_query = Ident("action");
-        let percept_query = Ident("percept");
-        // let host_query = Ident("host");
-        let name_query = Ident("name");
-
-        let mut vert = Graph::<&str, &str>::new();
-
-        let mut v_nodes = HashMap::<&str, NodeIndex>::new();
-
-        let mut h_name = HashMap::new();
-        let mut h_styl = HashMap::new();
-        let mut h_acts = HashMap::new();
-        let mut h_sens = HashMap::new();
-
-        for hint in res {
-            match hint {
-                Fact::Fact(Ident(style), items) => {
-                    for item in items {
-                        let item_ident = unwrap_atom(item).unwrap();
-                        let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
-                        let name = as_string(&resolved_item, &name_query, item_ident.into());
-                        // println!(r#"{}/{};"#, unwrap_atom(item).unwrap(), tikz_escape(&name));
-
-                        // TODO: need to loop here to resolve all the actuates/senses/hosts pairs, not just the first
-                        let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
-                        let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
-                        let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
-                        let action = as_string(&resolved_item, &action_query, item_ident.into());
-                        let percept = as_string(&resolved_item, &percept_query, item_ident.into());
-                        // let host = as_string(&resolved_item, &host_query, item_ident.into());
-
-                        h_styl.insert(item_ident, style);
-                        h_name.insert(item_ident, name);
-
-                        h_acts.entry((resolved_actuates, resolved_hosts))
-                            .or_insert(vec![])
-                            .push((item_ident, action));
-
-                        h_sens.entry((resolved_senses, resolved_hosts))
-                            .or_insert(vec![])
-                            .push((item_ident, percept));
-
-                        match *style {
-                            "compact" => {
-                                let _v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
-                            },
-                            "coalesce" => {
-                                if let (Some(actuator), Some(process)) = (resolved_actuates, resolved_hosts) {
-                                    let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
-                                    let process_ix = or_insert(&mut vert, &mut v_nodes, process.0);
-                                    vert.add_edge(controller_ix, process_ix, "actuates"); // controls?
-                                }
-                                if let (Some(sensor), Some(process)) = (resolved_senses, resolved_hosts) {
-                                    let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor.0);
-                                    let process_ix = or_insert(&mut vert, &mut v_nodes, process.0);
-                                    vert.add_edge(controller_ix, process_ix, "senses"); // reads?
-                                }
-                            },
-                            "embed" => {
-                                let _v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
-                            },
-                            "parallel" => {
-                                let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
-                            
-                                if let Some(actuator) = resolved_actuates {
-                                    let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
-                                    vert.add_edge(controller_ix, v_ix, "actuates");
-                                }
         
-                                if let Some(sensor) = resolved_senses {
-                                    let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor.0);
-                                    vert.add_edge(controller_ix, v_ix, "senses");
-                                }
-        
-                                if let Some(platform) = resolved_hosts {
-                                    let platform_ix = or_insert(&mut vert, &mut v_nodes, platform.0);
-                                    vert.add_edge(v_ix, platform_ix, "rides");
-                                }
-                            },
-                            _ => {
-                                unimplemented!("{}", style);
-                            }
-                        }
-                        
-
-                        eprintln!("READ {} {} {:?} {:?} {:?}", item_ident, style, resolved_actuates, resolved_senses, resolved_hosts)
-                    }
-                },
-                _ => {},
-            }
-        }
-
-        eprintln!("VERT: {:?}", Dot::new(&vert));
+        let (vert, v_nodes, h_name) = calculate_vcg(&v, draw);
 
         let mut condensed = Graph::<&str, SortedVec<(&str, &str, &str)>>::new();
         let mut condensed_vxmap = HashMap::new();
