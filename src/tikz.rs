@@ -154,29 +154,36 @@ pub fn calculate_vcg<'s>(v: &'s Vec<Syn>, draw: &'s Fact) -> (Graph<&'s str, &'s
         }
     }
 
-    eprintln!("VERT: {:?}", Dot::new(&vert));
-
     (vert, v_nodes, h_name)
 }
 
-pub fn condense<'s>(vert: &'s Graph<&'s str, &'s str>) -> (Graph<&'s str, SortedVec<(&'s str, &'s str, &'s str)>>, HashMap::<&'s str, NodeIndex>) {
-    let mut condensed = Graph::<&str, SortedVec<(&str, &str, &str)>>::new();
+pub fn condense<'s, V: Clone + Ord + Hash, E: Clone + Ord>(vert: &'s Graph<V, E>) -> (Graph<V, SortedVec<(V, V, E)>>, HashMap::<V, NodeIndex>) {
+    let mut condensed = Graph::<V, SortedVec<(V, V, E)>>::new();
     let mut condensed_vxmap = HashMap::new();
     for (vx, vl) in vert.node_references() {
         let mut dsts = HashMap::new();
         for er in vert.edges_directed(vx, Outgoing) {
             let wx = er.target();
             let wl = vert.node_weight(wx).unwrap();
-            dsts.entry(wl).or_insert(SortedVec::new()).insert((*vl, *wl, *er.weight()));
+            dsts.entry(wl).or_insert(SortedVec::new()).insert((vl.clone(), wl.clone(), (*er.weight()).clone()));
         }
         
-        let cvx = or_insert(&mut condensed, &mut condensed_vxmap, vl);
+        let cvx = or_insert(&mut condensed, &mut condensed_vxmap, vl.clone());
         for (wl, exs) in dsts {
-            let cwx = or_insert(&mut condensed, &mut condensed_vxmap, wl);
+            let cwx = or_insert(&mut condensed, &mut condensed_vxmap, wl.clone());
             condensed.add_edge(cvx, cwx, exs);
         }
     }
     (condensed, condensed_vxmap)
+}
+
+pub fn roots<'s, V: Clone + Ord, E>(dag: &'s Graph<V, E>) -> SortedVec<V> {
+    SortedVec::from_unsorted(
+        dag
+            .externals(Incoming)
+            .map(|vx| dag.node_weight(vx).unwrap().clone())
+            .collect::<Vec<_>>()
+    )
 }
 
 pub fn render(v: Vec<Syn>) {
@@ -188,17 +195,15 @@ pub fn render(v: Vec<Syn>) {
         
         let (vert, v_nodes, h_name) = calculate_vcg(&v, draw);
 
+        eprintln!("VERT: {:?}", Dot::new(&vert));
+
         let (condensed, _) = condense(&vert);
 
         eprintln!("CONDENSED: {:?}", Dot::new(&condensed));
 
         // find graph roots
         // in a digraph, the roots are nodes with in-degree 0
-        let roots = SortedVec::from_unsorted(
-            condensed
-            .externals(Incoming)
-            .map(|vx| *condensed.node_weight(vx).unwrap())
-            .collect::<Vec<_>>());
+        let roots = roots(&condensed);
         eprintln!("ROOTS {:?}\n", roots);
 
         let paths_fw = floyd_warshall(&condensed, |_ex| { -1 as i32 }).unwrap();
