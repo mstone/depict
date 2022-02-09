@@ -6,6 +6,7 @@ use pyo3::types::{PyModule, IntoPyDict, PyList};
 use sorted_vec::SortedVec;
 use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
+use std::fmt::Debug;
 use std::fs::read_to_string;
 use std::env::args;
 use std::hash::Hash;
@@ -157,7 +158,7 @@ pub fn calculate_vcg<'s>(v: &'s Vec<Syn>, draw: &'s Fact) -> (Graph<&'s str, &'s
     (vert, v_nodes, h_name)
 }
 
-pub fn condense<'s, V: Clone + Ord + Hash, E: Clone + Ord>(vert: &'s Graph<V, E>) -> (Graph<V, SortedVec<(V, V, E)>>, HashMap::<V, NodeIndex>) {
+pub fn condense<'s, V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord>(vert: &'s Graph<V, E>) -> (Graph<V, SortedVec<(V, V, E)>>, HashMap::<V, NodeIndex>) {
     let mut condensed = Graph::<V, SortedVec<(V, V, E)>>::new();
     let mut condensed_vxmap = HashMap::new();
     for (vx, vl) in vert.node_references() {
@@ -174,16 +175,59 @@ pub fn condense<'s, V: Clone + Ord + Hash, E: Clone + Ord>(vert: &'s Graph<V, E>
             condensed.add_edge(cvx, cwx, exs);
         }
     }
+    eprintln!("CONDENSED: {:?}", Dot::new(&condensed));
     (condensed, condensed_vxmap)
 }
 
-pub fn roots<'s, V: Clone + Ord, E>(dag: &'s Graph<V, E>) -> SortedVec<V> {
-    SortedVec::from_unsorted(
+pub fn roots<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>) -> SortedVec<V> {
+    let roots = SortedVec::from_unsorted(
         dag
             .externals(Incoming)
             .map(|vx| dag.node_weight(vx).unwrap().clone())
             .collect::<Vec<_>>()
-    )
+    );
+    eprintln!("ROOTS {:?}\n", roots);
+    roots
+}
+
+pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s SortedVec<V>) -> BTreeMap<usize, SortedVec<(V, V)>> {
+    let paths_fw = floyd_warshall(&dag, |_ex| { -1 as i32 }).unwrap();
+
+    let paths_fw2 = SortedVec::from_unsorted(
+        paths_fw
+            .iter()
+            .map(|((vx, wx), wgt)| {
+                let vl = (*dag.node_weight(*vx).unwrap()).clone();
+                let wl = (*dag.node_weight(*wx).unwrap()).clone();
+                (*wgt, vl, wl)
+            }).collect::<Vec<_>>()
+    );
+    eprintln!("FLOYD-WARSHALL: {:#?}\n", paths_fw2);
+
+    let paths_from_roots = SortedVec::from_unsorted(
+        paths_fw2
+            .iter()
+            .filter_map(|(wgt, vl, wl)| {
+                if *wgt <= 0 && roots.contains(vl) {
+                    Some((-(*wgt) as usize, vl.clone(), wl.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    );
+    eprintln!("PATHS_FROM_ROOTS: {:#?}", paths_from_roots);
+
+    let mut paths_by_rank = BTreeMap::new();
+    for (wgt, vx, wx) in paths_from_roots.iter() {
+        paths_by_rank
+            .entry(*wgt)
+            .or_insert(SortedVec::new())
+            .insert((vx.clone(), wx.clone()));
+    }
+    eprintln!("PATHS_BY_RANK: {:#?}", paths_by_rank);
+
+    paths_by_rank
 }
 
 pub fn render(v: Vec<Syn>) {
@@ -199,52 +243,9 @@ pub fn render(v: Vec<Syn>) {
 
         let (condensed, _) = condense(&vert);
 
-        eprintln!("CONDENSED: {:?}", Dot::new(&condensed));
-
-        // find graph roots
-        // in a digraph, the roots are nodes with in-degree 0
         let roots = roots(&condensed);
-        eprintln!("ROOTS {:?}\n", roots);
 
-        let paths_fw = floyd_warshall(&condensed, |_ex| { -1 as i32 }).unwrap();
-
-        eprintln!("FLOYD-WARSHALL: {:#?}\n", SortedVec::from_unsorted(
-            paths_fw
-                .iter()
-                .map(|((vx, wx), wgt)| {
-                    let vl = *condensed.node_weight(*vx).unwrap();
-                    let wl = *condensed.node_weight(*wx).unwrap();
-                    (wgt, vl, wl)
-                }).collect::<Vec<_>>()
-            )
-        );
-
-        let paths_from_roots = SortedVec::from_unsorted(
-            paths_fw
-                .iter()
-                .filter_map(|((vx, wx), wgt)| {
-                    let vl = *condensed.node_weight(*vx).unwrap();
-                    let wl = *condensed.node_weight(*wx).unwrap();
-                    if *wgt <= 0 && roots.contains(&vl) {
-                        Some((-(*wgt) as usize, vl, wl))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-        );
-
-        eprintln!("PATHS_FROM_ROOTS: {:#?}", paths_from_roots);
-
-        let mut paths_by_rank = BTreeMap::new();
-        for (wgt, vx, wx) in paths_from_roots.iter() {
-            paths_by_rank
-                .entry(*wgt)
-                .or_insert(SortedVec::new())
-                .insert((*vx, *wx));
-        }
-
-        eprintln!("PATHS_BY_RANK: {:#?}", paths_by_rank);
+        let paths_by_rank = rank(&condensed, &roots);
 
         let mut vx_rank = HashMap::new();
         let mut hx_rank = HashMap::new();
