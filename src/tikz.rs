@@ -568,6 +568,240 @@ pub fn calculate_sols<'s, V>(
     (all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop)
 }
 
+pub fn position_sols<'s, V, E>(
+    dag: &'s Graph<V, E>,
+    dag_map: &'s HashMap::<V, NodeIndex>,
+    hops_by_edge: &'s BTreeMap<(V, V), BTreeMap<usize, (usize, usize)>>,
+    node_to_loc: &'s HashMap::<Loc<V, V>, (usize, usize)>,
+    solved_locs: &'s BTreeMap<usize, BTreeMap<usize, usize>>,
+    all_locs: &'s Vec<(usize, usize, usize, Loc<V, V>, usize)>,
+    all_hops0: &'s Vec<(usize, usize, usize, V, V, usize)>,
+    all_hops: &'s Vec<(usize, usize, usize, V, V, usize)>,
+    sol_by_loc: &'s HashMap<(usize, usize), usize>,
+    sol_by_hop: &'s HashMap<(usize, usize, V, V), usize>
+) -> (
+    Vec<f64>,
+    Vec<f64>,
+    Vec<f64>
+) where 
+    V: Clone + Debug + Display + Ord + Hash,
+    E: Clone + Debug
+{
+    let num_locs = all_locs.len();
+    let num_hops = all_hops.len();
+    prepare_freethreaded_python();
+    let res: PyResult<(Vec<_>, Vec<_>, Vec<_>)> = Python::with_gil(|py| {
+        let cp = PyModule::import(py, "cvxpy")?;
+        let var = cp.getattr("Variable")?;
+        let sq = cp.getattr("square")?;
+        let constant = cp.getattr("Constant")?;
+        let problem = cp.getattr("Problem")?;
+        let minimize = cp.getattr("Minimize")?;
+        let square = |a: &PyAny| {sq.call1((a,)).unwrap()};
+        let as_constant = |a: i32| { constant.call1((a.into_py(py),)).unwrap() };
+        let as_constantf = |a: f64| { constant.call1((a.into_py(py),)).unwrap() };
+        let hundred: &PyAny = as_constant(100);
+        let thousand: &PyAny = as_constant(1000);
+        let _ten: &PyAny = as_constant(10);
+        let one: &PyAny = as_constant(1);
+        let zero: &PyAny = as_constant(0);
+        let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
+        let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
+        let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
+        let eps = var.call((), Some([("pos", true)].into_py_dict(py)))?;
+        let sep = as_constantf(0.05);
+        let mut cvec: Vec<&PyAny> = vec![];
+        let mut obj = zero;
+
+        for (ovr, ohr, _shr, _loc, _n) in all_locs.iter() {
+            let ovr = *ovr; 
+            let ohr = *ohr;
+            let locs = &solved_locs[&ovr];
+            let shr = locs[&ohr];
+            let n = sol_by_loc[&(ovr, ohr)];
+            // if loc.is_node() { 
+                eprint!("C0: ");
+                eprint!("r{} >= l{} + S, ", n, n);
+                cvec.push(geq(get(r,n), add(get(l,n), &sep)));
+                if shr > 0 {
+                    let ohrp = locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap();
+                    let np = sol_by_loc[&(ovr, ohrp)];
+                    let shrp = locs[&ohrp];
+                    cvec.push(geq(get(l, n), get(r, np)));
+                    eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
+                }
+                if shr < locs.len()-1 {
+                    let ohrn = locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap();
+                    let nn = sol_by_loc[&(ovr,ohrn)];
+                    let shrn = locs[&(ohr+1)];
+                    cvec.push(leq(get(r,n), get(l,nn)));
+                    eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
+                }
+                if shr == locs.len()-1 {
+                    cvec.push(leq(get(r,n), one));
+                    eprint!("r{:?} <= 1", (ovr, ohr, shr, n));
+                }
+                eprintln!();  
+            // }
+        }
+        for (lvl, mhr, nhr, vl, wl, _n) in all_hops0.iter() {
+            let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
+            let w_ers = dag.edges_directed(dag_map[wl], Incoming).into_iter().collect::<Vec<_>>();
+
+            let mut v_dsts = v_ers.iter().map(|er| { (*dag.node_weight(er.target()).unwrap()).clone() }).collect::<Vec<_>>();
+            let mut w_srcs = w_ers.iter().map(|er| { (*dag.node_weight(er.source()).unwrap()).clone() }).collect::<Vec<_>>();
+
+            v_dsts.sort(); v_dsts.dedup();
+            v_dsts.sort_by_key(|dst| {
+                let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
+                let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+                (shr, -(svr as i32))
+            });
+            let v_outs = v_dsts
+                .iter()
+                .map(|dst| { (vl.clone(), dst.clone()) })
+                .collect::<Vec<_>>();
+
+            w_srcs.sort(); w_srcs.dedup();
+            w_srcs.sort_by_key(|src| {
+                let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
+                let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+                (shr, -(svr as i32))
+            });
+            let w_ins = w_srcs
+                .iter()
+                .map(|src| { (src.clone(), wl.clone()) })
+                .collect::<Vec<_>>();
+
+            let bundle_src_pos = v_outs.iter().position(|e| { *e == (vl.clone(), wl.clone()) }).unwrap();
+            let bundle_dst_pos = w_ins.iter().position(|e| { *e == (vl.clone(), wl.clone()) }).unwrap();
+            let hops = &hops_by_edge[&(vl.clone(), wl.clone())];
+            eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
+            
+            let ln = sol_by_loc[&(*lvl, *mhr)];
+            let rn = ln;
+            let n = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
+            let nd = sol_by_hop[&(lvl+1, *nhr, vl.clone(), wl.clone())];
+            let mut n = n;
+            let mut nd = nd;
+
+            // ORDER, SYMMETRY
+            if bundle_src_pos == 0 {
+                eprint!("C1: ");
+                cvec.push(geq(get(s, n), add(get(l, ln), &eps)));
+                eprintln!("s{} >= l{}+ε", n, ln);
+                obj = add(obj, square(sub(get(s, n), get(l, ln))));
+            }
+            if bundle_src_pos > 0 {
+                eprint!("C2: ");
+                let (vll, wll) = &v_outs[bundle_src_pos-1];
+                let hopsl = &hops_by_edge[&(vll.clone(), wll.clone())];
+                let (lvll, (mhrl, _nhrl)) = hopsl.iter().next().unwrap();
+                let nl = sol_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())];
+                cvec.push(geq(get(s, n), add(get(s, nl), &eps)));
+                eprintln!("s{} >= s{}+ε", n, nl);
+                obj = add(obj, square(sub(get(s, nl), get(s, n))));
+            }
+            if bundle_src_pos < v_outs.len()-1 {
+                eprint!("C3: ");
+                let (vlr, wlr) = &v_outs[bundle_src_pos+1];
+                let hopsr = &hops_by_edge[&(vlr.clone(), wlr.clone())];
+                let (lvlr, (mhrr, _nhrr)) = hopsr.iter().next().unwrap();
+                let nr = sol_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())];
+                cvec.push(leq(get(s, n), sub(get(s, nr), &eps)));
+                eprintln!("s{} <= s{}-ε", n, nr);
+            }
+            if bundle_src_pos == v_outs.len()-1 {
+                eprint!("C4: ");
+                cvec.push(leq(get(s, n), sub(get(r, rn), &eps)));
+                eprintln!("s{} <= r{}-ε", n, rn);
+                obj = add(obj, square(sub(get(s, n), get(r, rn))));
+            }
+
+            // AGREEMENT
+            for (i, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
+                if i < hops.len() {
+                    // s, t are really indexed by hops.
+                    let n2 = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
+                    let nd2 = sol_by_hop[&(lvl+1, *nhr, vl.clone(), wl.clone())];
+                    n = n2;
+                    nd = nd2;
+                    obj = add(obj, mul(thousand, square(sub(get(s,n), get(s,nd)))));
+                }
+            }
+
+            let last_hop = hops.iter().rev().next().unwrap();
+            let (llvl, (_lmhr, lnhr)) = last_hop;
+            let lnd = sol_by_loc[&(*llvl+1, *lnhr)];
+            let rnd = lnd;
+            
+            // ORDER, SYMMETRY
+            if bundle_dst_pos == 0 {
+                eprint!("C5: ");
+                cvec.push(geq(get(s, nd), add(get(l, lnd), &eps)));
+                eprintln!("s{} >= l{}+ε", nd, lnd);
+                obj = add(obj, square(sub(get(s, nd), get(l, lnd))));
+            }
+            if bundle_dst_pos > 0 {
+                eprint!("C6: ");
+                let (vll, wll) = &w_ins[bundle_dst_pos-1];
+                let hopsl = &hops_by_edge[&(vll.clone(), wll.clone())];
+                let (lvll, (_mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
+                let ndl = sol_by_hop[&(lvll+1, *nhrl, vll.clone(), wll.clone())];
+                cvec.push(geq(get(s, nd), add(get(s, ndl), &eps)));
+                eprintln!("s{} >= s{}+ε", nd, ndl);
+                obj = add(obj, square(sub(get(s, ndl), get(s, nd))));
+            }
+            if bundle_dst_pos < w_ins.len()-1 {
+                eprint!("C7: ");
+                let (vlr, wlr) = &w_ins[bundle_dst_pos+1];
+                let hopsr = &hops_by_edge[&(vlr.clone(), wlr.clone())];
+                let (lvlr, (_mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
+                let ndr = sol_by_hop[&(lvlr+1, *nhrr, vlr.clone(), wlr.clone())];
+                cvec.push(leq(get(s, nd), sub(get(s, ndr), &eps)));
+                eprintln!("s{} <= s{}-ε", nd, ndr);
+            }
+            if bundle_dst_pos == w_ins.len()-1 {
+                eprint!("C8: ");
+                cvec.push(leq(get(s, nd), sub(get(r, rnd), &eps)));
+                eprintln!("s{} <= r{}-ε", nd, rnd);
+                obj = add(obj, square(sub(get(s, nd), get(r, rnd))));
+            }
+        }
+
+        // SPACE
+        obj = sub(obj, mul(hundred, eps));
+        obj = minimize.call1((obj,))?;
+        
+        let constr = PyList::new(py, cvec);
+
+        eprintln!("OBJECTIVE: {}\n", obj.str()?);
+
+        let prb = problem.call1((obj, constr))?;
+        let is_dcp = prb.call_method1("is_dcp", ())?;
+        eprintln!("IS_DCP: {}\n", is_dcp.str()?);
+
+        prb.call_method1("solve", ())?;
+
+        let lv = get_value(l)?;
+        let lv = lv.as_slice().unwrap();
+
+        let rv = get_value(r)?;
+        let rv = rv.as_slice().unwrap();
+
+        let sv = get_value(s)?;
+        let sv = sv.as_slice().unwrap();
+
+        eprintln!("L: {:.2?}\n", lv);
+        eprintln!("R: {:.2?}\n", rv);
+        eprintln!("S: {:.2?}\n", sv);
+
+        Ok((lv.to_vec(), rv.to_vec(), sv.to_vec()))
+    });
+    eprintln!("PY: {:#?}", res);
+    res.unwrap()
+}
+
 pub fn render(v: Vec<Syn>) {
     let ds = filter_fact(v.iter(), &Ident("draw"));
     // let ds2 = ds.collect::<Vec<&Fact>>();
@@ -593,220 +827,7 @@ pub fn render(v: Vec<Syn>) {
         
         let (all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop) = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
-        let num_locs = all_locs.len();
-        let num_hops = all_hops.len();
-
-        prepare_freethreaded_python();
-        let res: PyResult<(Vec<_>, Vec<_>, Vec<_>)> = Python::with_gil(|py| {
-            let cp = PyModule::import(py, "cvxpy")?;
-            let var = cp.getattr("Variable")?;
-            let sq = cp.getattr("square")?;
-            let constant = cp.getattr("Constant")?;
-            let problem = cp.getattr("Problem")?;
-            let minimize = cp.getattr("Minimize")?;
-            let square = |a: &PyAny| {sq.call1((a,)).unwrap()};
-            let as_constant = |a: i32| { constant.call1((a.into_py(py),)).unwrap() };
-            let as_constantf = |a: f64| { constant.call1((a.into_py(py),)).unwrap() };
-            let hundred: &PyAny = as_constant(100);
-            let thousand: &PyAny = as_constant(1000);
-            let _ten: &PyAny = as_constant(10);
-            let one: &PyAny = as_constant(1);
-            let zero: &PyAny = as_constant(0);
-            let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
-            let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
-            let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
-            let eps = var.call((), Some([("pos", true)].into_py_dict(py)))?;
-            let sep = as_constantf(0.05);
-            let mut cvec: Vec<&PyAny> = vec![];
-            let mut obj = zero;
-
-            for (ovr, ohr, _shr, _loc, _n) in all_locs.iter() {
-                let ovr = *ovr; 
-                let ohr = *ohr;
-                let locs = &solved_locs[&ovr];
-                let shr = locs[&ohr];
-                let n = sol_by_loc[&(ovr, ohr)];
-                // if loc.is_node() { 
-                    eprint!("C0: ");
-                    eprint!("r{} >= l{} + S, ", n, n);
-                    cvec.push(geq(get(r,n), add(get(l,n), &sep)));
-                    if shr > 0 {
-                        let ohrp = locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap();
-                        let np = sol_by_loc[&(ovr, ohrp)];
-                        let shrp = locs[&ohrp];
-                        cvec.push(geq(get(l, n), get(r, np)));
-                        eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
-                    }
-                    if shr < locs.len()-1 {
-                        let ohrn = locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap();
-                        let nn = sol_by_loc[&(ovr,ohrn)];
-                        let shrn = locs[&(ohr+1)];
-                        cvec.push(leq(get(r,n), get(l,nn)));
-                        eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
-                    }
-                    if shr == locs.len()-1 {
-                        cvec.push(leq(get(r,n), one));
-                        eprint!("r{:?} <= 1", (ovr, ohr, shr, n));
-                    }
-                    eprintln!();  
-                // }
-            }
-            for (lvl, mhr, nhr, vl, wl, _n) in all_hops0.iter() {
-                let v_ers = vert.edges_directed(v_nodes[vl], Outgoing).into_iter().collect::<Vec<_>>();
-                let w_ers = vert.edges_directed(v_nodes[wl], Incoming).into_iter().collect::<Vec<_>>();
-
-                let mut v_dsts = v_ers.iter().map(|er| { *vert.node_weight(er.target()).unwrap() }).collect::<Vec<_>>();
-                let mut w_srcs = w_ers.iter().map(|er| { *vert.node_weight(er.source()).unwrap() }).collect::<Vec<_>>();
-
-                v_dsts.sort(); v_dsts.dedup();
-                v_dsts.sort_by_key(|dst| {
-                    let (ovr, ohr) = node_to_loc[&Loc::Node(*dst)];
-                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                    (shr, -(svr as i32))
-                });
-                let v_outs = v_dsts
-                    .iter()
-                    .map(|dst| { (*vl, *dst) })
-                    .collect::<Vec<_>>();
-
-                w_srcs.sort(); w_srcs.dedup();
-                w_srcs.sort_by_key(|src| {
-                    let (ovr, ohr) = node_to_loc[&Loc::Node(*src)];
-                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                    (shr, -(svr as i32))
-                });
-                let w_ins = w_srcs
-                    .iter()
-                    .map(|src| { (*src, *wl) })
-                    .collect::<Vec<_>>();
-
-                let bundle_src_pos = v_outs.iter().position(|e| { *e == (vl, wl) }).unwrap();
-                let bundle_dst_pos = w_ins.iter().position(|e| { *e == (vl, wl) }).unwrap();
-                let hops = &hops_by_edge[&(*vl, *wl)];
-                eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
-                
-                let ln = sol_by_loc[&(*lvl, *mhr)];
-                let rn = ln;
-                let n = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
-                let nd = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
-                let mut n = n;
-                let mut nd = nd;
-
-                // ORDER, SYMMETRY
-                if bundle_src_pos == 0 {
-                    eprint!("C1: ");
-                    cvec.push(geq(get(s, n), add(get(l, ln), &eps)));
-                    eprintln!("s{} >= l{}+ε", n, ln);
-                    obj = add(obj, square(sub(get(s, n), get(l, ln))));
-                }
-                if bundle_src_pos > 0 {
-                    eprint!("C2: ");
-                    let (vll, wll) = v_outs[bundle_src_pos-1];
-                    let hopsl = &hops_by_edge[&(vll, wll)];
-                    let (lvll, (mhrl, _nhrl)) = hopsl.iter().next().unwrap();
-                    let nl = sol_by_hop[&(*lvll, *mhrl, vll, wll)];
-                    cvec.push(geq(get(s, n), add(get(s, nl), &eps)));
-                    eprintln!("s{} >= s{}+ε", n, nl);
-                    obj = add(obj, square(sub(get(s, nl), get(s, n))));
-                }
-                if bundle_src_pos < v_outs.len()-1 {
-                    eprint!("C3: ");
-                    let (vlr, wlr) = v_outs[bundle_src_pos+1];
-                    let hopsr = &hops_by_edge[&(vlr, wlr)];
-                    let (lvlr, (mhrr, _nhrr)) = hopsr.iter().next().unwrap();
-                    let nr = sol_by_hop[&(*lvlr, *mhrr, vlr, wlr)];
-                    cvec.push(leq(get(s, n), sub(get(s, nr), &eps)));
-                    eprintln!("s{} <= s{}-ε", n, nr);
-                }
-                if bundle_src_pos == v_outs.len()-1 {
-                    eprint!("C4: ");
-                    cvec.push(leq(get(s, n), sub(get(r, rn), &eps)));
-                    eprintln!("s{} <= r{}-ε", n, rn);
-                    obj = add(obj, square(sub(get(s, n), get(r, rn))));
-                }
-
-                // AGREEMENT
-                for (i, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                    if i < hops.len() {
-                        // s, t are really indexed by hops.
-                        let n2 = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
-                        let nd2 = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
-                        n = n2;
-                        nd = nd2;
-                        obj = add(obj, mul(thousand, square(sub(get(s,n), get(s,nd)))));
-                    }
-                }
-
-                let last_hop = hops.iter().rev().next().unwrap();
-                let (llvl, (_lmhr, lnhr)) = last_hop;
-                let lnd = sol_by_loc[&(*llvl+1, *lnhr)];
-                let rnd = lnd;
-                
-                // ORDER, SYMMETRY
-                if bundle_dst_pos == 0 {
-                    eprint!("C5: ");
-                    cvec.push(geq(get(s, nd), add(get(l, lnd), &eps)));
-                    eprintln!("s{} >= l{}+ε", nd, lnd);
-                    obj = add(obj, square(sub(get(s, nd), get(l, lnd))));
-                }
-                if bundle_dst_pos > 0 {
-                    eprint!("C6: ");
-                    let (vll, wll) = w_ins[bundle_dst_pos-1];
-                    let hopsl = &hops_by_edge[&(vll, wll)];
-                    let (lvll, (_mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
-                    let ndl = sol_by_hop[&(lvll+1, *nhrl, vll, wll)];
-                    cvec.push(geq(get(s, nd), add(get(s, ndl), &eps)));
-                    eprintln!("s{} >= s{}+ε", nd, ndl);
-                    obj = add(obj, square(sub(get(s, ndl), get(s, nd))));
-                }
-                if bundle_dst_pos < w_ins.len()-1 {
-                    eprint!("C7: ");
-                    let (vlr, wlr) = w_ins[bundle_dst_pos+1];
-                    let hopsr = &hops_by_edge[&(vlr, wlr)];
-                    let (lvlr, (_mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
-                    let ndr = sol_by_hop[&(lvlr+1, *nhrr, vlr, wlr)];
-                    cvec.push(leq(get(s, nd), sub(get(s, ndr), &eps)));
-                    eprintln!("s{} <= s{}-ε", nd, ndr);
-                }
-                if bundle_dst_pos == w_ins.len()-1 {
-                    eprint!("C8: ");
-                    cvec.push(leq(get(s, nd), sub(get(r, rnd), &eps)));
-                    eprintln!("s{} <= r{}-ε", nd, rnd);
-                    obj = add(obj, square(sub(get(s, nd), get(r, rnd))));
-                }
-            }
-
-            // SPACE
-            obj = sub(obj, mul(hundred, eps));
-            obj = minimize.call1((obj,))?;
-            
-            let constr = PyList::new(py, cvec);
-
-            eprintln!("OBJECTIVE: {}\n", obj.str()?);
-
-            let prb = problem.call1((obj, constr))?;
-            let is_dcp = prb.call_method1("is_dcp", ())?;
-            eprintln!("IS_DCP: {}\n", is_dcp.str()?);
-
-            prb.call_method1("solve", ())?;
-
-            let lv = get_value(l)?;
-            let lv = lv.as_slice().unwrap();
-
-            let rv = get_value(r)?;
-            let rv = rv.as_slice().unwrap();
-
-            let sv = get_value(s)?;
-            let sv = sv.as_slice().unwrap();
-
-            eprintln!("L: {:.2?}\n", lv);
-            eprintln!("R: {:.2?}\n", rv);
-            eprintln!("S: {:.2?}\n", sv);
-
-            Ok((lv.to_vec(), rv.to_vec(), sv.to_vec()))
-        });
-        eprintln!("PY: {:#?}", res);
-        let (ls, rs, ss) = res.unwrap();
+        let (ls, rs, ss) = position_sols(&vert, &v_nodes, &hops_by_edge, &node_to_loc, &solved_locs, &all_locs, &all_hops0, &all_hops, &sol_by_loc, &sol_by_hop);
 
         // std::process::exit(0);
 
