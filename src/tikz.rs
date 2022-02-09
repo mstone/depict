@@ -335,6 +335,173 @@ pub fn calculate_locs_and_hops<'s, V, E>(
     (locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc)
 }
 
+pub fn minimize_edge_crossing<'s, V>(
+    locs_by_level: &'s BTreeMap<usize, Vec<usize>>,
+    hops_by_level: &'s BTreeMap<usize, SortedVec<(usize, usize, V, V, usize)>>
+) -> BTreeMap<usize, BTreeMap<usize, usize>> where
+    V: Clone + Debug + Display + Ord + Hash
+{
+    let max_level = *hops_by_level.keys().max().unwrap();
+    let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
+
+    eprintln!("max_level: {}, max_width: {}", max_level, max_width);
+
+    let mut csp = String::new();
+
+    csp.push_str("MINION 3\n");
+    csp.push_str("**VARIABLES**\n");
+    csp.push_str("BOUND csum {0..1000}\n");
+    for (rank, locs) in locs_by_level.iter() {
+        csp.push_str(&format!("BOOL x{}[{},{}]\n", rank, locs.len(), locs.len()));
+    }
+    for rank in 0..locs_by_level.len() - 2 {
+        let w1 = locs_by_level[&rank].len();
+        let w2 = locs_by_level[&(rank+1)].len();
+        csp.push_str(&format!("BOOL c{}[{},{},{},{}]\n", rank, w1, w2, w1, w2));
+    }
+    csp.push_str("\n**SEARCH**\n");
+    csp.push_str("MINIMISING csum\n");
+    // csp.push_str("PRINT ALL\n");
+    csp.push_str("PRINT [[csum]]\n");
+    for (rank, _) in locs_by_level.iter() {
+        csp.push_str(&format!("PRINT [[x{}]]\n", rank));
+    }
+    // for rank in 0..max_level {
+    //     csp.push_str(&format!("PRINT [[c{}]]\n", rank));
+    // }
+    csp.push_str("\n**CONSTRAINTS**\n");
+    for (rank, locs) in locs_by_level.iter() {
+        let l = rank;
+        let n = locs.len();
+        // let n = max_width;
+        for a in 0..n {
+            csp.push_str(&format!("sumleq(x{l}[{a},{a}],0)\n", l=l, a=a));
+            for b in 0..n {
+                if a != b {
+                    csp.push_str(&format!("sumleq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                    csp.push_str(&format!("sumgeq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                    for c in 0..(n) {
+                        if b != c && a != c {
+                            csp.push_str(&format!("sumleq([x{l}[{c},{b}], x{l}[{b},{a}], -1],x{l}[{c},{a}])\n", l=l, a=a, b=b, c=c));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (k, hops) in hops_by_level.iter() {
+        if *k < max_level {
+            for (u1, v1, ..) in hops.iter() {
+                for (u2, v2, ..)  in hops.iter() {
+                    // if (u1,v1) != (u2,v2) { // BUG!
+                    if u1 != u2 && v1 != v2 {
+                        csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u2},{u1}],x{j}[{v1},{v2}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=k+1));
+                        csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u1},{u2}],x{j}[{v2},{v1}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=k+1));
+                        // csp.push_str(&format!("sumleq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
+                        // csp.push_str(&format!("sumgeq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
+                    }
+                }
+            }
+        }
+    }
+    csp.push_str("\nsumleq([");
+    for rank in 0..max_level {
+        if rank > 0 {
+            csp.push_str(",");
+        }
+        csp.push_str(&format!("c{}[_,_,_,_]", rank));
+    }
+    csp.push_str("],csum)\n");
+    csp.push_str("sumgeq([");
+    for rank in 0..max_level {
+        if rank > 0 {
+            csp.push_str(",");
+        }
+        csp.push_str(&format!("c{}[_,_,_,_]", rank));
+    }
+    csp.push_str("],csum)\n");
+    csp.push_str("\n\n**EOF**");
+
+    eprintln!("{}", csp);
+
+
+    // std::process::exit(0);
+
+    let mut minion = Command::new("/Users/mstone/src/minion/result/bin/minion");
+    minion
+        .arg("-printsolsonly")
+        .arg("-printonlyoptimal")
+        // .arg("-timelimit")
+        // .arg("30")
+        .arg("--")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = minion.spawn()
+        .expect("failed to execute minion");
+    let stdin = child.stdin.as_mut().unwrap();
+    stdin.write_all(csp.as_bytes()).expect("failed to write csp");
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait on child");
+
+    let outs = std::str::from_utf8(&output.stdout[..]).unwrap();
+
+    eprintln!("{}", outs);
+
+    // std::process::exit(0);
+
+    let lines = outs.split("\n").collect::<Vec<_>>();
+    eprintln!("cn line: {}", lines[2]);
+    
+    let crossing_number = lines[2]
+        .trim()
+        .parse::<i32>()
+        .expect("unable to parse crossing number");
+
+    // std::process::exit(0);
+    
+    let solns = &lines[3..lines.len()];
+    
+    eprintln!("{:?}\n{:?}\n{:?}", lines, solns, crossing_number);
+
+    let mut perm = Vec::<Array2<i32>>::new();
+    for (rank, locs) in locs_by_level.iter() {
+        let mut arr = Array2::<i32>::zeros((locs.len(), locs.len()));
+        let parsed_solns = solns[*rank]
+            .split(" ")
+            .filter_map(|s| {
+                s
+                    .trim()
+                    .parse::<i32>()
+                    .ok()
+            })
+            .collect::<Vec<_>>();
+        for (n, ix) in arr.iter_mut().enumerate() {
+            *ix = parsed_solns[n];
+        }
+        perm.push(arr);
+    }
+
+    for (n, p) in perm.iter().enumerate() {
+        eprintln!("{}:\n{:?}\n", n, p);
+    };
+
+    let mut solved_locs = BTreeMap::new();
+    for (n, p) in perm.iter().enumerate() {
+        let mut sums = p.rows().into_iter().enumerate().map(|(i, r)| (i, r.sum() as usize)).collect::<Vec<_>>();
+        sums.sort_by_key(|(_i,s)| *s);
+        eprintln!("row sums: {:?}", sums);
+        for (nhr, (i,_s)) in sums.into_iter().enumerate() {
+            solved_locs.entry(n).or_insert(BTreeMap::new()).insert(i, nhr);
+        }
+    }
+    eprintln!("SOLVED_LOCS: {:#?}", solved_locs);
+
+    solved_locs
+}
+
 pub fn render(v: Vec<Syn>) {
     let ds = filter_fact(v.iter(), &Ident("draw"));
     // let ds2 = ds.collect::<Vec<&Fact>>();
@@ -352,167 +519,11 @@ pub fn render(v: Vec<Syn>) {
 
         let paths_by_rank = rank(&condensed, &roots);
 
-        let (locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc) = calculate_locs_and_hops(&condensed, &paths_by_rank);        
+        let (locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc) = calculate_locs_and_hops(&condensed, &paths_by_rank);
 
         // std::process::exit(0);
 
-        let max_level = *hops_by_level.keys().max().unwrap();
-        let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
-
-        eprintln!("max_level: {}, max_width: {}", max_level, max_width);
-
-        let mut csp = String::new();
-        csp.push_str("MINION 3\n");
-        csp.push_str("**VARIABLES**\n");
-        csp.push_str("BOUND csum {0..1000}\n");
-        for (rank, locs) in locs_by_level.iter() {
-            csp.push_str(&format!("BOOL x{}[{},{}]\n", rank, locs.len(), locs.len()));
-        }
-        for rank in 0..locs_by_level.len() - 2 {
-            let w1 = locs_by_level[&rank].len();
-            let w2 = locs_by_level[&(rank+1)].len();
-            csp.push_str(&format!("BOOL c{}[{},{},{},{}]\n", rank, w1, w2, w1, w2));
-        }
-        csp.push_str("\n**SEARCH**\n");
-        csp.push_str("MINIMISING csum\n");
-        // csp.push_str("PRINT ALL\n");
-        csp.push_str("PRINT [[csum]]\n");
-        for (rank, _) in locs_by_level.iter() {
-            csp.push_str(&format!("PRINT [[x{}]]\n", rank));
-        }
-        // for rank in 0..max_level {
-        //     csp.push_str(&format!("PRINT [[c{}]]\n", rank));
-        // }
-        csp.push_str("\n**CONSTRAINTS**\n");
-        for (rank, locs) in locs_by_level.iter() {
-            let l = rank;
-            let n = locs.len();
-            // let n = max_width;
-            for a in 0..n {
-                csp.push_str(&format!("sumleq(x{l}[{a},{a}],0)\n", l=l, a=a));
-                for b in 0..n {
-                    if a != b {
-                        csp.push_str(&format!("sumleq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
-                        csp.push_str(&format!("sumgeq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
-                        for c in 0..(n) {
-                            if b != c && a != c {
-                                csp.push_str(&format!("sumleq([x{l}[{c},{b}], x{l}[{b},{a}], -1],x{l}[{c},{a}])\n", l=l, a=a, b=b, c=c));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        for (k, hops) in hops_by_level.iter() {
-            if *k < max_level {
-                for (u1, v1, ..) in hops.iter() {
-                    for (u2, v2, ..)  in hops.iter() {
-                        // if (u1,v1) != (u2,v2) { // BUG!
-                        if u1 != u2 && v1 != v2 {
-                            csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u2},{u1}],x{j}[{v1},{v2}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=k+1));
-                            csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u1},{u2}],x{j}[{v2},{v1}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=k+1));
-                            // csp.push_str(&format!("sumleq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
-                            // csp.push_str(&format!("sumgeq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
-                        }
-                    }
-                }
-            }
-        }
-        csp.push_str("\nsumleq([");
-        for rank in 0..max_level {
-            if rank > 0 {
-                csp.push_str(",");
-            }
-            csp.push_str(&format!("c{}[_,_,_,_]", rank));
-        }
-        csp.push_str("],csum)\n");
-        csp.push_str("sumgeq([");
-        for rank in 0..max_level {
-            if rank > 0 {
-                csp.push_str(",");
-            }
-            csp.push_str(&format!("c{}[_,_,_,_]", rank));
-        }
-        csp.push_str("],csum)\n");
-        csp.push_str("\n\n**EOF**");
-
-        eprintln!("{}", csp);
-
-
-        // std::process::exit(0);
-
-        let mut minion = Command::new("/Users/mstone/src/minion/result/bin/minion");
-        minion
-            .arg("-printsolsonly")
-            .arg("-printonlyoptimal")
-            // .arg("-timelimit")
-            // .arg("30")
-            .arg("--")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped());
-        let mut child = minion.spawn()
-            .expect("failed to execute minion");
-        let stdin = child.stdin.as_mut().unwrap();
-        stdin.write_all(csp.as_bytes()).expect("failed to write csp");
-        drop(stdin);
-
-        let output = child
-            .wait_with_output()
-            .expect("failed to wait on child");
-
-        let outs = std::str::from_utf8(&output.stdout[..]).unwrap();
-
-        eprintln!("{}", outs);
-
-        // std::process::exit(0);
-
-        let lines = outs.split("\n").collect::<Vec<_>>();
-        eprintln!("cn line: {}", lines[2]);
-        
-
-        let crossing_number = lines[2]
-            .trim()
-            .parse::<i32>()
-            .expect("unable to parse crossing number");
-
-        // std::process::exit(0);
-        
-        let solns = &lines[3..lines.len()];
-        
-        eprintln!("{:?}\n{:?}\n{:?}", lines, solns, crossing_number);
-
-        let mut perm = Vec::<Array2<i32>>::new();
-        for (rank, locs) in locs_by_level.iter() {
-            let mut arr = Array2::<i32>::zeros((locs.len(), locs.len()));
-            let parsed_solns = solns[*rank]
-                .split(" ")
-                .filter_map(|s| {
-                    s
-                        .trim()
-                        .parse::<i32>()
-                        .ok()
-                })
-                .collect::<Vec<_>>();
-            for (n, ix) in arr.iter_mut().enumerate() {
-                *ix = parsed_solns[n];
-            }
-            perm.push(arr);
-        }
-
-        for (n, p) in perm.iter().enumerate() {
-            eprintln!("{}:\n{:?}\n", n, p);
-        };
-
-        let mut solved_locs = BTreeMap::new();
-        for (n, p) in perm.iter().enumerate() {
-            let mut sums = p.rows().into_iter().enumerate().map(|(i, r)| (i, r.sum() as usize)).collect::<Vec<_>>();
-            sums.sort_by_key(|(_i,s)| *s);
-            eprintln!("row sums: {:?}", sums);
-            for (nhr, (i,_s)) in sums.into_iter().enumerate() {
-                solved_locs.entry(n).or_insert(BTreeMap::new()).insert(i, nhr);
-            }
-        }
-        eprintln!("SOLVED_LOCS: {:#?}", solved_locs);
+        let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level);        
 
         let all_locs = solved_locs
             .iter()
