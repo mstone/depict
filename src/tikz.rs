@@ -62,7 +62,7 @@ pub fn leq<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
     a.rich_compare(b, CompareOp::Le).unwrap()
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone)]
 pub enum Loc<V,E> {
     Node(V),
     Hop(usize, E, E),
@@ -502,6 +502,72 @@ pub fn minimize_edge_crossing<'s, V>(
     solved_locs
 }
 
+pub fn calculate_sols<'s, V>(
+    solved_locs: &'s BTreeMap<usize, BTreeMap<usize, usize>>,
+    loc_to_node: &'s HashMap<(usize, usize), Loc<V, V>>,
+    hops_by_level: &'s BTreeMap<usize, SortedVec<(usize, usize, V, V, usize)>>,
+    hops_by_edge: &'s BTreeMap<(V, V), BTreeMap<usize, (usize, usize)>>,
+) -> (
+    Vec<(usize, usize, usize, Loc<V, V>, usize)>,
+    Vec<(usize, usize, usize, V, V, usize)>,
+    Vec<(usize, usize, usize, V, V, usize)>,
+    HashMap<(usize, usize), usize>,
+    HashMap<(usize, usize, V, V), usize>
+) where
+    V: Clone + Debug + Display + Ord + Hash
+{
+    let all_locs = solved_locs
+        .iter()
+        .flat_map(|(ovr, nodes)| nodes
+            .iter()
+            .map(|(ohr, shr)| (*ovr, *ohr, *shr, &loc_to_node[&(*ovr,*ohr)])))
+        .enumerate()
+        .map(|(n, (ovr, ohr, shr, loc))| (ovr, ohr, shr, loc.clone(), n))
+        .collect::<Vec<_>>();
+
+    let mut sol_by_loc = HashMap::new();
+    for (ovr, ohr, _shr, _loc, n) in all_locs.iter() {
+        sol_by_loc.insert((*ovr, *ohr), *n);
+    }
+
+    let all_hops0 = hops_by_level
+        .iter()
+        .flat_map(|h| 
+            h.1.iter().map(|(mhr, nhr, vl, wl, lvl)| {
+                (*mhr, *nhr, vl.clone(), wl.clone(), *lvl)
+            })
+        ).enumerate()
+        .map(|(n, (mhr, nhr, vl, wl, lvl))| {
+            (lvl, mhr, nhr, vl, wl, n)
+        })
+        .collect::<Vec<_>>();
+    let all_hops = hops_by_level
+        .iter()
+        .flat_map(|h| 
+            h.1.iter().map(|(mhr, nhr, vl, wl, lvl)| {
+                (*mhr, *nhr, vl.clone(), wl.clone(), *lvl)
+            })
+        )
+        .chain(
+            hops_by_edge.iter().map(|((vl, wl), hops)| {
+                    let (lvl, (_mhr, nhr)) = hops.iter().rev().next().unwrap();
+                    (*nhr, std::usize::MAX, vl.clone(), wl.clone(), lvl+1)
+            }) 
+        )
+        .enumerate()
+        .map(|(n, (mhr, nhr, vl, wl, lvl))| {
+            (lvl, mhr, nhr, vl, wl, n)
+        })
+        .collect::<Vec<_>>();
+    
+    let mut sol_by_hop = HashMap::new();
+    for (lvl, mhr, _nhr, vl, wl, n) in all_hops.iter() {
+        sol_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), *n);
+    }
+
+    (all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop)
+}
+
 pub fn render(v: Vec<Syn>) {
     let ds = filter_fact(v.iter(), &Ident("draw"));
     // let ds2 = ds.collect::<Vec<&Fact>>();
@@ -523,57 +589,11 @@ pub fn render(v: Vec<Syn>) {
 
         // std::process::exit(0);
 
-        let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level);        
-
-        let all_locs = solved_locs
-            .iter()
-            .flat_map(|(ovr, nodes)| nodes
-                .iter()
-                .map(|(ohr, shr)| (*ovr, *ohr, *shr, &loc_to_node[&(*ovr,*ohr)])))
-            .enumerate()
-            .map(|(n, (ovr, ohr, shr, loc))| (ovr, ohr, shr, loc, n))
-            .collect::<Vec<_>>();
-        let num_locs = all_locs.len();
-
-        let mut sol_by_loc = HashMap::new();
-        for (ovr, ohr, _shr, _loc, n) in all_locs.iter() {
-            sol_by_loc.insert((*ovr, *ohr), *n);
-        }
-
-        let all_hops0 = hops_by_level
-            .iter()
-            .flat_map(|h| 
-                h.1.iter().map(|(mhr, nhr, vl, wl, lvl)| {
-                    (*mhr, *nhr, *vl, *wl, *lvl)
-                })
-            ).enumerate()
-            .map(|(n, (mhr, nhr, vl, wl, lvl))| {
-                (lvl, mhr, nhr, vl, wl, n)
-            })
-            .collect::<Vec<_>>();
-        let all_hops = hops_by_level
-            .iter()
-            .flat_map(|h| 
-                h.1.iter().map(|(mhr, nhr, vl, wl, lvl)| {
-                    (*mhr, *nhr, *vl, *wl, *lvl)
-                })
-            )
-            .chain(
-                hops_by_edge.iter().map(|((vl, wl), hops)| {
-                        let (lvl, (_mhr, nhr)) = hops.iter().rev().next().unwrap();
-                        (*nhr, std::usize::MAX, *vl, *wl, lvl+1)
-                }) 
-            )
-            .enumerate()
-            .map(|(n, (mhr, nhr, vl, wl, lvl))| {
-                (lvl, mhr, nhr, vl, wl, n)
-            })
-            .collect::<Vec<_>>();
+        let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level);
         
-        let mut sol_by_hop = HashMap::new();
-        for (lvl, mhr, _nhr, vl, wl, n) in all_hops.iter() {
-            sol_by_hop.insert((*lvl, *mhr, *vl, *wl), *n);
-        }
+        let (all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop) = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
+
+        let num_locs = all_locs.len();
         let num_hops = all_hops.len();
 
         prepare_freethreaded_python();
