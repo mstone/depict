@@ -6,7 +6,7 @@ use pyo3::types::{PyModule, IntoPyDict, PyList};
 use sorted_vec::SortedVec;
 use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::fs::read_to_string;
 use std::env::args;
 use std::hash::Hash;
@@ -230,6 +230,111 @@ pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s Sort
     paths_by_rank
 }
 
+pub fn calculate_locs_and_hops<'s, V, E>(
+    dag: &'s Graph<V, E>, 
+    paths_by_rank: &'s BTreeMap<usize, SortedVec<(V, V)>>
+) -> (
+    BTreeMap<usize, Vec<usize>>, 
+    BTreeMap<usize, SortedVec<(usize, usize, V, V, usize)>>,
+    BTreeMap<(V, V), BTreeMap<usize, (usize, usize)>>,
+    HashMap<(usize, usize), Loc<V, V>>,
+    HashMap<Loc<V, V>, (usize, usize)>
+)
+     where 
+    V: Clone + Debug + Display + Ord + Hash, 
+    E: Clone + Debug + Ord 
+{
+    let mut vx_rank = HashMap::new();
+    let mut hx_rank = HashMap::new();
+    for (rank, paths) in paths_by_rank.iter() {
+        for (n, (_vx, wx)) in paths.iter().enumerate() {
+            vx_rank.insert(wx.clone(), *rank);
+            hx_rank.insert(wx.clone(), n);
+        }
+    }
+
+    let mut loc_to_node = HashMap::new();
+    let mut node_to_loc = HashMap::new();
+
+    let mut locs_by_level = BTreeMap::new();
+    for (rank, paths) in paths_by_rank.iter() {
+        let l = *rank;
+        for (a, (_cvl, cwl)) in paths.iter().enumerate() {
+            locs_by_level.entry(l).or_insert(vec![]).push(a);
+            loc_to_node.insert((l, a), Loc::Node(cwl.clone()));
+            node_to_loc.insert(Loc::Node(cwl.clone()), (l, a));
+        }
+    }
+
+    eprintln!("LOCS_BY_LEVEL V1: {:#?}", locs_by_level);
+
+    let sorted_condensed_edges = SortedVec::from_unsorted(
+        dag
+            .edge_references()
+            .map(|er| {
+                let (vx, wx) = (er.source(), er.target());
+                let vl = dag.node_weight(vx).unwrap();
+                let wl = dag.node_weight(wx).unwrap();
+                (vl.clone(), wl.clone(), er.weight())
+            })
+            .collect::<Vec<_>>()
+    );
+
+    eprintln!("CONDENSED GRAPH: {:#?}", sorted_condensed_edges);
+
+    let mut hops_by_edge = BTreeMap::new();
+    let mut hops_by_level = BTreeMap::new();
+    for (vl, wl, _) in sorted_condensed_edges.iter() {
+        let vvr = *vx_rank.get(vl).unwrap();
+        let wvr = *vx_rank.get(wl).unwrap();
+        let vhr = *hx_rank.get(vl).unwrap();
+        let whr = *hx_rank.get(wl).unwrap();
+        
+        let mut mhrs = vec![vhr];
+        for mid_level in (vvr+1)..(wvr) {
+            let mhr = locs_by_level.get(&mid_level).map_or(0, |v| v.len());
+            locs_by_level.entry(mid_level).or_insert(vec![]).push(mhr);
+            loc_to_node.insert((mid_level, mhr), Loc::Hop(mid_level, vl.clone(), wl.clone()));
+            node_to_loc.insert(Loc::Hop(mid_level, vl.clone(), wl.clone()), (mid_level, mhr)); // BUG: what about the endpoints?
+            mhrs.push(mhr);
+        }
+        mhrs.push(whr);
+
+        eprintln!("HOP {} {} {} {} {} {} {:?}", vl, wl, vvr, wvr, vhr, whr, mhrs);
+        
+        for lvl in vvr..wvr {
+            let mx = (lvl as i32 - vvr as i32) as usize;
+            let nx = (lvl as i32 + 1 - vvr as i32) as usize;
+            let mhr = mhrs[mx];
+            let nhr = mhrs[nx];
+            hops_by_level
+                .entry(lvl)
+                .or_insert(SortedVec::new())
+                .insert((mhr, nhr, vl.clone(), wl.clone(), lvl));
+            hops_by_edge
+                .entry((vl.clone(), wl.clone()))
+                .or_insert(BTreeMap::new())
+                .insert(lvl, (mhr, nhr));
+        }
+    }
+    eprintln!("LOCS_BY_LEVEL V2: {:#?}", locs_by_level);
+
+    eprintln!("HOPS_BY_LEVEL: {:#?}", hops_by_level);
+
+    let mut g_hops = Graph::<(usize, usize), (usize, V, V)>::new();
+    let mut g_hops_vx = HashMap::new();
+    for (_rank, hops) in hops_by_level.iter() {
+        for (mhr, nhr, vl, wl, lvl) in hops.iter() {
+            let gvx = or_insert(&mut g_hops, &mut g_hops_vx, (*lvl, *mhr));
+            let gwx = or_insert(&mut g_hops, &mut g_hops_vx, (lvl+1, *nhr));
+            g_hops.add_edge(gvx, gwx, (*lvl, vl.clone(), wl.clone()));
+        }
+    }
+    eprintln!("HOPS GRAPH: {:?}\n", Dot::new(&g_hops));
+
+    (locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc)
+}
+
 pub fn render(v: Vec<Syn>) {
     let ds = filter_fact(v.iter(), &Ident("draw"));
     // let ds2 = ds.collect::<Vec<&Fact>>();
@@ -247,94 +352,7 @@ pub fn render(v: Vec<Syn>) {
 
         let paths_by_rank = rank(&condensed, &roots);
 
-        let mut vx_rank = HashMap::new();
-        let mut hx_rank = HashMap::new();
-        for (rank, paths) in paths_by_rank.iter() {
-            for (n, (_vx, wx)) in paths.iter().enumerate() {
-                vx_rank.insert(*wx, *rank);
-                hx_rank.insert(*wx, n);
-            }
-        }
-
-
-        let mut loc_to_node = HashMap::new();
-        let mut node_to_loc = HashMap::new();
-
-        let mut locs_by_level = BTreeMap::new();
-        for (rank, paths) in paths_by_rank.iter() {
-            let l = *rank;
-            for (a, (_cvl, cwl)) in paths.iter().enumerate() {
-                locs_by_level.entry(l).or_insert(vec![]).push(a);
-                loc_to_node.insert((l, a), Loc::Node(cwl));
-                node_to_loc.insert(Loc::Node(cwl), (l, a));
-            }
-        }
-
-        eprintln!("LOCS_BY_LEVEL V1: {:#?}", locs_by_level);
-
-        let sorted_condensed_edges = SortedVec::from_unsorted(
-            condensed
-                .edge_references()
-                .map(|er| {
-                    let (vx, wx) = (er.source(), er.target());
-                    let vl = condensed.node_weight(vx).unwrap();
-                    let wl = condensed.node_weight(wx).unwrap();
-                    (*vl, *wl, er.weight())
-                })
-                .collect::<Vec<_>>()
-        );
-
-        eprintln!("CONDENSED GRAPH: {:#?}", sorted_condensed_edges);
-
-        let mut hops_by_edge = BTreeMap::new();
-        let mut hops_by_level = BTreeMap::new();
-        for (vl, wl, _) in sorted_condensed_edges.iter() {
-            let vvr = *vx_rank.get(*vl).unwrap();
-            let wvr = *vx_rank.get(*wl).unwrap();
-            let vhr = *hx_rank.get(*vl).unwrap();
-            let whr = *hx_rank.get(*wl).unwrap();
-            
-            let mut mhrs = vec![vhr];
-            for mid_level in (vvr+1)..(wvr) {
-                let mhr = locs_by_level.get(&mid_level).map_or(0, |v| v.len());
-                locs_by_level.entry(mid_level).or_insert(vec![]).push(mhr);
-                loc_to_node.insert((mid_level, mhr), Loc::Hop(mid_level, vl, wl));
-                node_to_loc.insert(Loc::Hop(mid_level, vl, wl), (mid_level, mhr)); // BUG: what about the endpoints?
-                mhrs.push(mhr);
-            }
-            mhrs.push(whr);
-
-            eprintln!("HOP {} {} {} {} {} {} {:?}", vl, wl, vvr, wvr, vhr, whr, mhrs);
-            
-            for lvl in vvr..wvr {
-                let mx = (lvl as i32 - vvr as i32) as usize;
-                let nx = (lvl as i32 + 1 - vvr as i32) as usize;
-                let mhr = mhrs[mx];
-                let nhr = mhrs[nx];
-                hops_by_level
-                    .entry(lvl)
-                    .or_insert(SortedVec::new())
-                    .insert((mhr, nhr, vl, wl, lvl));
-                hops_by_edge
-                    .entry((*vl, *wl))
-                    .or_insert(BTreeMap::new())
-                    .insert(lvl, (mhr, nhr));
-            }
-        }
-        eprintln!("LOCS_BY_LEVEL V2: {:#?}", locs_by_level);
-
-        eprintln!("HOPS_BY_LEVEL: {:#?}", hops_by_level);
-
-        let mut g_hops = Graph::<(usize, usize), (usize, &str, &str)>::new();
-        let mut g_hops_vx = HashMap::new();
-        for (_rank, hops) in hops_by_level.iter() {
-            for (mhr, nhr, vl, wl, lvl) in hops.iter() {
-                let gvx = or_insert(&mut g_hops, &mut g_hops_vx, (*lvl, *mhr));
-                let gwx = or_insert(&mut g_hops, &mut g_hops_vx, (lvl+1, *nhr));
-                g_hops.add_edge(gvx, gwx, (*lvl, vl, wl));
-            }
-        }
-        eprintln!("HOPS GRAPH: {:?}\n", Dot::new(&g_hops));
+        let (locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc) = calculate_locs_and_hops(&condensed, &paths_by_rank);        
 
         // std::process::exit(0);
 
@@ -515,7 +533,7 @@ pub fn render(v: Vec<Syn>) {
             .iter()
             .flat_map(|h| 
                 h.1.iter().map(|(mhr, nhr, vl, wl, lvl)| {
-                    (*mhr, *nhr, **vl, **wl, *lvl)
+                    (*mhr, *nhr, *vl, *wl, *lvl)
                 })
             ).enumerate()
             .map(|(n, (mhr, nhr, vl, wl, lvl))| {
@@ -526,7 +544,7 @@ pub fn render(v: Vec<Syn>) {
             .iter()
             .flat_map(|h| 
                 h.1.iter().map(|(mhr, nhr, vl, wl, lvl)| {
-                    (*mhr, *nhr, **vl, **wl, *lvl)
+                    (*mhr, *nhr, *vl, *wl, *lvl)
                 })
             )
             .chain(
@@ -611,7 +629,7 @@ pub fn render(v: Vec<Syn>) {
 
                 v_dsts.sort(); v_dsts.dedup();
                 v_dsts.sort_by_key(|dst| {
-                    let (ovr, ohr) = node_to_loc[&Loc::Node(dst)];
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(*dst)];
                     let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
                     (shr, -(svr as i32))
                 });
@@ -622,7 +640,7 @@ pub fn render(v: Vec<Syn>) {
 
                 w_srcs.sort(); w_srcs.dedup();
                 w_srcs.sort_by_key(|src| {
-                    let (ovr, ohr) = node_to_loc[&Loc::Node(src)];
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(*src)];
                     let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
                     (shr, -(svr as i32))
                 });
@@ -788,7 +806,7 @@ pub fn render(v: Vec<Syn>) {
                         width, vl, hpos, vpos, h_name[*vl]);
                 },
                 Loc::Hop(_, vl, wl) => {
-                    let hn = sol_by_hop[&(*ovr, *ohr, **vl, **wl)];
+                    let hn = sol_by_hop[&(*ovr, *ohr, *vl, *wl)];
                     let spos = ss[hn];
                     let hpos = 10.0 * spos;
                     println!(indoc!(r#"
@@ -801,8 +819,8 @@ pub fn render(v: Vec<Syn>) {
 
         for cer in condensed.edge_references() {
             for (vl, wl, ew) in cer.weight().iter() {
-                let (ovr, ohr) = node_to_loc[&Loc::Node(vl)];
-                let (ovrd, ohrd) = node_to_loc[&Loc::Node(wl)];
+                let (ovr, ohr) = node_to_loc[&Loc::Node(*vl)];
+                let (ovrd, ohrd) = node_to_loc[&Loc::Node(*wl)];
 
                 let snv = sol_by_hop[&(ovr, ohr, *vl, *wl)];
                 let snw = sol_by_hop[&(ovrd, ohrd, *vl, *wl)];
