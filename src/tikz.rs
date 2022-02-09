@@ -81,9 +81,6 @@ pub fn calculate_vcg<'s>(v: &'s Vec<Syn>, draw: &'s Fact) -> (Graph<&'s str, &'s
 
     // println!("resolution: {:?}\n", res);
 
-    let action_query = Ident("action");
-    let percept_query = Ident("percept");
-    // let host_query = Ident("host");
     let name_query = Ident("name");
 
     let mut vert = Graph::<&str, &str>::new();
@@ -91,9 +88,6 @@ pub fn calculate_vcg<'s>(v: &'s Vec<Syn>, draw: &'s Fact) -> (Graph<&'s str, &'s
     let mut v_nodes = HashMap::<&str, NodeIndex>::new();
 
     let mut h_name = HashMap::new();
-    let mut h_styl = HashMap::new();
-    let mut h_acts = HashMap::new();
-    let mut h_sens = HashMap::new();
 
     for hint in res {
         match hint {
@@ -102,26 +96,13 @@ pub fn calculate_vcg<'s>(v: &'s Vec<Syn>, draw: &'s Fact) -> (Graph<&'s str, &'s
                     let item_ident = unwrap_atom(item).unwrap();
                     let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
                     let name = as_string(&resolved_item, &name_query, item_ident.into());
-                    // println!(r#"{}/{};"#, unwrap_atom(item).unwrap(), tikz_escape(&name));
 
                     // TODO: need to loop here to resolve all the actuates/senses/hosts pairs, not just the first
                     let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
                     let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
                     let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
-                    let action = as_string(&resolved_item, &action_query, item_ident.into());
-                    let percept = as_string(&resolved_item, &percept_query, item_ident.into());
-                    // let host = as_string(&resolved_item, &host_query, item_ident.into());
 
-                    h_styl.insert(item_ident, style);
                     h_name.insert(item_ident, name);
-
-                    h_acts.entry((resolved_actuates, resolved_hosts))
-                        .or_insert(vec![])
-                        .push((item_ident, action));
-
-                    h_sens.entry((resolved_senses, resolved_hosts))
-                        .or_insert(vec![])
-                        .push((item_ident, percept));
 
                     match *style {
                         "compact" => {
@@ -178,9 +159,27 @@ pub fn calculate_vcg<'s>(v: &'s Vec<Syn>, draw: &'s Fact) -> (Graph<&'s str, &'s
     (vert, v_nodes, h_name)
 }
 
-pub fn render(v: Vec<Syn>) {
-    // println!("ok\n\n");
+pub fn condense<'s>(vert: &'s Graph<&'s str, &'s str>) -> (Graph<&'s str, SortedVec<(&'s str, &'s str, &'s str)>>, HashMap::<&'s str, NodeIndex>) {
+    let mut condensed = Graph::<&str, SortedVec<(&str, &str, &str)>>::new();
+    let mut condensed_vxmap = HashMap::new();
+    for (vx, vl) in vert.node_references() {
+        let mut dsts = HashMap::new();
+        for er in vert.edges_directed(vx, Outgoing) {
+            let wx = er.target();
+            let wl = vert.node_weight(wx).unwrap();
+            dsts.entry(wl).or_insert(SortedVec::new()).insert((*vl, *wl, *er.weight()));
+        }
+        
+        let cvx = or_insert(&mut condensed, &mut condensed_vxmap, vl);
+        for (wl, exs) in dsts {
+            let cwx = or_insert(&mut condensed, &mut condensed_vxmap, wl);
+            condensed.add_edge(cvx, cwx, exs);
+        }
+    }
+    (condensed, condensed_vxmap)
+}
 
+pub fn render(v: Vec<Syn>) {
     let ds = filter_fact(v.iter(), &Ident("draw"));
     // let ds2 = ds.collect::<Vec<&Fact>>();
     // println!("draw:\n{:#?}\n\n", ds2);
@@ -189,22 +188,7 @@ pub fn render(v: Vec<Syn>) {
         
         let (vert, v_nodes, h_name) = calculate_vcg(&v, draw);
 
-        let mut condensed = Graph::<&str, SortedVec<(&str, &str, &str)>>::new();
-        let mut condensed_vxmap = HashMap::new();
-        for (vx, vl) in vert.node_references() {
-            let mut dsts = HashMap::new();
-            for er in vert.edges_directed(vx, Outgoing) {
-                let wx = er.target();
-                let wl = vert.node_weight(wx).unwrap();
-                dsts.entry(wl).or_insert(SortedVec::new()).insert((*vl, *wl, *er.weight()));
-            }
-            
-            let cvx = or_insert(&mut condensed, &mut condensed_vxmap, vl);
-            for (wl, exs) in dsts {
-                let cwx = or_insert(&mut condensed, &mut condensed_vxmap, wl);
-                condensed.add_edge(cvx, cwx, exs);
-            }
-        }
+        let (condensed, _) = condense(&vert);
 
         eprintln!("CONDENSED: {:?}", Dot::new(&condensed));
 
