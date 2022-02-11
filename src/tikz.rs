@@ -149,6 +149,7 @@ pub fn render(v: Vec<Syn>) {
                     2 => {
                         let (lvl, (_mhr, nhr)) = hops.iter().next().unwrap();
                         let (ovr, ohr) = (lvl+1, nhr);
+                        // BUG? -- intermediate node needs to be at aux_{ovr}_{ohr}?
                         println!(indoc!(r#"
                             \draw [rounded corners, {},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
                             dir, vl, arr_src_frac, vl, anchor, ew, ovr, ohr, wl, arr_dst_frac, wl    
