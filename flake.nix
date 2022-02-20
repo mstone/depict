@@ -2,13 +2,14 @@
   description = "github.com/mstone/diagrams";
 
   inputs.import-cargo.url = "git+https://github.com/edolstra/import-cargo";
-  inputs.nixpkgs.url = "nixpkgs";
+  inputs.nixpkgs.url = "github:mstone/nixpkgs";
   inputs.flake-utils.url = "github:numtide/flake-utils";
+  inputs.nix-filter.url = "github:numtide/nix-filter";
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
   inputs.rust-overlay.inputs.flake-utils.follows = "flake-utils";
   inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = {self, nixpkgs, import-cargo, rust-overlay, flake-utils}:
+  outputs = {self, nixpkgs, import-cargo, rust-overlay, flake-utils, nix-filter}:
     flake-utils.lib.simpleFlake {
       inherit self nixpkgs;
       name = "diagrams";
@@ -22,7 +23,13 @@
           lib.diagrams = { isShell }: with final; with pkgs; stdenv.mkDerivation {
             name = "diagrams";
 
-            src = self;
+            #src = self;
+            src = nix-filter.lib.filter {
+              root = self;
+              include = [
+                "src"
+              ];
+            };
 
             buildInputs = [
               rust-bin.stable.latest.rust
@@ -36,9 +43,16 @@
                 lockFile = ./Cargo.lock;
                 inherit pkgs;
               }).cargoHome
-            ]) ++ final.lib.optionals stdenv.isDarwin [
-              darwin.apple_sdk.frameworks.AppKit
-            ];
+            ]) ++ final.lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
+              AppKit
+              Security
+              CoreServices
+              CoreFoundation
+              Foundation
+              AppKit
+              WebKit
+              Cocoa
+            ]);
 
             buildPhase = ''
               cargo build --frozen --offline

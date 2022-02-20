@@ -9,7 +9,7 @@ use std::fs::read_to_string;
 use std::env::args;
 use std::io;
 
-use druid::{self, AppLauncher, WindowDesc, Data, Size, Point, Color, LifeCycle, WidgetPod};
+use druid::{self, AppLauncher, WindowDesc, Data, Size, Point, Color, LifeCycle, WidgetPod, LocalizedString, MenuItem, commands, SysMods, Menu};
 use druid::{widget::{Label}, Widget};
 
 #[derive(Clone, Data, Default)]
@@ -64,7 +64,7 @@ impl Widget<AppState> for AppWidget<AppState> {
                 let lpos = ls[n];
                 let rpos = rs[n];
 
-                let vpos = 80.0 * (*ovr as f64);
+                let vpos = 80.0 * (*ovr as f64) + 100.0;
                 let hpos = 1024.0 * ((lpos + rpos) / 2.0);
                 // let width = 1024.0 * width_scale * (rpos - lpos);
 
@@ -104,10 +104,10 @@ impl Widget<AppState> for AppWidget<AppState> {
                         let hpos = 1024.0 * spos;
 
                         if n == 0 {
-                            path.push(PathEl::MoveTo(Point::new(1024.0 * sposv, (*lvl as f64) * height_scale)));
+                            path.push(PathEl::MoveTo(Point::new(1024.0 * sposv, (*lvl as f64) * height_scale + 100.0)));
                         }
                         
-                        path.push(PathEl::LineTo(Point::new(hpos, ((*lvl + 1) as f64) * height_scale)));
+                        path.push(PathEl::LineTo(Point::new(hpos, ((*lvl + 1) as f64) * height_scale + 100.0)));
                         
                     }
 
@@ -153,14 +153,79 @@ pub fn build_ui() -> impl Widget<AppState> {
     Scroll::new(AppWidget{..Default::default()})
 }
 
+fn macos_application_menu<T: Data>() -> Menu<T> {
+    // Menu::new("Hi")
+    // druid::platform_menus::mac::menu_bar()
+    Menu::new("WTF")
+        .entry(druid::platform_menus::mac::application::default())
+        .entry(druid::platform_menus::mac::file::default())
+    // Menu::new(LocalizedString::new("macos-menu-application-menu"))
+    //     .entry(MenuItem::new( LocalizedString::new("macos-menu-about-app") ).command( commands::SHOW_ABOUT ))
+    //     .separator()
+    //     .entry(
+    //         MenuItem::new(
+    //             LocalizedString::new("macos-menu-preferences"),
+    //         )
+    //         .command(
+    //             commands::SHOW_PREFERENCES,
+    //         )
+    //         .hotkey(SysMods::Cmd, ",")
+    //         .enabled(false),
+    //     )
+    //     .separator()
+    //     .entry(Menu::new(LocalizedString::new("macos-menu-services")))
+    //     .entry(
+    //         MenuItem::new(
+    //             LocalizedString::new("macos-menu-hide-app"),
+    //         ).command(
+    //             commands::HIDE_APPLICATION,
+    //         )
+    //         .hotkey(SysMods::Cmd, "h"),
+    //     )
+    //     .entry(
+    //         MenuItem::new(
+    //             LocalizedString::new("macos-menu-hide-others"),
+    //         ).command(
+    //             commands::HIDE_OTHERS,
+    //         )
+    //         .hotkey(SysMods::AltCmd, "h"),
+    //     )
+    //     .entry(
+    //         MenuItem::new(
+    //             LocalizedString::new("macos-menu-show-all"),
+    //         ).command(
+    //             commands::SHOW_ALL,
+    //         )
+    //         .enabled(false),
+    //     )
+    //     .separator()
+    //     .entry(
+    //         MenuItem::new(
+    //             LocalizedString::new("macos-menu-quit-app"),
+    //         ).command(
+    //             commands::QUIT_APP,
+    //         )
+    //         .hotkey(SysMods::Cmd, "q"),
+    //     )
+}
+
 pub fn render(contents: String) {
-    let main_window = WindowDesc::new(build_ui)
-    .title("Todo Tutorial")
-    .window_size((400.0, 400.0));
+    let main_window = WindowDesc::new(build_ui())
+        .title("STAMPEDE")
+        .window_size((1050.0, 600.0))
+        .menu(|_window_id, _data, _env| {
+            eprintln!("MENU MENU MENU MENU");
+            macos_application_menu()
+        });
+        // .menu(
+        //     |_window_id, _data, _env| druid::menu::sys::mac::application::default()
+        // );
 
     let initial_state = AppState(contents);
 
     AppLauncher::with_window(main_window)
+        .log_to_console()
+        // .localization_resources(vec!["builtin.ftl".into()], "./resources/i18n".into())
         .launch(initial_state)
         .expect("Failed to launch application");
 }

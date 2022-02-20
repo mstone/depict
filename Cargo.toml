@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 auto_enums = "0.7"
-druid = "0.7"
+dioxus = { git = "https://github.com/dioxuslabs/dioxus", features = [ "desktop", "ssr", "web" ] }
 indoc = "1.0"
 is_variant = "1.0"
 ndarray = "0.15"
@@ -19,9 +19,26 @@ rand = "0.8"
 sorted-vec = "0.7"
 thiserror = "1.0"
 
+[dependencies.dioxus-desktop]
+git = "https://github.com/dioxuslabs/dioxus"
+features = [ "devtool" ]
+
+
+[target.'cfg(target_os="macos")'.dependencies]
+block = "0.1.6"
+cocoa = "0.24.0"
+objc = "0.2.7"
+core-graphics = "0.22.0"
+foreign-types = "0.3.2"
+bitflags = "1.2.1"
+
 [lib]
 name = "diagrams"
 path = "src/lib.rs"
+
+[[bin]]
+name = "dioxus"
+path = "src/dioxus.rs"
 
 [[bin]]
 name = "parse"
@@ -32,8 +49,8 @@ name = "dot"
 path = "src/dot.rs"
 
 [[bin]]
-name = "druid"
-path = "src/druid.rs"
+name = "objc"
+path = "src/objc.rs"
 
 [[bin]]
 name = "tikz"
