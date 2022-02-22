@@ -19,32 +19,32 @@ pub fn tikz_escape(s: &str) -> String {
         .replace("\\n", "\\\\")
 }
 
-pub fn render(v: Vec<Syn>) {
+pub fn render(v: Vec<Syn>) -> Result<(), Error> {
     let ds = filter_fact(v.iter(), &Ident("draw"));
     // let ds2 = ds.collect::<Vec<&Fact>>();
     // println!("draw:\n{:#?}\n\n", ds2);
 
     for draw in ds {
         
-        let Vcg{vert, v_nodes, h_name} = calculate_vcg(&v, draw);
+        let Vcg{vert, v_nodes, h_name} = calculate_vcg(&v, draw)?;
 
         eprintln!("VERT: {:?}", Dot::new(&vert));
 
-        let Cvcg{condensed, condensed_vxmap: _} = condense(&vert);
+        let Cvcg{condensed, condensed_vxmap: _} = condense(&vert)?;
 
-        let roots = roots(&condensed);
+        let roots = roots(&condensed)?;
 
-        let paths_by_rank = rank(&condensed, &roots);
+        let paths_by_rank = rank(&condensed, &roots)?;
 
-        let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank);
+        let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
 
         // std::process::exit(0);
 
-        let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level);
+        let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
         
         let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
-        let (ls, rs, ss) = position_sols(&vert, &v_nodes, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem);
+        let LayoutSolution{ls, rs, ss} = position_sols(&vert, &v_nodes, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
 
         let LayoutProblem{all_locs, sol_by_loc, sol_by_hop, ..} = layout_problem;
 
@@ -256,6 +256,8 @@ pub fn render(v: Vec<Syn>) {
     // use top-level "draw" fact to identify inline or top-level drawings to draw
     // resolve top-level drawings + use inline drawings to identify objects to draw to make particular drawings
     // use object facts to figure out directions + labels?
+
+    Ok(())
 }
 
 pub fn main() -> io::Result<()> {
@@ -269,7 +271,7 @@ pub fn main() -> io::Result<()> {
                 exit(1);
             },
             Ok(("", v2)) => {
-                render(v2);
+                render(v2).unwrap();
             }
             _ => {
                 println!("{:#?}", v);

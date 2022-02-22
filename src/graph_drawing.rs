@@ -1,12 +1,14 @@
+#![deny(clippy::unwrap_used)]
 use petgraph::graph::{Graph, NodeIndex};
 use petgraph::dot::{Dot};
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
 use pyo3::{prelude::*, prepare_freethreaded_python};
 use pyo3::class::basic::CompareOp;
 use petgraph::EdgeDirection::{Incoming, Outgoing};
-use petgraph::algo::{floyd_warshall};
+use petgraph::algo::{floyd_warshall, NegativeCycle};
 use pyo3::types::{PyModule, IntoPyDict, PyList};
 use sorted_vec::SortedVec;
+use tracing_error::{TracedError, InstrumentError};
 use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
 use std::fmt::{Debug, Display};
@@ -17,7 +19,7 @@ use ndarray::{Array2};
 use numpy::{PyArray1, PyReadonlyArray1};
 use tracing::{event, Level};
 use crate::parser::Ident;
-use crate::render::{Fact, Syn, resolve, unwrap_atom, find_parent, to_ident, as_string};
+use crate::render::{Fact, Syn, resolve, try_atom, find_parent, to_ident, as_string};
 
 pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V) -> NodeIndex where V: Eq + Hash + Clone {
     let e = h.entry(v.clone());
@@ -29,28 +31,28 @@ pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V)
     *ix
 }
 
-pub fn mul<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
-    a.call_method1("__mul__", (b,)).unwrap()
+pub fn mul<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
+    a.call_method1("__mul__", (b,))
 }
 
-pub fn sub<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
-    a.call_method1("__sub__", (b,)).unwrap()
+pub fn sub<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
+    a.call_method1("__sub__", (b,))
 }
 
-pub fn add<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
-    a.call_method1("__add__", (b,)).unwrap()
+pub fn add<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
+    a.call_method1("__add__", (b,))
 }
 
-pub fn get(a: &PyAny, b: usize) -> &PyAny {
-    a.get_item(b.into_py(a.py())).unwrap()
+pub fn get(a: &PyAny, b: usize) -> PyResult<&PyAny> {
+    a.get_item(b.into_py(a.py()))
 }
 
-pub fn geq<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
-    a.rich_compare(b, CompareOp::Ge).unwrap()
+pub fn geq<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
+    a.rich_compare(b, CompareOp::Ge)
 }
 
-pub fn leq<'py>(a: &'py PyAny, b: &'py PyAny) -> &'py PyAny {
-    a.rich_compare(b, CompareOp::Le).unwrap()
+pub fn leq<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
+    a.rich_compare(b, CompareOp::Le)
 }
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone)]
@@ -79,7 +81,55 @@ pub struct Vcg<'s> {
     pub h_name: HashMap<&'s str, String>,
 }
 
-pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Vcg<'s> {
+#[derive(Debug, thiserror::Error)]
+pub enum Kind {
+    #[error("indexing error")]
+    IndexingError {},
+    #[error("missing drawing error")]
+    MissingDrawingError {},
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RankingError {
+    #[error("negative cycle error")]
+    NegativeCycleError{cycle: NegativeCycle},
+    #[error("io error")]
+    IoError{#[from] source: std::io::Error},
+    #[error("utf8 error")]
+    Utf8Error{#[from] source: std::str::Utf8Error},
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LayoutError {
+    #[error("cvxpy error")]
+    CvxpyError{#[from] source: pyo3::PyErr},
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error(transparent)]
+    ParsingError{
+        #[from] source: nom::Err<String>,
+    },
+    #[error(transparent)]
+    RenderError{
+        #[from] source: crate::render::Error,
+    },
+    #[error(transparent)]
+    GraphDrawingError{
+        #[from] source: TracedError<Kind>,
+    },
+    #[error(transparent)]
+    RankingError{
+        #[from] source: TracedError<RankingError>,
+    },
+    #[error(transparent)]
+    LayoutError{
+        #[from] source: TracedError<LayoutError>,
+    }
+}
+
+pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Result<Vcg<'s>, Error> {
     // println!("draw:\n{:#?}\n\n", draw);
 
     let res = resolve(v.iter(), draw);
@@ -95,7 +145,7 @@ pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Vcg<'s> {
     for hint in res {
         if let Fact::Fact(Ident(style), items) = hint {
             for item in items {
-                let item_ident = unwrap_atom(item).unwrap();
+                let item_ident = try_atom(item)?;
                 let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
                 let name = as_string(&resolved_item, &Ident("name"), item_ident.into());
 
@@ -155,7 +205,7 @@ pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Vcg<'s> {
         }
     }
 
-    Vcg{vert, v_nodes, h_name}
+    Ok(Vcg{vert, v_nodes, h_name})
 }
 
 pub struct Cvcg<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord> {
@@ -163,14 +213,45 @@ pub struct Cvcg<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord> {
     pub condensed_vxmap: HashMap::<V, NodeIndex>
 }
 
-pub fn condense<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord>(vert: &Graph<V, E>) -> Cvcg<V,E> {
+pub trait OrErrExt<E> {
+    type Item;
+    fn or_err(self, error: E) -> Result<Self::Item, Error>;
+}
+
+impl<V, E> OrErrExt<E> for Option<V> where tracing_error::TracedError<E>: From<E>, Error: From<tracing_error::TracedError<E>> {
+    type Item = V;
+    fn or_err(self, error: E) -> Result<V, Error> {
+        self.ok_or_else(|| Error::from(error.in_current_span()))
+    }
+}
+
+pub trait OrErrMutExt {
+    type Item;
+    fn or_err_mut(&mut self) -> Result<&mut Self::Item, Error>;
+}
+
+impl<V> OrErrMutExt for Option<V> {
+    type Item = V;
+    fn or_err_mut(&mut self) -> Result<&mut V, Error> {
+        match self {
+            Some(ref mut inner) => {
+                Ok(inner)
+            },
+            None => {
+                Err(Error::from(Kind::IndexingError{}.in_current_span()))
+            },
+        }
+    }
+}
+
+pub fn condense<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord>(vert: &Graph<V, E>) -> Result<Cvcg<V,E>, Error> {
     let mut condensed = Graph::<V, SortedVec<(V, V, E)>>::new();
     let mut condensed_vxmap = HashMap::new();
     for (vx, vl) in vert.node_references() {
         let mut dsts = HashMap::new();
         for er in vert.edges_directed(vx, Outgoing) {
             let wx = er.target();
-            let wl = vert.node_weight(wx).unwrap();
+            let wl = vert.node_weight(wx).or_err(Kind::IndexingError{})?;
             dsts.entry(wl).or_insert_with(SortedVec::new).insert((vl.clone(), wl.clone(), (*er.weight()).clone()));
         }
         
@@ -182,31 +263,36 @@ pub fn condense<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord>(vert: &Gr
     }
     let dot = Dot::new(&condensed);
     event!(Level::DEBUG, ?dot, "CONDENSED");
-    Cvcg{condensed, condensed_vxmap}
+    Ok(Cvcg{condensed, condensed_vxmap})
 }
 
-pub fn roots<V: Clone + Debug + Ord, E>(dag: &Graph<V, E>) -> SortedVec<V> {
-    let roots = SortedVec::from_unsorted(
-        dag
-            .externals(Incoming)
-            .map(|vx| dag.node_weight(vx).unwrap().clone())
-            .collect::<Vec<_>>()
-    );
+pub fn roots<V: Clone + Debug + Ord, E>(dag: &Graph<V, E>) -> Result<SortedVec<V>, Error> {
+    let roots = dag
+        .externals(Incoming)
+        .map(|vx| dag.node_weight(vx).or_err(Kind::IndexingError{}).map(Clone::clone))
+        .into_iter()
+        .collect::<Result<Vec<_>, Error>>()?;
+    let roots = SortedVec::from_unsorted(roots);
     event!(Level::DEBUG, ?roots, "ROOTS");
-    roots
+    Ok(roots)
 }
 
-pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s SortedVec<V>) -> BTreeMap<usize, SortedVec<(V, V)>> {
-    let paths_fw = floyd_warshall(&dag, |_ex| { -1 }).unwrap();
+pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s SortedVec<V>) -> Result<BTreeMap<usize, SortedVec<(V, V)>>, Error> {
+    let paths_fw = floyd_warshall(&dag, |_ex| { -1 })
+        .map_err(|cycle| 
+            Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
+        )?;
 
     let paths_fw2 = SortedVec::from_unsorted(
         paths_fw
             .iter()
             .map(|((vx, wx), wgt)| {
-                let vl = (*dag.node_weight(*vx).unwrap()).clone();
-                let wl = (*dag.node_weight(*wx).unwrap()).clone();
-                (*wgt, vl, wl)
-            }).collect::<Vec<_>>()
+                let vl = dag.node_weight(*vx).or_err(Kind::IndexingError{})?.clone();
+                let wl = dag.node_weight(*wx).or_err(Kind::IndexingError{})?.clone();
+                Ok((*wgt, vl, wl))
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, Error>>()?
     );
     event!(Level::DEBUG, ?paths_fw2, "FLOYD-WARSHALL");
 
@@ -233,7 +319,7 @@ pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s Sort
     }
     event!(Level::DEBUG, ?paths_by_rank, "PATHS_BY_RANK");
 
-    paths_by_rank
+    Ok(paths_by_rank)
 }
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -255,7 +341,7 @@ pub struct Placement<V: Clone + Debug + Display + Ord + Hash> {
 pub fn calculate_locs_and_hops<'s, V, E>(
     dag: &'s Graph<V, E>, 
     paths_by_rank: &'s BTreeMap<usize, SortedVec<(V, V)>>
-) -> Placement<V>
+) -> Result<Placement<V>, Error>
         where 
     V: Clone + Debug + Display + Ord + Hash, 
     E: Clone + Debug + Ord 
@@ -289,11 +375,12 @@ pub fn calculate_locs_and_hops<'s, V, E>(
             .edge_references()
             .map(|er| {
                 let (vx, wx) = (er.source(), er.target());
-                let vl = dag.node_weight(vx).unwrap();
-                let wl = dag.node_weight(wx).unwrap();
-                (vl.clone(), wl.clone(), er.weight())
+                let vl = dag.node_weight(vx).or_err(Kind::IndexingError{})?;
+                let wl = dag.node_weight(wx).or_err(Kind::IndexingError{})?;
+                Ok((vl.clone(), wl.clone(), er.weight()))
             })
-            .collect::<Vec<_>>()
+            .into_iter()
+            .collect::<Result<Vec<_>, Error>>()?
     );
 
     event!(Level::DEBUG, ?sorted_condensed_edges, "CONDENSED GRAPH");
@@ -349,16 +436,21 @@ pub fn calculate_locs_and_hops<'s, V, E>(
     let g_hops_dot = Dot::new(&g_hops);
     event!(Level::DEBUG, ?g_hops_dot, "HOPS GRAPH");
 
-    Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc}
+    Ok(Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc})
 }
 
 pub fn minimize_edge_crossing<'s, V>(
     locs_by_level: &'s BTreeMap<usize, Vec<usize>>,
     hops_by_level: &'s BTreeMap<usize, SortedVec<Hop<V>>>
-) -> BTreeMap<usize, BTreeMap<usize, usize>> where
+) -> Result<BTreeMap<usize, BTreeMap<usize, usize>>, Error> where
     V: Clone + Debug + Display + Ord + Hash
 {
+    if hops_by_level.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    #[allow(clippy::unwrap_used)]
     let max_level = *hops_by_level.keys().max().unwrap();
+    #[allow(clippy::unwrap_used)]
     let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
 
     event!(Level::DEBUG, %max_level, %max_width, "max_level, max_width");
@@ -453,16 +545,15 @@ pub fn minimize_edge_crossing<'s, V>(
         .arg("--")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
-    let mut child = minion.spawn()
-        .expect("failed to execute minion");
-    let stdin = child.stdin.as_mut().unwrap();
-    stdin.write_all(csp.as_bytes()).expect("failed to write csp");
+    let mut child = minion.spawn().map_err(|e| Error::from(RankingError::from(e).in_current_span()))?;
+    let stdin = child.stdin.or_err_mut()?;
+    stdin.write_all(csp.as_bytes()).map_err(|e| Error::from(RankingError::from(e).in_current_span()))?;
 
     let output = child
         .wait_with_output()
-        .expect("failed to wait on child");
+        .map_err(|e| Error::from(RankingError::from(e).in_current_span()))?;
 
-    let outs = std::str::from_utf8(&output.stdout[..]).unwrap();
+    let outs = std::str::from_utf8(&output.stdout[..]).map_err(|e| Error::from(RankingError::from(e).in_current_span()))?;
 
     event!(Level::DEBUG, %outs, "CSP OUT");
 
@@ -516,7 +607,7 @@ pub fn minimize_edge_crossing<'s, V>(
     }
     event!(Level::DEBUG, ?solved_locs, "SOLVED_LOCS");
 
-    solved_locs
+    Ok(solved_locs)
 }
 
 pub struct LocRow<V: Clone + Debug + Display + Ord + Hash> {
@@ -595,6 +686,7 @@ pub fn calculate_sols<'s, V>(
         )
         .chain(
             hops_by_edge.iter().map(|((vl, wl), hops)| {
+                    #[allow(clippy::unwrap_used)] // an edge with no hops really should panic
                     let (lvl, (_mhr, nhr)) = hops.iter().rev().next().unwrap();
                     (*nhr, std::usize::MAX, vl.clone(), wl.clone(), lvl+1)
             }) 
@@ -613,6 +705,13 @@ pub fn calculate_sols<'s, V>(
     LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop}
 }
 
+#[derive(Debug)]
+pub struct LayoutSolution {
+    pub ls: Vec<f64>,
+    pub rs: Vec<f64>,
+    pub ss: Vec<f64>,
+}
+
 pub fn position_sols<'s, V, E>(
     dag: &'s Graph<V, E>,
     dag_map: &'s HashMap::<V, NodeIndex>,
@@ -620,11 +719,7 @@ pub fn position_sols<'s, V, E>(
     node_to_loc: &'s HashMap::<Loc<V, V>, (usize, usize)>,
     solved_locs: &'s BTreeMap<usize, BTreeMap<usize, usize>>,
     layout_problem: &'s LayoutProblem<V>,
-) -> (
-    Vec<f64>,
-    Vec<f64>,
-    Vec<f64>
-) where 
+) -> Result<LayoutSolution, Error> where 
     V: Clone + Debug + Display + Ord + Hash,
     E: Clone + Debug
 {
@@ -633,26 +728,26 @@ pub fn position_sols<'s, V, E>(
     let num_locs = all_locs.len();
     let num_hops = all_hops.len();
     prepare_freethreaded_python();
-    let res: PyResult<(Vec<_>, Vec<_>, Vec<_>)> = Python::with_gil(|py| {
+    let res: PyResult<LayoutSolution> = Python::with_gil(|py| {
         let cp = PyModule::import(py, "cvxpy")?;
         let var = cp.getattr("Variable")?;
         let sq = cp.getattr("square")?;
         let constant = cp.getattr("Constant")?;
         let problem = cp.getattr("Problem")?;
         let minimize = cp.getattr("Minimize")?;
-        let square = |a: &PyAny| {sq.call1((a,)).unwrap()};
-        let as_constant = |a: i32| { constant.call1((a.into_py(py),)).unwrap() };
-        let as_constantf = |a: f64| { constant.call1((a.into_py(py),)).unwrap() };
-        let hundred: &PyAny = as_constant(100);
-        let thousand: &PyAny = as_constant(1000);
-        let _ten: &PyAny = as_constant(10);
-        let one: &PyAny = as_constant(1);
-        let zero: &PyAny = as_constant(0);
+        let square = |a: &PyAny| {sq.call1((a,))};
+        let as_constant = |a: i32| { constant.call1((a.into_py(py),)) };
+        let as_constantf = |a: f64| { constant.call1((a.into_py(py),)) };
+        let hundred: &PyAny = as_constant(100)?;
+        let thousand: &PyAny = as_constant(1000)?;
+        let _ten: &PyAny = as_constant(10)?;
+        let one: &PyAny = as_constant(1)?;
+        let zero: &PyAny = as_constant(0)?;
         let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
         let eps = var.call((), Some([("pos", true)].into_py_dict(py)))?;
-        let sep = as_constantf(0.05);
+        let sep = as_constantf(0.05)?;
         let mut cvec: Vec<&PyAny> = vec![];
         let mut obj = zero;
 
@@ -665,23 +760,25 @@ pub fn position_sols<'s, V, E>(
             // if loc.is_node() { 
                 // eprint!("C0: ");
                 // eprint!("r{} >= l{} + S, ", n, n);
-                cvec.push(geq(get(r,n), add(get(l,n), sep)));
+                cvec.push(geq(get(r,n)?, add(get(l,n)?, sep)?)?);
                 if shr > 0 {
+                    #[allow(clippy::unwrap_used)]
                     let ohrp = locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap();
                     let np = sol_by_loc[&(ovr, ohrp)];
                     // let _shrp = locs[&ohrp];
-                    cvec.push(geq(get(l, n), get(r, np)));
+                    cvec.push(geq(get(l, n)?, get(r, np)?)?);
                     // eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
                 }
                 if shr < locs.len()-1 {
+                    #[allow(clippy::unwrap_used)]
                     let ohrn = locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap();
                     let nn = sol_by_loc[&(ovr,ohrn)];
                     // let _shrn = locs[&(ohr+1)];
-                    cvec.push(leq(get(r,n), get(l,nn)));
+                    cvec.push(leq(get(r,n)?, get(l,nn)?)?);
                     // eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
                 }
                 if shr == locs.len()-1 {
-                    cvec.push(leq(get(r,n), one));
+                    cvec.push(leq(get(r,n)?, one)?);
                     // eprint!("r{:?} <= 1", (ovr, ohr, shr, n));
                 }
                 // eprintln!();  
@@ -691,8 +788,26 @@ pub fn position_sols<'s, V, E>(
             let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
             let w_ers = dag.edges_directed(dag_map[wl], Incoming).into_iter().collect::<Vec<_>>();
 
-            let mut v_dsts = v_ers.iter().map(|er| { (*dag.node_weight(er.target()).unwrap()).clone() }).collect::<Vec<_>>();
-            let mut w_srcs = w_ers.iter().map(|er| { (*dag.node_weight(er.source()).unwrap()).clone() }).collect::<Vec<_>>();
+            let mut v_dsts = v_ers
+                .iter()
+                .map(|er| { 
+                    dag
+                        .node_weight(er.target())
+                        .map(Clone::clone)
+                        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>("missing node weight"))
+                })
+                .into_iter()
+                .collect::<Result<Vec<_>, PyErr>>()?;
+            let mut w_srcs = w_ers
+                .iter()
+                .map(|er| { 
+                    dag
+                        .node_weight(er.source())
+                        .map(Clone::clone)
+                        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>("missing node weight"))
+                })
+                .into_iter()
+                .collect::<Result<Vec<_>, PyErr>>()?;
 
             v_dsts.sort(); v_dsts.dedup();
             v_dsts.sort_by_key(|dst| {
@@ -716,7 +831,9 @@ pub fn position_sols<'s, V, E>(
                 .map(|src| { (src.clone(), wl.clone()) })
                 .collect::<Vec<_>>();
 
+            #[allow(clippy::unwrap_used)]
             let bundle_src_pos = v_outs.iter().position(|e| { *e == (vl.clone(), wl.clone()) }).unwrap();
+            #[allow(clippy::unwrap_used)]
             let bundle_dst_pos = w_ins.iter().position(|e| { *e == (vl.clone(), wl.clone()) }).unwrap();
             let hops = &hops_by_edge[&(vl.clone(), wl.clone())];
             // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
@@ -731,34 +848,36 @@ pub fn position_sols<'s, V, E>(
             // ORDER, SYMMETRY
             if bundle_src_pos == 0 {
                 // eprint!("C1: ");
-                cvec.push(geq(get(s, n), add(get(l, ln), eps)));
+                cvec.push(geq(get(s, n)?, add(get(l, ln)?, eps)?)?);
                 // eprintln!("s{} >= l{}+ε", n, ln);
-                obj = add(obj, square(sub(get(s, n), get(l, ln))));
+                obj = add(obj, square(sub(get(s, n)?, get(l, ln)?)?)?)?;
             }
             if bundle_src_pos > 0 {
                 // eprint!("C2: ");
                 let (vll, wll) = &v_outs[bundle_src_pos-1];
                 let hopsl = &hops_by_edge[&(vll.clone(), wll.clone())];
+                #[allow(clippy::unwrap_used)]
                 let (lvll, (mhrl, _nhrl)) = hopsl.iter().next().unwrap();
                 let nl = sol_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())];
-                cvec.push(geq(get(s, n), add(get(s, nl), eps)));
+                cvec.push(geq(get(s, n)?, add(get(s, nl)?, eps)?)?);
                 // eprintln!("s{} >= s{}+ε", n, nl);
-                obj = add(obj, square(sub(get(s, nl), get(s, n))));
+                obj = add(obj, square(sub(get(s, nl)?, get(s, n)?)?)?)?;
             }
             if bundle_src_pos < v_outs.len()-1 {
                 // eprint!("C3: ");
                 let (vlr, wlr) = &v_outs[bundle_src_pos+1];
                 let hopsr = &hops_by_edge[&(vlr.clone(), wlr.clone())];
+                #[allow(clippy::unwrap_used)]
                 let (lvlr, (mhrr, _nhrr)) = hopsr.iter().next().unwrap();
                 let nr = sol_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())];
-                cvec.push(leq(get(s, n), sub(get(s, nr), eps)));
+                cvec.push(leq(get(s, n)?, sub(get(s, nr)?, eps)?)?);
                 // eprintln!("s{} <= s{}-ε", n, nr);
             }
             if bundle_src_pos == v_outs.len()-1 {
                 // eprint!("C4: ");
-                cvec.push(leq(get(s, n), sub(get(r, rn), eps)));
+                cvec.push(leq(get(s, n)?, sub(get(r, rn)?, eps)?)?);
                 // eprintln!("s{} <= r{}-ε", n, rn);
-                obj = add(obj, square(sub(get(s, n), get(r, rn))));
+                obj = add(obj, square(sub(get(s, n)?, get(r, rn)?)?)?)?;
             }
 
             // AGREEMENT
@@ -769,10 +888,11 @@ pub fn position_sols<'s, V, E>(
                     let nd2 = sol_by_hop[&(lvl+1, *nhr, vl.clone(), wl.clone())];
                     n = n2;
                     nd = nd2;
-                    obj = add(obj, mul(thousand, square(sub(get(s,n), get(s,nd)))));
+                    obj = add(obj, mul(thousand, square(sub(get(s,n)?, get(s,nd)?)?)?)?)?;
                 }
             }
 
+            #[allow(clippy::unwrap_used)]
             let last_hop = hops.iter().rev().next().unwrap();
             let (llvl, (_lmhr, lnhr)) = last_hop;
             let lnd = sol_by_loc[&(*llvl+1, *lnhr)];
@@ -781,39 +901,41 @@ pub fn position_sols<'s, V, E>(
             // ORDER, SYMMETRY
             if bundle_dst_pos == 0 {
                 // eprint!("C5: ");
-                cvec.push(geq(get(s, nd), add(get(l, lnd), eps)));
+                cvec.push(geq(get(s, nd)?, add(get(l, lnd)?, eps)?)?);
                 // eprintln!("s{} >= l{}+ε", nd, lnd);
-                obj = add(obj, square(sub(get(s, nd), get(l, lnd))));
+                obj = add(obj, square(sub(get(s, nd)?, get(l, lnd)?)?)?)?;
             }
             if bundle_dst_pos > 0 {
                 // eprint!("C6: ");
                 let (vll, wll) = &w_ins[bundle_dst_pos-1];
                 let hopsl = &hops_by_edge[&(vll.clone(), wll.clone())];
+                #[allow(clippy::unwrap_used)]
                 let (lvll, (_mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
                 let ndl = sol_by_hop[&(lvll+1, *nhrl, vll.clone(), wll.clone())];
-                cvec.push(geq(get(s, nd), add(get(s, ndl), eps)));
+                cvec.push(geq(get(s, nd)?, add(get(s, ndl)?, eps)?)?);
                 // eprintln!("s{} >= s{}+ε", nd, ndl);
-                obj = add(obj, square(sub(get(s, ndl), get(s, nd))));
+                obj = add(obj, square(sub(get(s, ndl)?, get(s, nd)?)?)?)?;
             }
             if bundle_dst_pos < w_ins.len()-1 {
                 // eprint!("C7: ");
                 let (vlr, wlr) = &w_ins[bundle_dst_pos+1];
                 let hopsr = &hops_by_edge[&(vlr.clone(), wlr.clone())];
+                #[allow(clippy::unwrap_used)]
                 let (lvlr, (_mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
                 let ndr = sol_by_hop[&(lvlr+1, *nhrr, vlr.clone(), wlr.clone())];
-                cvec.push(leq(get(s, nd), sub(get(s, ndr), eps)));
+                cvec.push(leq(get(s, nd)?, sub(get(s, ndr)?, eps)?)?);
                 // eprintln!("s{} <= s{}-ε", nd, ndr);
             }
             if bundle_dst_pos == w_ins.len()-1 {
                 // eprint!("C8: ");
-                cvec.push(leq(get(s, nd), sub(get(r, rnd), eps)));
+                cvec.push(leq(get(s, nd)?, sub(get(r, rnd)?, eps)?)?);
                 // eprintln!("s{} <= r{}-ε", nd, rnd);
-                obj = add(obj, square(sub(get(s, nd), get(r, rnd))));
+                obj = add(obj, square(sub(get(s, nd)?, get(r, rnd)?)?)?)?;
             }
         }
 
         // SPACE
-        obj = sub(obj, mul(hundred, eps));
+        obj = sub(obj, mul(hundred, eps)?)?;
         obj = minimize.call1((obj,))?;
         
         let constr = PyList::new(py, cvec);
@@ -828,20 +950,20 @@ pub fn position_sols<'s, V, E>(
         prb.call_method1("solve", ())?;
 
         let lv = get_value(l)?;
-        let lv = lv.as_slice().unwrap();
+        let lv = lv.as_slice()?;
 
         let rv = get_value(r)?;
-        let rv = rv.as_slice().unwrap();
+        let rv = rv.as_slice()?;
 
         let sv = get_value(s)?;
-        let sv = sv.as_slice().unwrap();
+        let sv = sv.as_slice()?;
 
         // eprintln!("L: {:.2?}\n", lv);
         // eprintln!("R: {:.2?}\n", rv);
         // eprintln!("S: {:.2?}\n", sv);
 
-        Ok((lv.to_vec(), rv.to_vec(), sv.to_vec()))
+        Ok(LayoutSolution{ls: lv.to_vec(), rs: rv.to_vec(), ss: sv.to_vec()})
     });
     event!(Level::DEBUG, ?res, "PY");
-    res.unwrap()
+    res.map_err(|e| Error::from(LayoutError::from(e).in_current_span()))
 }

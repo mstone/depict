@@ -21,6 +21,7 @@ sorted-vec = "0.7"
 thiserror = "1.0"
 tokio = "1"
 tracing = "0.1"
+tracing-error = { version = "0.2", features = [ "traced-error" ] }
 
 [dependencies.dioxus-desktop]
 git = "https://github.com/dioxuslabs/dioxus"

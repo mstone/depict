@@ -244,6 +244,41 @@ pub mod parser {
 
 pub mod render {
     use auto_enums::auto_enum;
+    use tracing_error::{TracedError, InstrumentError};
+
+    #[derive(Debug, thiserror::Error)]
+    enum Kind {
+        #[error("missing atom")]
+        MissingAtom
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("render error: {source:?}")]
+    pub struct Error {
+        #[from]
+        source: TracedError<Kind>,
+        // backtrace: Backtrace,
+    }
+
+    pub fn try_atom<'a>(a: &'a Fact<'a>) -> Result<&'a str, Error> {
+        match a {
+            Fact::Atom(crate::parser::Ident(i)) => Ok(*i),
+            _ => Err(Error::from(Kind::MissingAtom{}.in_current_span())),
+        // }
+        }
+    }
+
+    // impl<E> From<E> for Error
+    // where
+    //     Kind: From<E>,
+    // {
+    //     fn from(source: E) -> Self {
+    //         Self {
+    //             source: Kind::from(source).into(),
+    //             // backtrace: Backtrace::capture(),
+    //         }
+    //     }
+    // }
 
     pub trait Render {
         fn header();
