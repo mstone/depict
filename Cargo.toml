@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 auto_enums = "0.7"
 dioxus = { git = "https://github.com/dioxuslabs/dioxus", features = [ "desktop", "ssr", "web" ] }
+futures = "0.3"
 indoc = "1.0"
 is_variant = "1.0"
 ndarray = "0.15"
@@ -18,6 +19,8 @@ pyo3 = "0.15.1"
 rand = "0.8"
 sorted-vec = "0.7"
 thiserror = "1.0"
+tokio = "1"
+tracing = "0.1"
 
 [dependencies.dioxus-desktop]
 git = "https://github.com/dioxuslabs/dioxus"

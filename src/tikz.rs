@@ -26,25 +26,27 @@ pub fn render(v: Vec<Syn>) {
 
     for draw in ds {
         
-        let (vert, v_nodes, h_name) = calculate_vcg(&v, draw);
+        let Vcg{vert, v_nodes, h_name} = calculate_vcg(&v, draw);
 
         eprintln!("VERT: {:?}", Dot::new(&vert));
 
-        let (condensed, _) = condense(&vert);
+        let Cvcg{condensed, condensed_vxmap: _} = condense(&vert);
 
         let roots = roots(&condensed);
 
         let paths_by_rank = rank(&condensed, &roots);
 
-        let (locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc) = calculate_locs_and_hops(&condensed, &paths_by_rank);
+        let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank);
 
         // std::process::exit(0);
 
         let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level);
         
-        let (all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop) = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
+        let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
-        let (ls, rs, ss) = position_sols(&vert, &v_nodes, &hops_by_edge, &node_to_loc, &solved_locs, &all_locs, &all_hops0, &all_hops, &sol_by_loc, &sol_by_hop);
+        let (ls, rs, ss) = position_sols(&vert, &v_nodes, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem);
+
+        let LayoutProblem{all_locs, sol_by_loc, sol_by_hop, ..} = layout_problem;
 
         // std::process::exit(0);
 
@@ -189,7 +191,7 @@ pub fn render(v: Vec<Syn>) {
         use rand::Rng;
         let mut rng = rand::thread_rng();
 
-        for (ovr, ohr, _shr, loc, _n) in all_locs.iter() {
+        for LocRow{ovr, ohr, shr: _, loc, ..} in all_locs.iter() {
             let n = sol_by_loc[&(*ovr, *ohr)];
 
             let lpos = ls[n];
@@ -205,8 +207,8 @@ pub fn render(v: Vec<Syn>) {
                 Loc::Hop(_, _, _) => "blue",
             };
             let loc_str = match loc {
-                Loc::Node(vl) => format!("{}", vl),
-                Loc::Hop(_, vl, wl) => format!("{}{}", vl.chars().nth(0).unwrap(), wl.chars().nth(0).unwrap()),
+                Loc::Node(vl) => vl.to_string(),
+                Loc::Hop(_, vl, wl) => format!("{}{}", vl.chars().next().unwrap(), wl.chars().next().unwrap()),
             };
 
             println!(indoc!(r#"%\draw [{}] ({}, {}) circle (1pt);"#), loc_color, hpos, vpos);
@@ -224,7 +226,7 @@ pub fn render(v: Vec<Syn>) {
             let hpos = 10.0 * (spos);// + rng.gen_range(0.0..0.25);
             
             println!(indoc!(r#"%\draw [fill, black] ({}, {}) circle (1pt);"#), hpos, vpos);
-            println!(indoc!(r#"%\node[scale=0.5, anchor=south east] at ({}, {}) {{{}{}}};"#), hpos, vpos, vl.chars().nth(0).unwrap(), wl.chars().nth(0).unwrap());
+            println!(indoc!(r#"%\node[scale=0.5, anchor=south east] at ({}, {}) {{{}{}}};"#), hpos, vpos, vl.chars().next().unwrap(), wl.chars().next().unwrap());
         }
 
 

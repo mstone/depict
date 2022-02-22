@@ -21,7 +21,7 @@ pub fn render(v: Vec<Syn>) {
 
         // println!("resolution: {:?}\n", res);
 
-        println!("{}", "digraph {");
+        println!("digraph {{");
         // println!("{}", "graph [splines=ortho, nodesep=1];");
 
         let action_query = Fact::Atom(Ident("action"));
@@ -37,29 +37,23 @@ pub fn render(v: Vec<Syn>) {
                     for item in items {
                         let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
                         let resolved_name = resolve(resolved_item.iter().copied(), &name_query);
-                        let name = first_ident(resolved_name).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
+                        let name = first_ident(resolved_name).unwrap_or_else(|| unwrap_atom(item).unwrap());
                         println!("{} [label=\"{}\",shape=rect];", unwrap_atom(item).unwrap(), name);
 
                         let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
                         let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
                         let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
                         let resolved_action = resolve(resolved_item.iter().copied(), &action_query);
-                        let action = first_ident(resolved_action).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
+                        let action = first_ident(resolved_action).unwrap_or_else(|| unwrap_atom(item).unwrap());
                         let resolved_percept = resolve(resolved_item.iter().copied(), &percept_query);
-                        let percept = first_ident(resolved_percept).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
+                        let percept = first_ident(resolved_percept).unwrap_or_else(|| unwrap_atom(item).unwrap());
 
                         h_acts.entry((resolved_actuates, resolved_hosts))
-                            .or_insert(vec![])
+                            .or_insert_with(Vec::new)
                             .push((unwrap_atom(item).unwrap(), action));
 
                         h_sens.entry((resolved_senses, resolved_hosts))
-                            .or_insert(vec![])
+                            .or_insert_with(Vec::new)
                             .push((unwrap_atom(item).unwrap(), percept));
                     }
 
@@ -96,20 +90,16 @@ pub fn render(v: Vec<Syn>) {
                         // println!("{:?}", resolved_src);
 
                         let resolved_action = resolve(resolved_item.iter().copied(), &action_query);
-                        let action = first_ident(resolved_action).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
+                        let action = first_ident(resolved_action).unwrap_or_else(|| unwrap_atom(item).unwrap());
                         let resolved_percept = resolve(resolved_item.iter().copied(), &percept_query);
-                        let percept = first_ident(resolved_percept).unwrap_or(
-                            unwrap_atom(item).unwrap()
-                        );
+                        let percept = first_ident(resolved_percept).unwrap_or_else(|| unwrap_atom(item).unwrap());
 
                         h_acts.entry((resolved_actuates, resolved_hosts))
-                            .or_insert(vec![])
+                            .or_insert_with(Vec::new)
                             .push(action);
 
                         h_sens.entry((resolved_senses, resolved_hosts))
-                            .or_insert(vec![])
+                            .or_insert_with(Vec::new)
                             .push(percept);
                     }
 
@@ -131,7 +121,7 @@ pub fn render(v: Vec<Syn>) {
             }
         }
 
-        println!("{}", "}");
+        println!("}}");
     }
     // use top-level "draw" fact to identify inline or top-level drawings to draw
     // resolve top-level drawings + use inline drawings to identify objects to draw to make particular drawings

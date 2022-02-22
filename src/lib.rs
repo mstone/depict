@@ -56,20 +56,11 @@ pub mod parser {
     }
 
     pub fn is_ws(chr: char) -> bool {
-        match chr {
-            ' ' => true,
-            _ => false,
-        }
+        matches!(chr, ' ')
     }
 
     pub fn is_wst(chr: char) -> bool {
-        match chr {
-            ' ' => true,
-            '\n' => true,
-            '\r' => true,
-            '.' => true,
-            _ => false,
-        }
+        matches!(chr, ' ' | '\n' | '\r' | '.')
     }
 
     pub fn nl(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
@@ -123,7 +114,7 @@ pub mod parser {
                             alt((
                                 many1(preceded(tuple((ws, char('\n'), take_while_m_n(n, n, is_ws), ws)), fact(indent+1))), // for indentation
                                 many1(preceded(ws, fact(indent))),
-                                many0(preceded(ws, map(guarded_ident, |i| Fact::<Ident<&str>>::Atom(i)))), // many0, for empty facts.
+                                many0(preceded(ws, map(guarded_ident, Fact::<Ident<&str>>::Atom))), // many0, for empty facts.
                             )),
                         )
                     )
@@ -278,6 +269,8 @@ pub mod render {
     }
 
     // pub fn resolve<'a>(v: &'a Vec<Syn>, r: &'a Fact<'a>) -> Vec<&'a Fact<'a>> {
+    /// If `r` is an atomic identifier, look it up in `v` and return what we know about it.
+    /// Otherwise, `r` is a compound fact so return its subordinate facts. 
     #[auto_enum(Iterator)]
     pub fn resolve<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E>, E>(v: I, r: &'a Fact<'a>) -> impl Iterator<Item = &'a Fact<'a>> {
         match r {
@@ -326,10 +319,7 @@ pub mod render {
                 match item.try_into() {
                     Ok(Fact::Fact(i, fs)) => {
                         let mut candidates = filter_fact(fs.iter(), q1);
-                        candidates.find(|c| match c {
-                            Fact::Atom(a) if a == q2 => true,
-                            _ => false,
-                        }).map(|_| i)
+                        candidates.find(|c| matches!(c, Fact::Atom(a) if a == q2)).map(|_| i)
                     },
                     _ => None,
                 }
