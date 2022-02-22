@@ -15,19 +15,25 @@ use indoc::indoc;
 
 use futures::StreamExt;
 
+use tracing::{span, Level, instrument};
+use tracing_error::{InstrumentResult, ExtractSpanTrace};
+
 #[derive(Clone, PartialEq, PartialOrd)]
 pub enum Node {
   Div { key: String, label: String, hpos: f64, vpos: f64, width: f64 },
   Svg { key: String, path: String },
 }
 
+#[instrument]
 fn draw(data: String) -> Result<Vec<Node>, Error> {
     let v = parse(&data[..])
         .map_err(|e| match e {
             nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
             nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
             nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
-        })?.1;
+        })
+        .in_current_span()?
+        .1;
     let mut ds = filter_fact(v.iter(), &Ident("draw"));
     let draw = ds.next().or_err(Kind::MissingDrawingError{})?;
 
@@ -202,14 +208,17 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     cx.render(rsx!{
         link { href:"https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css", rel:"stylesheet" }
         div {
+            key: "editor",
             class: "width-full z-20 p-4",
             div {
                 class: "max-w-3xl mx-auto flex flex-col",
                 div {
+                    key: "editor_label",
                     class: "fs-24",
                     "Model"
                 }
                 div {
+                    key: "editor_editor",
                     textarea {
                         class: "border",
                         rows: "10",
@@ -225,6 +234,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             }
         }
         div {
+            key: "viewer",
             class: "relative",
             nodes
         }
@@ -232,6 +242,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 }
 
 pub fn main() -> io::Result<()> {
+    tracing_subscriber::fmt::init();
 
     let (model_sender, mut model_receiver) = futures_channel::mpsc::unbounded::<String>();
     let (drawing_sender, drawing_receiver) = futures_channel::mpsc::unbounded::<Vec<Node>>();
@@ -249,9 +260,17 @@ pub fn main() -> io::Result<()> {
                             draw(model.clone())
                         });
                         let model = model.clone();
-                        if let Ok(Ok(nodes)) = nodes {
-                            prev_model = Some(model);
-                            drawing_sender.unbounded_send(nodes).unwrap();
+                        match nodes {
+                            Ok(Ok(nodes)) => {
+                                prev_model = Some(model);
+                                drawing_sender.unbounded_send(nodes).unwrap();
+                            },
+                            Ok(Err(err)) => {
+                                eprintln!("drawing error: {:?} {:?}", err, err.span_trace());
+                            }
+                            Err(_) => {
+                                eprintln!("panic!");
+                            }
                         }
                     }
                 }

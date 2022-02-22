@@ -8,7 +8,7 @@ use petgraph::EdgeDirection::{Incoming, Outgoing};
 use petgraph::algo::{floyd_warshall, NegativeCycle};
 use pyo3::types::{PyModule, IntoPyDict, PyList};
 use sorted_vec::SortedVec;
-use tracing_error::{TracedError, InstrumentError};
+use tracing_error::{TracedError, InstrumentError, ExtractSpanTrace, SpanTrace};
 use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
 use std::fmt::{Debug, Display};
@@ -17,7 +17,7 @@ use std::io::{Write};
 use std::process::{Command, Stdio};
 use ndarray::{Array2};
 use numpy::{PyArray1, PyReadonlyArray1};
-use tracing::{event, Level};
+use tracing::{event, Level, instrument};
 use crate::parser::Ident;
 use crate::render::{Fact, Syn, resolve, try_atom, find_parent, to_ident, as_string};
 
@@ -81,14 +81,18 @@ pub struct Vcg<'s> {
     pub h_name: HashMap<&'s str, String>,
 }
 
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Kind {
     #[error("indexing error")]
     IndexingError {},
     #[error("missing drawing error")]
     MissingDrawingError {},
+    #[error("unimplemented drawing style error")]
+    UnimplementedDrawingStyleError { style: String },
 }
 
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum RankingError {
     #[error("negative cycle error")]
@@ -99,17 +103,19 @@ pub enum RankingError {
     Utf8Error{#[from] source: std::str::Utf8Error},
 }
 
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum LayoutError {
     #[error("cvxpy error")]
     CvxpyError{#[from] source: pyo3::PyErr},
 }
 
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     ParsingError{
-        #[from] source: nom::Err<String>,
+        #[from] source: TracedError<nom::Err<String>>,
     },
     #[error(transparent)]
     RenderError{
@@ -129,6 +135,19 @@ pub enum Error {
     }
 }
 
+impl ExtractSpanTrace for Error {
+    fn span_trace(&self) -> Option<&SpanTrace> {
+        match self {
+            Error::ParsingError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
+            Error::RenderError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
+            Error::GraphDrawingError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
+            Error::RankingError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
+            Error::LayoutError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
+        }
+    }
+}
+
+#[instrument]
 pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Result<Vcg<'s>, Error> {
     // println!("draw:\n{:#?}\n\n", draw);
 
@@ -195,8 +214,8 @@ pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Result<Vcg<'s>, Error>
                     },
                     // hide? elide? skip?
                     // autodraw?
-                    _ => {
-                        unimplemented!("{}", style);
+                    style => {
+                        return Err(Error::from(Kind::UnimplementedDrawingStyleError{style: style.to_string()}.in_current_span()))
                     }
                 }
                 

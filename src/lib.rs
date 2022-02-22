@@ -246,6 +246,7 @@ pub mod render {
     use auto_enums::auto_enum;
     use tracing_error::{TracedError, InstrumentError};
 
+    #[non_exhaustive]
     #[derive(Debug, thiserror::Error)]
     enum Kind {
         #[error("missing atom")]
