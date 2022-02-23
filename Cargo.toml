@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 auto_enums = "0.7"
+color-spantrace = "0.2"
 dioxus = { git = "https://github.com/dioxuslabs/dioxus", features = [ "desktop", "ssr", "web" ] }
 futures = "0.3"
 indoc = "1.0"
@@ -48,10 +49,6 @@ path = "src/dioxus.rs"
 [[bin]]
 name = "parse"
 path = "src/parse.rs"
-
-[[bin]]
-name = "dot"
-path = "src/dot.rs"
 
 [[bin]]
 name = "objc"

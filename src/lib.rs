@@ -261,9 +261,9 @@ pub mod render {
         // backtrace: Backtrace,
     }
 
-    pub fn try_atom<'a>(a: &'a Fact<'a>) -> Result<&'a str, Error> {
+    pub fn try_atom<'a>(a: &'a Fact<'a>) -> Result<&Ident, Error> {
         match a {
-            Fact::Atom(crate::parser::Ident(i)) => Ok(*i),
+            Fact::Atom(i) => Ok(i),
             _ => Err(Error::from(Kind::MissingAtom{}.in_current_span())),
         // }
         }
@@ -298,6 +298,7 @@ pub mod render {
 
     // pub fn filter_fact<'a>(v: &'a Vec<Syn>, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
     // pub fn filter_fact<'a, I: Iterator<Item = &'a Syn<'a>>>(v: I, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
+    /// Return associated sub-facts of children of `v` whose head matches `q`
     pub fn filter_fact<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
         v
             .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i, f)) if q == i => Some(f), _ => None, })
@@ -338,18 +339,54 @@ pub mod render {
             .find_map(unwrap_atom)
     }
 
+    /// Given a database `v`, returns facts of type `q1` from the entity identified by `q2`.
+    /// 
+    /// Example: 
+    /// 
+    /// Suppose `person: actuates: lever`.
+    /// 
+    /// Who does `person` `actuate`?
+    /// 
+    /// ```rust
+    /// use diagrams::parser::{parse, Ident};
+    /// use diagrams::render::{find_image, to_ident, Fact};
+    /// let v = parse("person: actuates: lever").unwrap().1;
+    /// let query = Ident("actuates");
+    /// let item = Ident("person");
+    /// let resolved_actuates = find_image(v.iter(), &query, &item).next();
+    /// assert_eq!(resolved_actuates, Some(&Fact::Atom(Ident("lever"))));
+    /// ```
+    pub fn find_image<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
+        v
+            .filter_map(move |item|
+                match item.try_into() {
+                    Ok(Fact::Fact(i, fs)) if i == q2 => {
+                        Some(filter_fact(fs.iter(), q1))
+                    },
+                    _ => None,
+                }
+            )
+            .flatten()
+    }
+
     /// Given a database `v`, returns facts of type `q1` about the entity identified by `q2`.
     /// 
     /// Example: 
     /// 
-    /// Suppose person: actuates: lever. Then
+    /// Suppose `person: actuates: lever`. 
+    /// 
+    /// Who `actuates` `lever`?
     /// 
     /// ```rust
-    /// let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next(); 
+    /// use diagrams::parser::{parse, Ident};
+    /// use diagrams::render::{find_preimage, to_ident, Fact};
+    /// let v = parse("person: actuates: lever").unwrap().1;
+    /// let query = Ident("actuates");
+    /// let item = Ident("lever");
+    /// let resolved_actuates = find_preimage(v.iter(), &query, &item).next();
+    /// assert_eq!(resolved_actuates, Some(&Ident("person")));
     /// ```
-    /// 
-    /// Then `resolved_actuates == Some(Ident("lever"))`.
-    pub fn find_parent<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Ident<'a>> {
+    pub fn find_preimage<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Ident<'a>> {
         v
             .filter_map(move |item|
                 match item.try_into() {

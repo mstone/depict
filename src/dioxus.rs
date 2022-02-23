@@ -1,22 +1,26 @@
 use std::cell::Cell;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hasher, Hash};
 use std::io;
 use std::panic::catch_unwind;
 
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
 
+use dioxus_desktop::tao::dpi::{LogicalSize};
+
 use diagrams::parser::{parse, Ident};
 use diagrams::graph_drawing::*;
 use diagrams::render::filter_fact;
 
-use dioxus_desktop::tao::dpi::{LogicalSize};
+use color_spantrace::colorize;
+// use dioxus_desktop::use_window;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-use indoc::indoc;
-
 use futures::StreamExt;
-
-use tracing::{span, Level, instrument};
+use indoc::indoc;
+use tracing::{instrument};
 use tracing_error::{InstrumentResult, ExtractSpanTrace};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone, PartialEq, PartialOrd)]
 pub enum Node {
@@ -24,7 +28,7 @@ pub enum Node {
   Svg { key: String, path: String },
 }
 
-#[instrument]
+#[instrument(skip(data))]
 fn draw(data: String) -> Result<Vec<Node>, Error> {
     let v = parse(&data[..])
         .map_err(|e| match e {
@@ -61,6 +65,9 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
     let height_scale = 80.0;
 
     let mut texts = vec![];
+    let mut hasher = DefaultHasher::new();
+    data.hash(&mut hasher);
+    let data_hash = hasher.finish();
 
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
@@ -75,7 +82,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
         let width = 1024.0 * 0.9 * (rpos - lpos);
 
         if let Loc::Node(vl) = node {
-            let key = String::from(*vl);
+            let key = format!("{vl}_{data_hash}");
             let label = h_name[*vl].clone();
             texts.push(Node::Div{key, label, hpos, vpos, width});
         }
@@ -106,7 +113,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
             }
 
-            let key = format!("{vl}_{wl}_{ew}");
+            let key = format!("{vl}_{wl}_{ew}_{data_hash}");
             let path = path.join(" ");
             arrows.push(Node::Svg{key, path});
         }
@@ -120,7 +127,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
     Ok(nodes)
 }
 
-pub fn render<P>(_cx: Scope<P>, mut nodes: Vec<Node>) -> LazyNodes {
+pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
     let mut children = vec![];
     nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
     for node in nodes {
@@ -162,7 +169,7 @@ pub fn render<P>(_cx: Scope<P>, mut nodes: Vec<Node>) -> LazyNodes {
             },
         }
     }
-    rsx!(children)
+    cx.render(rsx!(children))
 }
 
 const PLACEHOLDER: &str = indoc!("
@@ -200,6 +207,8 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     // let desktop = cx.consume_context::<dioxus_desktop::desktop_context::DesktopContext>().unwrap();
     // desktop.devtool();
+    // let window = use_window(&cx);
+    // window.devtool();
 
     let nodes = render(cx, drawing.to_owned());
     let model_sender = cx.props.model_sender.clone().unwrap();
@@ -208,17 +217,17 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     cx.render(rsx!{
         link { href:"https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css", rel:"stylesheet" }
         div {
-            key: "editor",
+            // key: "editor",
             class: "width-full z-20 p-4",
             div {
                 class: "max-w-3xl mx-auto flex flex-col",
                 div {
-                    key: "editor_label",
+                    // key: "editor_label",
                     class: "fs-24",
                     "Model"
                 }
                 div {
-                    key: "editor_editor",
+                    // key: "editor_editor",
                     textarea {
                         class: "border",
                         rows: "10",
@@ -226,7 +235,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         // placeholder: "",
                         value: "{model}",
                         oninput: move |e| { 
-                            set_model(e.value.clone()); 
+                            set_model(e.value.clone());
                             model_sender.unbounded_send(e.value.clone()).unwrap(); 
                         }
                     }
@@ -234,15 +243,18 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             }
         }
         div {
-            key: "viewer",
+            // key: "viewer",
             class: "relative",
             nodes
         }
     })   
 }
 
-pub fn main() -> io::Result<()> {
-    tracing_subscriber::fmt::init();
+pub fn main() -> io::Result<()> {    
+    tracing_subscriber::Registry::default()
+        .with(tracing_error::ErrorLayer::default())
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     let (model_sender, mut model_receiver) = futures_channel::mpsc::unbounded::<String>();
     let (drawing_sender, drawing_receiver) = futures_channel::mpsc::unbounded::<Vec<Node>>();
@@ -266,7 +278,7 @@ pub fn main() -> io::Result<()> {
                                 drawing_sender.unbounded_send(nodes).unwrap();
                             },
                             Ok(Err(err)) => {
-                                eprintln!("drawing error: {:?} {:?}", err, err.span_trace());
+                                eprintln!("drawing error: {:?}\n{}", err, colorize(err.span_trace().unwrap()));
                             }
                             Err(_) => {
                                 eprintln!("panic!");

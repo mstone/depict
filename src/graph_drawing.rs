@@ -19,7 +19,7 @@ use ndarray::{Array2};
 use numpy::{PyArray1, PyReadonlyArray1};
 use tracing::{event, Level, instrument};
 use crate::parser::Ident;
-use crate::render::{Fact, Syn, resolve, try_atom, find_parent, to_ident, as_string};
+use crate::render::{Fact, Syn, resolve, try_atom, first_ident, find_preimage, find_image};
 
 pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V) -> NodeIndex where V: Eq + Hash + Clone {
     let e = h.entry(v.clone());
@@ -112,10 +112,21 @@ pub enum LayoutError {
 
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
+pub enum TypeError {
+    #[error("cvxpy error")]
+    DeepNameError{name: String},
+}
+
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     ParsingError{
         #[from] source: TracedError<nom::Err<String>>,
+    },
+    #[error(transparent)]
+    TypeError{
+        #[from] source: TracedError<TypeError>,
     },
     #[error(transparent)]
     RenderError{
@@ -135,19 +146,29 @@ pub enum Error {
     }
 }
 
-impl ExtractSpanTrace for Error {
-    fn span_trace(&self) -> Option<&SpanTrace> {
-        match self {
-            Error::ParsingError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
-            Error::RenderError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
-            Error::GraphDrawingError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
-            Error::RankingError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
-            Error::LayoutError{source} => (source as &(dyn std::error::Error + 'static)).span_trace(),
+impl From<Kind> for Error {
+    fn from(source: Kind) -> Self {
+        Self::GraphDrawingError {
+            source: source.into(),
         }
     }
 }
 
-#[instrument]
+impl ExtractSpanTrace for Error {
+    fn span_trace(&self) -> Option<&SpanTrace> {
+        use std::error::Error as _;
+        match self {
+            Error::ParsingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
+            Error::TypeError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
+            Error::RenderError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
+            Error::GraphDrawingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
+            Error::RankingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
+            Error::LayoutError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
+        }
+    }
+}
+
+#[instrument(skip(v, draw))]
 pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Result<Vcg<'s>, Error> {
     // println!("draw:\n{:#?}\n\n", draw);
 
@@ -163,59 +184,65 @@ pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Result<Vcg<'s>, Error>
 
     for hint in res {
         if let Fact::Fact(Ident(style), items) = hint {
-            for item in items {
-                let item_ident = try_atom(item)?;
-                let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
-                let name = as_string(&resolved_item, &Ident("name"), item_ident.into());
+            for item_fact in items {
+                let item_ident = try_atom(item_fact)?;
+                let item = item_ident.0;
+                // let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
+                // let name = as_string(&resolved_item, &Ident("name"), item_ident.into());
+                let name = find_image(v.iter(), &Ident("name"), item_ident);
+                let name = first_ident(name)
+                    .or_err(TypeError::DeepNameError{name: item_ident.to_string()})?
+                    .to_string();
+                
 
                 // TODO: need to loop here to resolve all the actuates/senses/hosts pairs, not just the first
-                let resolved_actuates = find_parent(v.iter(), &Ident("actuates"), to_ident(item)).next();
-                let resolved_senses = find_parent(v.iter(), &Ident("senses"), to_ident(item)).next();
-                let resolved_hosts = find_parent(v.iter(), &Ident("hosts"), to_ident(item)).next();
+                let resolved_actuates = find_preimage(v.iter(), &Ident("actuates"), item_ident).map(|f| f.0).collect::<Vec<_>>();
+                let resolved_senses = find_preimage(v.iter(), &Ident("senses"), item_ident).map(|f| f.0).collect::<Vec<_>>();
+                let resolved_hosts = find_preimage(v.iter(), &Ident("hosts"), item_ident).map(|f| f.0).collect::<Vec<_>>();
 
-                h_name.insert(item_ident, name);
+                h_name.insert(item, name);
 
                 match *style {
                     "compact" => {
-                        let _v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                        let _v_ix = or_insert(&mut vert, &mut v_nodes, item);
                     },
                     "coalesce" => {
-                        if let (Some(actuator), Some(process)) = (resolved_actuates, resolved_hosts) {
-                            let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
-                            let process_ix = or_insert(&mut vert, &mut v_nodes, process.0);
+                        if let (Some(actuator), Some(process)) = (resolved_actuates.first(), resolved_hosts.first()) {
+                            let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator);
+                            let process_ix = or_insert(&mut vert, &mut v_nodes, process);
                             vert.add_edge(controller_ix, process_ix, "actuates"); // controls?
                         }
-                        if let (Some(sensor), Some(process)) = (resolved_senses, resolved_hosts) {
-                            let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor.0);
-                            let process_ix = or_insert(&mut vert, &mut v_nodes, process.0);
+                        if let (Some(sensor), Some(process)) = (resolved_senses.first(), resolved_hosts.first()) {
+                            let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor);
+                            let process_ix = or_insert(&mut vert, &mut v_nodes, process);
                             vert.add_edge(controller_ix, process_ix, "senses"); // reads?
                         }
                     },
                     "embed" => {
-                        let _v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                        let _v_ix = or_insert(&mut vert, &mut v_nodes, item);
                     },
                     "parallel" => {
-                        let v_ix = or_insert(&mut vert, &mut v_nodes, item_ident);
+                        let v_ix = or_insert(&mut vert, &mut v_nodes, item);
                     
-                        if let Some(actuator) = resolved_actuates {
-                            let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator.0);
+                        if let Some(actuator) = resolved_actuates.first() {
+                            let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator);
                             vert.add_edge(controller_ix, v_ix, "actuates");
                         }
 
-                        if let Some(sensor) = resolved_senses {
-                            let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor.0);
+                        if let Some(sensor) = resolved_senses.first() {
+                            let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor);
                             vert.add_edge(controller_ix, v_ix, "senses");
                         }
 
-                        if let Some(platform) = resolved_hosts {
-                            let platform_ix = or_insert(&mut vert, &mut v_nodes, platform.0);
+                        if let Some(platform) = resolved_hosts.first() {
+                            let platform_ix = or_insert(&mut vert, &mut v_nodes, platform);
                             vert.add_edge(v_ix, platform_ix, "rides");
                         }
                     },
                     // hide? elide? skip?
                     // autodraw?
                     style => {
-                        return Err(Error::from(Kind::UnimplementedDrawingStyleError{style: style.to_string()}.in_current_span()))
+                        return Err(Kind::UnimplementedDrawingStyleError{style: style.to_string()}.into())
                     }
                 }
                 
