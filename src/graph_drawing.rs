@@ -1,4 +1,5 @@
 #![deny(clippy::unwrap_used)]
+use inflector::Inflector;
 use petgraph::graph::{Graph, NodeIndex};
 use petgraph::dot::{Dot};
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
@@ -18,8 +19,7 @@ use std::process::{Command, Stdio};
 use ndarray::{Array2};
 use numpy::{PyArray1, PyReadonlyArray1};
 use tracing::{event, Level, instrument};
-use crate::parser::Ident;
-use crate::render::{Fact, Syn, resolve, try_atom, first_ident, find_preimage, find_image};
+use crate::parser::Fact;
 
 pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V) -> NodeIndex where V: Eq + Hash + Clone {
     let e = h.entry(v.clone());
@@ -68,6 +68,22 @@ pub fn get_value(a: &PyAny) -> PyResult<PyReadonlyArray1<f64>> {
         .readonly())
 }
 
+#[derive(Clone, Debug, Default)]
+struct NodeStyle<'s> {
+    node: &'s str,
+    node_ix: Option<NodeIndex>,
+    style: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct EdgeStyle<'s> {
+    src: &'s str,
+    dst: &'s str,
+    action: Option<String>,
+    percept: Option<String>,
+}
+
+#[derive(Debug)]
 pub struct Vcg<'s> {
     /// vert is a vertical constraint graph. 
     /// Edges (v, w) in vert indicate that v needs to be placed above w. 
@@ -86,8 +102,12 @@ pub struct Vcg<'s> {
 pub enum Kind {
     #[error("indexing error")]
     IndexingError {},
+    #[error("key not found error")]
+    KeyNotFoundError {key: String},
     #[error("missing drawing error")]
     MissingDrawingError {},
+    #[error("missing fact error")]
+    MissingFactError {ident: String},
     #[error("unimplemented drawing style error")]
     UnimplementedDrawingStyleError { style: String },
 }
@@ -113,8 +133,10 @@ pub enum LayoutError {
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum TypeError {
-    #[error("cvxpy error")]
+    #[error("deep name error")]
     DeepNameError{name: String},
+    #[error("unknown mode")]
+    UnknownModeError{mode: String},
 }
 
 #[non_exhaustive]
@@ -127,10 +149,6 @@ pub enum Error {
     #[error(transparent)]
     TypeError{
         #[from] source: TracedError<TypeError>,
-    },
-    #[error(transparent)]
-    RenderError{
-        #[from] source: crate::render::Error,
     },
     #[error(transparent)]
     GraphDrawingError{
@@ -160,7 +178,6 @@ impl ExtractSpanTrace for Error {
         match self {
             Error::ParsingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
             Error::TypeError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
-            Error::RenderError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
             Error::GraphDrawingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
             Error::RankingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
             Error::LayoutError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
@@ -168,90 +185,93 @@ impl ExtractSpanTrace for Error {
     }
 }
 
-#[instrument(skip(v, draw))]
-pub fn calculate_vcg<'s>(v: &'s [Syn], draw: &'s Fact) -> Result<Vcg<'s>, Error> {
-    // println!("draw:\n{:#?}\n\n", draw);
+// #[instrument]
+// pub fn draw<'s, 'g>(v: &'s [Syn], vcg: &'g mut Vcg<'s>) -> Result<(), Error> {
+//     let h_name = &mut vcg.h_name;
+//     let (_, hints) = try_fact(draw)?;
 
-    let res = resolve(v.iter(), draw);
+//     event!(Level::TRACE, ?hints, "HINTS");
 
-    // println!("resolution: {:?}\n", res);
+//     for hint in hints.iter() {
+//         if let Fact::Fact(Ident(style), items) = hint {
+//             for item_fact in items {
+//                 event!(Level::TRACE, ?item_fact, "ITEM");
+//                 let item_ident = try_atom(item_fact)?;
+//                 let item = item_ident.0;
 
-    let mut vert = Graph::<&str, &str>::new();
-
-    let mut v_nodes = HashMap::<&str, NodeIndex>::new();
-
-    let mut h_name = HashMap::new();
-
-    for hint in res {
-        if let Fact::Fact(Ident(style), items) = hint {
-            for item_fact in items {
-                let item_ident = try_atom(item_fact)?;
-                let item = item_ident.0;
-                // let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
-                // let name = as_string(&resolved_item, &Ident("name"), item_ident.into());
-                let name = find_image(v.iter(), &Ident("name"), item_ident);
-                let name = first_ident(name)
-                    .or_err(TypeError::DeepNameError{name: item_ident.to_string()})?
-                    .to_string();
+//                 event!(Level::TRACE, ?item, "ITEM2");
+//                 // let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
+//                 // let name = as_string(&resolved_item, &Ident("name"), item_ident.into());
+//                 let name = find_image(v.iter(), &Ident("name"), item_ident);
+//                 let name = first_ident(name)
+//                     .unwrap_or(item)
+//                     .to_string();
                 
+//                 // TODO: need to loop here to resolve all the actuates/senses/hosts pairs, not just the first
+//                 let resolved_actuates = find_preimage(v.iter(), &Ident("actuates"), item_ident).map(|f| f.0).collect::<Vec<_>>();
+//                 let resolved_senses = find_preimage(v.iter(), &Ident("senses"), item_ident).map(|f| f.0).collect::<Vec<_>>();
+//                 let resolved_hosts = find_preimage(v.iter(), &Ident("on"), item_ident).map(|f| f.0).collect::<Vec<_>>();
 
-                // TODO: need to loop here to resolve all the actuates/senses/hosts pairs, not just the first
-                let resolved_actuates = find_preimage(v.iter(), &Ident("actuates"), item_ident).map(|f| f.0).collect::<Vec<_>>();
-                let resolved_senses = find_preimage(v.iter(), &Ident("senses"), item_ident).map(|f| f.0).collect::<Vec<_>>();
-                let resolved_hosts = find_preimage(v.iter(), &Ident("hosts"), item_ident).map(|f| f.0).collect::<Vec<_>>();
+//                 h_name.insert(item, name);
 
-                h_name.insert(item, name);
-
-                match *style {
-                    "compact" => {
-                        let _v_ix = or_insert(&mut vert, &mut v_nodes, item);
-                    },
-                    "coalesce" => {
-                        if let (Some(actuator), Some(process)) = (resolved_actuates.first(), resolved_hosts.first()) {
-                            let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator);
-                            let process_ix = or_insert(&mut vert, &mut v_nodes, process);
-                            vert.add_edge(controller_ix, process_ix, "actuates"); // controls?
-                        }
-                        if let (Some(sensor), Some(process)) = (resolved_senses.first(), resolved_hosts.first()) {
-                            let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor);
-                            let process_ix = or_insert(&mut vert, &mut v_nodes, process);
-                            vert.add_edge(controller_ix, process_ix, "senses"); // reads?
-                        }
-                    },
-                    "embed" => {
-                        let _v_ix = or_insert(&mut vert, &mut v_nodes, item);
-                    },
-                    "parallel" => {
-                        let v_ix = or_insert(&mut vert, &mut v_nodes, item);
-                    
-                        if let Some(actuator) = resolved_actuates.first() {
-                            let controller_ix = or_insert(&mut vert, &mut v_nodes, actuator);
-                            vert.add_edge(controller_ix, v_ix, "actuates");
-                        }
-
-                        if let Some(sensor) = resolved_senses.first() {
-                            let controller_ix = or_insert(&mut vert, &mut v_nodes, sensor);
-                            vert.add_edge(controller_ix, v_ix, "senses");
-                        }
-
-                        if let Some(platform) = resolved_hosts.first() {
-                            let platform_ix = or_insert(&mut vert, &mut v_nodes, platform);
-                            vert.add_edge(v_ix, platform_ix, "rides");
-                        }
-                    },
-                    // hide? elide? skip?
-                    // autodraw?
-                    style => {
-                        return Err(Kind::UnimplementedDrawingStyleError{style: style.to_string()}.into())
-                    }
-                }
+//                 match *style {
+//                     "compact" => {
+//                     },
+//                     "coalesce" => {
+//                     },
+//                     "embed" => {
+//                     },
+//                     "parallel" => {
+//                     },
+//                     // hide? elide? skip?
+//                     // autodraw?
+//                     style => {
+//                         return Err(Kind::UnimplementedDrawingStyleError{style: style.to_string()}.into())
+//                     }
+//                 }
                 
-                event!(Level::DEBUG, %item_ident, %style, ?resolved_actuates, ?resolved_senses, ?resolved_hosts, "READ");
+//                 event!(Level::DEBUG, %item_ident, %style, ?resolved_actuates, ?resolved_senses, ?resolved_hosts, "READ");
+//             }
+//         }
+//     }
+//     Ok(())
+// }
+
+#[instrument(skip(v))]
+pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
+    event!(Level::TRACE, "CALCULATE_VCG");
+    let vert = Graph::<&str, &str>::new();
+    let v_nodes = HashMap::<&str, NodeIndex>::new();
+    let h_name = HashMap::new();
+    let mut vcg = Vcg{vert, v_nodes, h_name};
+
+    let _ = v;
+
+    for Fact{path, action, percept} in v {
+        for n in 0..path.len()-1 {
+            let src = path[n];
+            let dst = path[n+1];
+            let src_ix = or_insert(&mut vcg.vert, &mut vcg.v_nodes, src);
+            let dst_ix = or_insert(&mut vcg.vert, &mut vcg.v_nodes, dst);
+
+            // TODO: record associated action/percept texts.
+            let action = action.trim();
+            let percept = percept.trim();
+            if !action.is_empty() {
+                vcg.vert.add_edge(src_ix, dst_ix, "actuates");
             }
+            if !percept.is_empty() {
+                vcg.vert.add_edge(src_ix, dst_ix, "senses");
+            }
+        }
+        for node in path {
+            vcg.h_name.insert(*node, node.to_title_case());
         }
     }
 
-    Ok(Vcg{vert, v_nodes, h_name})
+    event!(Level::TRACE, ?vcg, "VCG");
+
+    Ok(vcg)
 }
 
 pub struct Cvcg<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord> {

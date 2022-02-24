@@ -1,58 +1,20 @@
 pub mod parser {
     // use crate::data::*;
-    use nom::IResult;
+    use nom::{IResult};
     use nom::error::{VerboseError, context};
-    use nom::branch::{alt};
-    use nom::bytes::complete::{take_while, take_while1, take_while_m_n, is_not, is_a};
+    use nom::bytes::complete::{take_while, take_while1, is_not, is_a};
     // use nom::character::{is_space};
     use nom::character::complete::{char};
-    use nom::combinator::{map, not};
-    use nom::multi::{many0, many1};
+    use nom::combinator::{map};
+    use nom::multi::{many1};
     use nom::sequence::{preceded, terminated, tuple};
     use std::hash::Hash;
-    use std::fmt::Display;
-
 
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-    pub struct Ident<I>(pub I);
-
-    impl<I: Display> Display for Ident<I> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            self.0.fmt(f)
-        }
-    }
-
-    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-    pub struct Directive<I>(pub I, pub Vec<I>);
-
-    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-    pub enum Fact<I> {
-        Atom(I),
-        Fact(I, Vec<Self>)
-    }
-
-    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-    pub enum Syn<I> where I: Clone + std::fmt::Debug + PartialEq {
-        Ident(Ident<I>),
-        Directive(Directive<Ident<I>>),
-        Fact(Fact<Ident<I>>),
-    }
-
-    impl<'a, I: Clone + std::fmt::Debug + Eq + Hash + PartialEq> TryFrom<&'a Syn<I>> for &'a Fact<Ident<I>> {
-        type Error = ();
-
-        fn try_from(value: &'a Syn<I>) -> Result<Self, ()> {
-            match value {
-                Syn::Fact(f) => Ok(f),
-                _ => Err(())
-            }
-        }
-    }
-
-    impl<'a, I> From<&&'a Fact<Ident<I>>> for &'a Fact<Ident<I>> {
-        fn from(value: &&'a Fact<Ident<I>>) -> Self {
-            *value
-        }
+    pub struct Fact<'s> {
+        pub path: Vec<&'s str>,
+        pub action: &'s str,
+        pub percept: &'s str,
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -76,374 +38,45 @@ pub mod parser {
     }
 
     pub fn normal(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
-        is_not(" \n\r:@.")(s)
+        is_not(" \n\r:./")(s)
     }
 
-    pub fn ident(s: &str) -> IResult<&str, Ident<&str>, VerboseError<&str>> {
-        map(context("ident", normal), Ident::<&str>)(s)
-    }
-
-    pub fn guarded_ident(s: &str) -> IResult<&str, Ident<&str>, VerboseError<&str>> {
-        map(context("guarded_ident", terminated(normal, not(char(':')))), Ident::<&str>)(s)
-    }
-
-    pub fn directive(s: &str) -> IResult<&str, Directive<Ident<&str>>, VerboseError<&str>> {
+    pub fn fact(s: &str) -> IResult<&str, Fact, VerboseError<&str>> {
         map(
             context(
-                "directive",
+                "fact",
                 tuple((
-                    char('@'),
-                    map(normal, Ident),
-                    many1(preceded(take_while(is_wst), guarded_ident))
+                    many1(preceded(ws, normal)),
+                    char(':'),
+                    preceded(ws, is_not("\n\r:./")),
+                    char('/'),
+                    preceded(ws, is_not("\n\r:./")),
                 ))
             ),
-            |(_, v1, v2)| Directive(v1, v2)
+            |(path, _, action, _, percept)| Fact{path, action, percept}
         )(s)
     }
 
-    pub fn fact(indent: usize) -> impl Fn(&str) -> IResult<&str, Fact<Ident<&str>>, VerboseError<&str>> {
-        let n = (indent + 1) * 4;
-        move |s: &str| {
-            map(
-                context(
-                    "fact",
-                    tuple(
-                        (
-                            ident,
-                            char(':'),
-                            alt((
-                                many1(preceded(tuple((ws, char('\n'), take_while_m_n(n, n, is_ws), ws)), fact(indent+1))), // for indentation
-                                many1(preceded(ws, fact(indent))),
-                                many0(preceded(ws, map(guarded_ident, Fact::<Ident<&str>>::Atom))), // many0, for empty facts.
-                            )),
-                        )
-                    )
-                ),
-                |(v1, _, v2)| Fact::<Ident<&str>>::Fact(v1, v2)
-            )(s)
-        }
+    pub fn parse(s: &str) -> IResult<&str, Vec<Fact>, VerboseError<&str>> {
+        terminated(many1(
+            preceded(take_while(is_wst), fact),
+        ), take_while(is_wst))(s)
     }
-
-    pub fn parse(s: &str) -> IResult<&str, Vec<Syn<&str>>, VerboseError<&str>> {
-        // many1(tag("hello"))(s)
-        terminated(many1(alt((
-            preceded(take_while(is_wst), map(directive, Syn::<&str>::Directive)),
-            preceded(take_while(is_wst), map(fact(0), Syn::<&str>::Fact)),
-            // ident
-        ))), take_while(is_wst))(s)
-    }
-
-    // let w = World{};
-    // w
 
     #[cfg(test)]
     mod tests {
         use nom::error::convert_error;
 
         #[test]
-        fn parse_works() {
-            let s = "@hello hello";
-            let y = super::parse(s);
-            if let Err(nom::Err::Error(ref y2)) = y {
-                println!("{}", convert_error(s, y2.clone()))
-            }
-            assert_eq!(y, Ok(("", vec![
-                super::Syn::<&str>::Directive(
-                    super::Directive(
-                        super::Ident("hello"),
-                        vec![
-                            super::Ident("hello")
-                        ]
-                    )
-                )
-            ])));
-        }
-
-        #[test]
         fn fact_works() {
-            let s = "hello: bar";
+            let s = "hello: bar / baz ";
             let y = super::parse(s);
             if let Err(nom::Err::Error(ref y2)) = y {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Syn::<&str>::Fact(
-                    super::Fact::Fact(
-                        super::Ident("hello"),
-                        vec![
-                            super::Fact::Atom(
-                                super::Ident("bar"),
-                            )
-                        ]
-                    )
-                ),
+                super::Fact{path: vec!["hello"], action: "bar ", percept: "baz "}
             ])));
-        }
-
-        #[test]
-        fn nested_fact_works() {
-            let s = "hello: bar: baz bar2: baz2";
-            let y = super::parse(s);
-            if let Err(nom::Err::Error(ref y2)) = y {
-                println!("{}", convert_error(s, y2.clone()))
-            }
-            assert_eq!(y, Ok(("", vec![
-                super::Syn::<&str>::Fact(
-                    super::Fact::Fact(
-                        super::Ident("hello"),
-                        vec![
-                            super::Fact::Fact(
-                                super::Ident("bar"),
-                                vec![
-                                    super::Fact::Atom(
-                                        super::Ident("baz"),
-                                    )
-                                ]
-                            ),
-                            super::Fact::Fact(
-                                super::Ident("bar2"),
-                                vec![
-                                    super::Fact::Atom(
-                                        super::Ident("baz2"),
-                                    )
-                                ]
-                            )
-                        ]
-                    )
-                ),
-            ])));
-        }
-
-        #[test]
-        fn expanded_fact_works() {
-            let s = "hello:\n    bar: baz";
-            let y = super::parse(s);
-            if let Err(nom::Err::Error(ref y2)) = y {
-                println!("{}", convert_error(s, y2.clone()))
-            }
-            assert_eq!(y, Ok(("", vec![
-                super::Syn::<&str>::Fact(
-                    super::Fact::Fact(
-                        super::Ident("hello"),
-                        vec![
-                            super::Fact::Fact(
-                                super::Ident("bar"),
-                                vec![
-                                    super::Fact::Atom(
-                                        super::Ident("baz"),
-                                    )
-                                ]
-                            )
-                        ]
-                    )
-                ),
-            ])));
-        }
-    }
-}
-
-pub mod render {
-    use auto_enums::auto_enum;
-    use tracing_error::{TracedError, InstrumentError};
-
-    #[non_exhaustive]
-    #[derive(Debug, thiserror::Error)]
-    enum Kind {
-        #[error("missing atom")]
-        MissingAtom
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    #[error("render error: {source:?}")]
-    pub struct Error {
-        #[from]
-        source: TracedError<Kind>,
-        // backtrace: Backtrace,
-    }
-
-    pub fn try_atom<'a>(a: &'a Fact<'a>) -> Result<&Ident, Error> {
-        match a {
-            Fact::Atom(i) => Ok(i),
-            _ => Err(Error::from(Kind::MissingAtom{}.in_current_span())),
-        // }
-        }
-    }
-
-    // impl<E> From<E> for Error
-    // where
-    //     Kind: From<E>,
-    // {
-    //     fn from(source: E) -> Self {
-    //         Self {
-    //             source: Kind::from(source).into(),
-    //             // backtrace: Backtrace::capture(),
-    //         }
-    //     }
-    // }
-
-    pub trait Render {
-        fn header();
-        fn footer();
-    }
-
-    pub type Syn<'a> = crate::parser::Syn::<&'a str>;
-    pub type Ident<'a> = crate::parser::Ident<&'a str>;
-    pub type Fact<'a> = crate::parser::Fact<Ident<'a>>;
-
-    // pub fn filter_directives<'a, I: Iterator<Item = Syn<'a>>>(v: I) -> Vec<&'a Directive<'a>> {
-    //     v
-    //         .filter_map(|e| if let Syn::Directive(d) = e { Some(d) } else { None })
-    //         .collect()
-    // }
-
-    // pub fn filter_fact<'a>(v: &'a Vec<Syn>, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
-    // pub fn filter_fact<'a, I: Iterator<Item = &'a Syn<'a>>>(v: I, i: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
-    /// Return associated sub-facts of children of `v` whose head matches `q`
-    pub fn filter_fact<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
-        v
-            .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i, f)) if q == i => Some(f), _ => None, })
-            .flatten()
-    }
-
-    // pub fn resolve<'a>(v: &'a Vec<Syn>, r: &'a Fact<'a>) -> Vec<&'a Fact<'a>> {
-    /// If `r` is an atomic identifier, look it up in `v` and return what we know about it.
-    /// Otherwise, `r` is a compound fact so return its subordinate facts. 
-    #[auto_enum(Iterator)]
-    pub fn resolve<'a, I: Iterator<Item = Item>, Item: TryInto<&'a Fact<'a>, Error=E>, E>(v: I, r: &'a Fact<'a>) -> impl Iterator<Item = &'a Fact<'a>> {
-        match r {
-            Fact::Atom(i) => {
-                return filter_fact(v, i);
-            },
-            Fact::Fact(_i, fs) => {
-                return fs.iter();
-            },
-        }
-    }
-
-    pub fn unwrap_atom<'a>(a: &'a Fact<'a>) -> Option<&'a str> {
-        match a {
-            Fact::Atom(crate::parser::Ident(i)) => Some(*i),
-            _ => None,
-        }
-    }
-
-    pub fn to_ident<'a>(a: &'a Fact<'a>) -> &'a Ident<'a> {
-        match a {
-            Fact::Atom(i) => i,
-            Fact::Fact(i, _fs) => i,
-        }
-    }
-
-    pub fn first_ident<'a, I: Iterator<Item = &'a Fact<'a>>>(mut v: I) -> Option<&'a str> {
-        v
-            .find_map(unwrap_atom)
-    }
-
-    /// Given a database `v`, returns facts of type `q1` from the entity identified by `q2`.
-    /// 
-    /// Example: 
-    /// 
-    /// Suppose `person: actuates: lever`.
-    /// 
-    /// Who does `person` `actuate`?
-    /// 
-    /// ```rust
-    /// use diagrams::parser::{parse, Ident};
-    /// use diagrams::render::{find_image, to_ident, Fact};
-    /// let v = parse("person: actuates: lever").unwrap().1;
-    /// let query = Ident("actuates");
-    /// let item = Ident("person");
-    /// let resolved_actuates = find_image(v.iter(), &query, &item).next();
-    /// assert_eq!(resolved_actuates, Some(&Fact::Atom(Ident("lever"))));
-    /// ```
-    pub fn find_image<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Fact<'a>> {
-        v
-            .filter_map(move |item|
-                match item.try_into() {
-                    Ok(Fact::Fact(i, fs)) if i == q2 => {
-                        Some(filter_fact(fs.iter(), q1))
-                    },
-                    _ => None,
-                }
-            )
-            .flatten()
-    }
-
-    /// Given a database `v`, returns facts of type `q1` about the entity identified by `q2`.
-    /// 
-    /// Example: 
-    /// 
-    /// Suppose `person: actuates: lever`. 
-    /// 
-    /// Who `actuates` `lever`?
-    /// 
-    /// ```rust
-    /// use diagrams::parser::{parse, Ident};
-    /// use diagrams::render::{find_preimage, to_ident, Fact};
-    /// let v = parse("person: actuates: lever").unwrap().1;
-    /// let query = Ident("actuates");
-    /// let item = Ident("lever");
-    /// let resolved_actuates = find_preimage(v.iter(), &query, &item).next();
-    /// assert_eq!(resolved_actuates, Some(&Ident("person")));
-    /// ```
-    pub fn find_preimage<'a, I: Iterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q1: &'a Ident, q2: &'a Ident) -> impl Iterator<Item = &'a Ident<'a>> {
-        v
-            .filter_map(move |item|
-                match item.try_into() {
-                    Ok(Fact::Fact(i, fs)) => {
-                        let mut candidates = filter_fact(fs.iter(), q1);
-                        candidates.find(|c| matches!(c, Fact::Atom(a) if a == q2)).map(|_| i)
-                    },
-                    _ => None,
-                }
-            )
-    }
-
-    pub fn as_string<'a, I: IntoIterator<Item = Item>, Item: PartialEq + TryInto<&'a Fact<'a>, Error=E>, E>(v: I, q: &'a Ident, default: String) -> String {
-        let default = vec![Fact::Atom(crate::parser::Ident(&default))];
-        let mut subfacts = v
-            .into_iter()
-            .filter_map(move |e| match e.try_into() { Ok(Fact::Fact(ref i, f)) if q == i => Some(f), _ => None, })
-            .collect::<Vec<&Vec<Fact>>>();
-        if subfacts.is_empty() {
-            subfacts.push(&default);
-        }
-        subfacts
-            .iter()
-            .map(|f| f
-                .iter()
-                .map(|ia| match ia {
-                    Fact::Atom(a2) => a2.0,
-                    Fact::Fact(ref i2, _f2) => i2.0,
-                })
-                .collect::<Vec<&str>>()
-                .join(" "))
-            .collect::<Vec<String>>()
-            .join(" ")
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use crate::{render::{as_string}, parser::{Ident, parse}};
-
-        #[test]
-        fn as_string_works() {
-            let y: String = "baz baz2".into();
-            let s = "bar: baz bar: baz2";
-            let p = parse(s);
-            let q = p.unwrap();
-            let r = q.1.iter();
-            assert_eq!(y, as_string(r, &Ident("bar"), "".into()));
-        }
-
-        #[test]
-        fn as_string_default_works() {
-            let y: String = "quux".into();
-            let s = "bar: baz bar: baz2";
-            let p = parse(s);
-            let q = p.unwrap();
-            let r = q.1.iter();
-            assert_eq!(y, as_string(r, &Ident("foo"), "quux".into()))
         }
     }
 }

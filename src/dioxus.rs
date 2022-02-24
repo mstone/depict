@@ -1,6 +1,4 @@
 use std::cell::Cell;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hasher, Hash};
 use std::io;
 use std::panic::catch_unwind;
 
@@ -9,20 +7,19 @@ use dioxus::prelude::*;
 
 use dioxus_desktop::tao::dpi::{LogicalSize};
 
-use diagrams::parser::{parse, Ident};
+use diagrams::parser::{parse};
 use diagrams::graph_drawing::*;
-use diagrams::render::filter_fact;
 
 use color_spantrace::colorize;
 // use dioxus_desktop::use_window;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
 use indoc::indoc;
-use tracing::{instrument};
+use tracing::{instrument, event, Level};
 use tracing_error::{InstrumentResult, ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Node {
   Div { key: String, label: String, hpos: f64, vpos: f64, width: f64 },
   Svg { key: String, path: String },
@@ -38,10 +35,15 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
         })
         .in_current_span()?
         .1;
-    let mut ds = filter_fact(v.iter(), &Ident("draw"));
-    let draw = ds.next().or_err(Kind::MissingDrawingError{})?;
 
-    let Vcg{vert, v_nodes, h_name} = calculate_vcg(&v, draw)?;
+    let Vcg{vert, v_nodes, h_name} = calculate_vcg(&v)?;
+
+    // diagrams::graph_drawing::draw(v, &mut vcg)?;
+
+
+    // let draw_query = Fact::Atom(Ident("draw"));
+    // let draw_cmd = diagrams::render::resolve(v.iter(), &draw_query).next().unwrap();
+    // diagrams::graph_drawing::draw(&v, draw_cmd, &mut vcg)?;
 
     // eprintln!("VERT: {:?}", Dot::new(&vert));
 
@@ -65,9 +67,12 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
     let height_scale = 80.0;
 
     let mut texts = vec![];
-    let mut hasher = DefaultHasher::new();
-    data.hash(&mut hasher);
-    let data_hash = hasher.finish();
+
+    // use std::collections::hash_map::DefaultHasher;
+    // use std::hash::{Hasher, Hash};
+    // let mut hasher = DefaultHasher::new();
+    // data.hash(&mut hasher);
+    // let data_hash = hasher.finish();
 
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
@@ -78,12 +83,18 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
         let vpos = 80.0 * (*ovr as f64) + 100.0;
         // let hpos = 1024.0 * ((lpos + rpos) / 2.0);
-        let hpos = 1024.0 * lpos + 0.1 * 1024.0 * (rpos - lpos);
-        let width = 1024.0 * 0.9 * (rpos - lpos);
+        let orig_width = 1024.0 * (rpos - lpos);
+        let width = orig_width * 0.9;
+        let hpos = 1024.0 * lpos + (0.05 * orig_width);
+        // let hpos = 1024.0 * lpos + 0.1 * 1024.0 * (rpos - lpos);
+        // let width = 1024.0 * 0.9 * (rpos - lpos);
 
         if let Loc::Node(vl) = node {
-            let key = format!("{vl}_{data_hash}");
-            let label = h_name[*vl].clone();
+            let key = vl.to_string();
+            let label = h_name
+                .get(*vl)
+                .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
+                .clone();
             texts.push(Node::Div{key, label, hpos, vpos, width});
         }
     }
@@ -91,9 +102,15 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
     let mut arrows = vec![];
 
     for cer in condensed.edge_references() {
-        for (vl, wl, ew) in cer.weight().iter() {
+        for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
             let hops = &hops_by_edge[&(*vl, *wl)];
             // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
+
+            let offset = match *ew { 
+                "actuates" | "actuator" => 0.0125,
+                "senses" | "sensor" => -0.0125,
+                _ => 0.0,
+            };
 
             let mut path = vec![];
 
@@ -101,7 +118,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
                 let (lvl, (_mhr, nhr)) = hop;
                 let hn = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
                 let spos = ss[hn];
-                let hpos = 1024.0 * spos;
+                let hpos = 1024.0 * (spos + offset);
                 let vpos = (*lvl as f64) * height_scale + 100.0;
                 let vpos2 = ((*lvl + 1) as f64) * height_scale + 100.0;
 
@@ -113,7 +130,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
             }
 
-            let key = format!("{vl}_{wl}_{ew}_{data_hash}");
+            let key = format!("{vl}_{wl}_{ew}_{m}");
             let path = path.join(" ");
             arrows.push(Node::Svg{key, path});
         }
@@ -123,6 +140,8 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
         .into_iter()
         .chain(arrows.into_iter())
         .collect::<Vec<_>>();
+
+    event!(Level::TRACE, ?nodes, "NODES");
 
     Ok(nodes)
 }
@@ -173,15 +192,11 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
 }
 
 const PLACEHOLDER: &str = indoc!("
-driver: name: Driver controls: car actuates: wheel brakes accel screen senses: wheel brakes accel screen
-car: name: Car hosts: wheel brakes accel thermostat
-computer: name: Computer hosts: screen actuates: thermostat senses: thermostat
-wheel: name: Wheel action: Turn $name percept: $name Angle
-brakes: name: Brakes action: Brake percept: $action Position
-accel: name: Accelerator action: Accelerate percept: Acceleration
-screen: name: Touchscreen action: Click percept: Read UI
-thermostat: name: Thermostat action: Set $name percept: Car Temperature
-draw: drawing1: compact: driver car computer parallel: wheel brakes accel screen thermostat
+driver wheel car: turn / wheel angle
+driver accel car: accelerate / accelerator pedal position
+driver brakes car: brake / brake pedal position
+driver screen computer: press screen / read display
+computer thermostat car: set temperature / measure temperature
 ");
 
 pub struct AppProps {
@@ -235,6 +250,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         // placeholder: "",
                         value: "{model}",
                         oninput: move |e| { 
+                            event!(Level::TRACE, "INPUT");
                             set_model(e.value.clone());
                             model_sender.unbounded_send(e.value.clone()).unwrap(); 
                         }
@@ -278,10 +294,14 @@ pub fn main() -> io::Result<()> {
                                 drawing_sender.unbounded_send(nodes).unwrap();
                             },
                             Ok(Err(err)) => {
-                                eprintln!("drawing error: {:?}\n{}", err, colorize(err.span_trace().unwrap()));
+                                if let Some(st) = err.span_trace() {
+                                    event!(Level::ERROR, ?err, %st, "DRAWING ERROR SPANTRACE");
+                                } else {
+                                    event!(Level::ERROR, ?err, "DRAWING ERROR");
+                                }
                             }
                             Err(_) => {
-                                eprintln!("panic!");
+                                event!(Level::ERROR, ?nodes, "PANIC");
                             }
                         }
                     }
