@@ -255,12 +255,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         rows: "6",
                         cols: "80",
                         // placeholder: "",
-                        value: "{model}",
                         oninput: move |e| { 
                             event!(Level::TRACE, "INPUT");
                             set_model(e.value.clone());
                             model_sender.unbounded_send(e.value.clone()).unwrap(); 
-                        }
+                        },
+                        "{model}"
                     }
                 }
             }
