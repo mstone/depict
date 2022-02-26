@@ -1,5 +1,5 @@
 // clang -g -Wall -framework Cocoa -o main main.m
-use cocoa::{self, foundation::{NSAutoreleasePool, NSProcessInfo, NSString, NSRect, NSPoint, NSSize}, base::{nil, selector, NO, id}, appkit::{NSApplication, NSMenu, NSMenuItem, NSWindow, NSBackingStoreType::NSBackingStoreBuffered, NSWindowStyleMask, NSRunningApplication, NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps, NSApp, NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular}};
+use cocoa::{self, foundation::{NSAutoreleasePool, NSProcessInfo, NSString, NSRect, NSPoint, NSSize}, base::{nil, selector, NO, id}, appkit::{NSApplication, NSMenu, NSMenuItem, NSWindow, NSBackingStoreType::NSBackingStoreBuffered, NSWindowStyleMask, NSRunningApplication, NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps, NSApp, NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular, NSButton, NSTextField}};
 use objc::{class, declare::ClassDecl, runtime::{Object, Sel}, sel, sel_impl, msg_send};
 
 // https://ar.al/2018/09/17/workaround-for-unclickable-app-menu-bug-with-window.makekeyandorderfront-and-nsapp.activate-on-macos/
@@ -29,21 +29,57 @@ pub fn main() {
 
         let superclass = class!(NSObject);
         let mut decl = ClassDecl::new("MyApplicationDelegate", superclass).unwrap();
+        decl.add_ivar::<id>("_window");
+
+        extern fn objc_set_window(this: &mut Object, _cmd: Sel, ptr: id) {
+            unsafe {this.set_ivar("_window", ptr);}
+        }
+
+        decl.add_method(sel!(setWindow:), 
+            objc_set_window as extern fn(&mut Object, Sel, id));
+
+        extern fn control_text_did_change(_: &Object, _: Sel, notification: id) {
+            unsafe {
+                let text: id = msg_send!(notification, object);
+                let value: id = msg_send!(text, stringValue);
+                let buf = NSString::UTF8String(value) as *const u8;
+                let len = NSString::len(value);
+                let slice = std::slice::from_raw_parts(buf, len);
+                let str = String::from_utf8_unchecked(Vec::from(slice));
+                eprintln!("{str}");
+            }
+        }
+
+        decl.add_method(sel!(controlTextDidChange:), 
+            control_text_did_change as extern fn(&Object, Sel, id));
 
         extern fn application_will_finish_launching(_: &Object, _: Sel, _: id) {
             unsafe {       
                 NSApp().setActivationPolicy_(NSApplicationActivationPolicyRegular);
             }
         }
-        extern fn application_did_finish_launching(_: &Object, _: Sel, _: id) {
+
+        decl.add_method(sel!(applicationWillFinishLaunching:),
+            application_will_finish_launching as extern fn(&Object, Sel, id));
+
+        extern fn application_did_finish_launching(this: &Object, _: Sel, _: id) {
             unsafe {
+
+                let text_field_frame = NSRect::new(NSPoint::new(200., 500.), NSSize::new(800., 100.));
+                let text_field = NSTextField::initWithFrame_(NSTextField::alloc(nil), text_field_frame).autorelease();
+                let () = msg_send!(text_field, setDelegate:this);
+
+                let window_ptr: &id = this.get_ivar("_window");
+                let window = *window_ptr as *mut Object;
+
+		        let content_view: *mut Object = msg_send!(window, contentView);
+
+                let () = msg_send!(content_view, addSubview:text_field);
+
                 let current_app = NSRunningApplication::currentApplication(nil);
                 current_app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps);
             }
         }
-
-        decl.add_method(sel!(applicationWillFinishLaunching:),
-            application_will_finish_launching as extern fn(&Object, Sel, id));
 
         decl.add_method(sel!(applicationDidFinishLaunching:),
             application_did_finish_launching as extern fn(&Object, Sel, id));
@@ -71,17 +107,18 @@ pub fn main() {
         app_menu.addItem_(quit_item);
         app_menu_item.setSubmenu_(app_menu);
 
-        let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(400., 200.));
-        let style = NSWindowStyleMask::NSTitledWindowMask;
+        let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1200., 650.));
+        let style = NSWindowStyleMask::NSTitledWindowMask | NSWindowStyleMask::NSClosableWindowMask;
         let backing = NSBackingStoreBuffered;
         let defer = NO;
         let window = NSWindow::alloc(nil)
             .initWithContentRect_styleMask_backing_defer_(rect, style, backing, defer)
             .autorelease();
+        let _: () = msg_send!(delegate_object, setWindow:window);
         window.cascadeTopLeftFromPoint_(NSPoint::new(20., 20.));
         window.center();
         let title = NSString::alloc(nil).init_str("Hello World!");
-        window.setTitle_(title);
+        NSWindow::setTitle_(window, title);
         window.makeKeyAndOrderFront_(nil);
         app.run();
     }

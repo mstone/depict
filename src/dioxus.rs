@@ -63,8 +63,10 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     let LayoutProblem{sol_by_loc, sol_by_hop, ..} = layout_problem;
 
-    // let width_scale = 0.9;
+    let viewbox_width = 1024;
+    let width_scale = 1.0;
     let height_scale = 80.0;
+    let vpad = 50.0;
 
     let mut texts = vec![];
 
@@ -76,16 +78,17 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
+        if (*ovr, *ohr) == (0, 0) { continue; }
         let n = sol_by_loc[&(*ovr, *ohr)];
 
         let lpos = ls[n];
         let rpos = rs[n];
 
-        let vpos = 80.0 * (*ovr as f64) + 100.0;
+        let vpos = height_scale * ((ovr-1) as f64) + vpad;
         // let hpos = 1024.0 * ((lpos + rpos) / 2.0);
-        let orig_width = 1024.0 * (rpos - lpos);
-        let width = orig_width * 0.9;
-        let hpos = 1024.0 * lpos + (0.05 * orig_width);
+        let orig_width = (viewbox_width as f64) * (rpos - lpos);
+        let width = orig_width * width_scale;
+        let hpos = (viewbox_width as f64) * lpos + (0.05 * orig_width);
         // let hpos = 1024.0 * lpos + 0.1 * 1024.0 * (rpos - lpos);
         // let width = 1024.0 * 0.9 * (rpos - lpos);
 
@@ -103,6 +106,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     for cer in condensed.edge_references() {
         for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
+            if *vl == "root" { continue; }
             let hops = &hops_by_edge[&(*vl, *wl)];
             // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
 
@@ -118,9 +122,9 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
                 let (lvl, (_mhr, nhr)) = hop;
                 let hn = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
                 let spos = ss[hn];
-                let hpos = 1024.0 * (spos + offset);
-                let vpos = (*lvl as f64) * height_scale + 100.0;
-                let vpos2 = ((*lvl + 1) as f64) * height_scale + 100.0;
+                let hpos = (viewbox_width as f64) * (spos + offset);
+                let vpos = ((lvl-1) as f64) * height_scale + vpad;
+                let vpos2 = (*lvl as f64) * height_scale + vpad;
 
                 if n == 0 {
                     path.push(format!("M {hpos} {vpos}"));
@@ -147,6 +151,8 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 }
 
 pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
+    let viewbox_width = 1024;
+    let viewbox_height = 768;
     let mut children = vec![];
     nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
     for node in nodes {
@@ -176,9 +182,9 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                             stroke_linecap: "round",
                             stroke_linejoin: "round",
                             stroke_width: "1",
-                            view_box: "0 0 1024 768",
-                            width: "1024px",
-                            height: "768px",
+                            view_box: "0 0 {viewbox_width} {viewbox_height}",
+                            width: "{viewbox_width}px",
+                            height: "{viewbox_height}px",
                             path {
                                 d: "{path}",
                             }
@@ -193,11 +199,12 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
 
 const PLACEHOLDER: &str = indoc!("
 driver wheel car: turn / wheel angle
-driver accel car: accelerate / accelerator pedal position
-driver brakes car: brake / brake pedal position
-driver screen computer: press screen / read display
-computer thermostat car: set temperature / measure temperature
 ");
+
+// driver accel car: accelerate / accelerator pedal position
+// driver brakes car: brake / brake pedal position
+// driver screen computer: press screen / read display
+// computer thermostat car: set temperature / measure temperature
 
 pub struct AppProps {
     model_sender: Option<UnboundedSender<String>>,
@@ -245,7 +252,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                     // key: "editor_editor",
                     textarea {
                         class: "border",
-                        rows: "10",
+                        rows: "6",
                         cols: "80",
                         // placeholder: "",
                         value: "{model}",
@@ -259,9 +266,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             }
         }
         div {
-            // key: "viewer",
-            class: "relative",
-            nodes
+            class: "width-full",
+            div {
+                class: "relative mx-auto",
+                width: "1024px",
+                nodes
+            }
         }
     })   
 }
@@ -295,7 +305,8 @@ pub fn main() -> io::Result<()> {
                             },
                             Ok(Err(err)) => {
                                 if let Some(st) = err.span_trace() {
-                                    event!(Level::ERROR, ?err, %st, "DRAWING ERROR SPANTRACE");
+                                    let st_col = colorize(st);
+                                    event!(Level::ERROR, ?err, %st_col, "DRAWING ERROR SPANTRACE");
                                 } else {
                                     event!(Level::ERROR, ?err, "DRAWING ERROR");
                                 }
@@ -315,7 +326,7 @@ pub fn main() -> io::Result<()> {
             drawing_receiver: Cell::new(Some(drawing_receiver)) 
         },
         |c| c.with_window(|c| 
-            c.with_inner_size(LogicalSize::new(1200.0, 900.0))));
+            c.with_inner_size(LogicalSize::new(1200.0, 700.0))));
 
     // let mut vdom = VirtualDom::new(app);
     // let _ = vdom.rebuild();

@@ -55,6 +55,10 @@ pub fn leq<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
     a.rich_compare(b, CompareOp::Le)
 }
 
+pub fn eq<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
+    a.rich_compare(b, CompareOp::Eq)
+}
+
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone)]
 pub enum Loc<V,E> {
     Node(V),
@@ -66,21 +70,6 @@ pub fn get_value(a: &PyAny) -> PyResult<PyReadonlyArray1<f64>> {
         .getattr("value")?
         .extract::<&PyArray1<f64>>()?
         .readonly())
-}
-
-#[derive(Clone, Debug, Default)]
-struct NodeStyle<'s> {
-    node: &'s str,
-    node_ix: Option<NodeIndex>,
-    style: Option<String>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct EdgeStyle<'s> {
-    src: &'s str,
-    dst: &'s str,
-    action: Option<String>,
-    percept: Option<String>,
 }
 
 #[derive(Debug)]
@@ -185,58 +174,6 @@ impl ExtractSpanTrace for Error {
     }
 }
 
-// #[instrument]
-// pub fn draw<'s, 'g>(v: &'s [Syn], vcg: &'g mut Vcg<'s>) -> Result<(), Error> {
-//     let h_name = &mut vcg.h_name;
-//     let (_, hints) = try_fact(draw)?;
-
-//     event!(Level::TRACE, ?hints, "HINTS");
-
-//     for hint in hints.iter() {
-//         if let Fact::Fact(Ident(style), items) = hint {
-//             for item_fact in items {
-//                 event!(Level::TRACE, ?item_fact, "ITEM");
-//                 let item_ident = try_atom(item_fact)?;
-//                 let item = item_ident.0;
-
-//                 event!(Level::TRACE, ?item, "ITEM2");
-//                 // let resolved_item = resolve(v.iter(), item).collect::<Vec<&Fact>>();
-//                 // let name = as_string(&resolved_item, &Ident("name"), item_ident.into());
-//                 let name = find_image(v.iter(), &Ident("name"), item_ident);
-//                 let name = first_ident(name)
-//                     .unwrap_or(item)
-//                     .to_string();
-                
-//                 // TODO: need to loop here to resolve all the actuates/senses/hosts pairs, not just the first
-//                 let resolved_actuates = find_preimage(v.iter(), &Ident("actuates"), item_ident).map(|f| f.0).collect::<Vec<_>>();
-//                 let resolved_senses = find_preimage(v.iter(), &Ident("senses"), item_ident).map(|f| f.0).collect::<Vec<_>>();
-//                 let resolved_hosts = find_preimage(v.iter(), &Ident("on"), item_ident).map(|f| f.0).collect::<Vec<_>>();
-
-//                 h_name.insert(item, name);
-
-//                 match *style {
-//                     "compact" => {
-//                     },
-//                     "coalesce" => {
-//                     },
-//                     "embed" => {
-//                     },
-//                     "parallel" => {
-//                     },
-//                     // hide? elide? skip?
-//                     // autodraw?
-//                     style => {
-//                         return Err(Kind::UnimplementedDrawingStyleError{style: style.to_string()}.into())
-//                     }
-//                 }
-                
-//                 event!(Level::DEBUG, %item_ident, %style, ?resolved_actuates, ?resolved_senses, ?resolved_hosts, "READ");
-//             }
-//         }
-//     }
-//     Ok(())
-// }
-
 #[instrument(skip(v))]
 pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
     event!(Level::TRACE, "CALCULATE_VCG");
@@ -267,6 +204,14 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
         for node in path {
             vcg.h_name.insert(*node, node.to_title_case());
         }
+    }
+
+    let roots = roots(&vcg.vert)?;
+    let root_ix = or_insert(&mut vcg.vert, &mut vcg.v_nodes, "root");
+    vcg.h_name.insert("root", "".to_string());
+    for node in roots.iter() {
+        let node_ix = vcg.v_nodes[node];
+        vcg.vert.add_edge(root_ix, node_ix, "fake");
     }
 
     event!(Level::TRACE, ?vcg, "VCG");
@@ -817,6 +762,11 @@ pub fn position_sols<'s, V, E>(
         let mut cvec: Vec<&PyAny> = vec![];
         let mut obj = zero;
 
+        // let root_n = sol_by_loc[&(0, 0)];
+        // cvec.push(eq(get(l,root_n)?, zero)?);
+        // cvec.push(eq(get(r,root_n)?, one)?);
+        cvec.push(geq(eps, sep)?);
+
         for LocRow{ovr, ohr, ..} in all_locs.iter() {
             let ovr = *ovr; 
             let ohr = *ohr;
@@ -827,12 +777,14 @@ pub fn position_sols<'s, V, E>(
                 // eprint!("C0: ");
                 // eprint!("r{} >= l{} + S, ", n, n);
                 cvec.push(geq(get(r,n)?, add(get(l,n)?, sep)?)?);
+                // WIDTH
+                obj = add(obj, sub(get(l,n)?, get(r,n)?)?)?;
                 if shr > 0 {
                     #[allow(clippy::unwrap_used)]
                     let ohrp = locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap();
                     let np = sol_by_loc[&(ovr, ohrp)];
                     // let _shrp = locs[&ohrp];
-                    cvec.push(geq(get(l, n)?, get(r, np)?)?);
+                    cvec.push(geq(get(l, n)?, add(get(r, np)?, sep)?)?);
                     // eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
                 }
                 if shr < locs.len()-1 {
@@ -840,7 +792,7 @@ pub fn position_sols<'s, V, E>(
                     let ohrn = locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap();
                     let nn = sol_by_loc[&(ovr,ohrn)];
                     // let _shrn = locs[&(ohr+1)];
-                    cvec.push(leq(get(r,n)?, get(l,nn)?)?);
+                    cvec.push(leq(get(r,n)?, sub(get(l,nn)?, sep)?)?);
                     // eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
                 }
                 if shr == locs.len()-1 {
