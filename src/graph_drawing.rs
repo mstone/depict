@@ -192,13 +192,17 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
             let dst_ix = or_insert(&mut vcg.vert, &mut vcg.v_nodes, dst);
 
             // TODO: record associated action/percept texts.
-            let action = action.trim();
-            let percept = percept.trim();
-            if !action.is_empty() {
-                vcg.vert.add_edge(src_ix, dst_ix, "actuates");
+            let action = action.map(str::trim);
+            let percept = percept.map(str::trim);
+            if let Some(action) = action {
+                if !action.is_empty() {
+                    vcg.vert.add_edge(src_ix, dst_ix, "actuates");
+                }
             }
-            if !percept.is_empty() {
-                vcg.vert.add_edge(src_ix, dst_ix, "senses");
+            if let Some(percept) = percept {
+                if !percept.is_empty() {
+                    vcg.vert.add_edge(src_ix, dst_ix, "senses");
+                }
             }
         }
         for node in path {

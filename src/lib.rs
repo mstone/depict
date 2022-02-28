@@ -5,7 +5,7 @@ pub mod parser {
     use nom::bytes::complete::{take_while, take_while1, is_not, is_a};
     // use nom::character::{is_space};
     use nom::character::complete::{char};
-    use nom::combinator::{map};
+    use nom::combinator::{map, opt};
     use nom::multi::{many1};
     use nom::sequence::{preceded, terminated, tuple};
     use std::hash::Hash;
@@ -13,8 +13,8 @@ pub mod parser {
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub struct Fact<'s> {
         pub path: Vec<&'s str>,
-        pub action: &'s str,
-        pub percept: &'s str,
+        pub action: Option<&'s str>,
+        pub percept: Option<&'s str>,
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -47,10 +47,10 @@ pub mod parser {
                 "fact",
                 tuple((
                     many1(preceded(ws, normal)),
-                    char(':'),
-                    preceded(ws, is_not("\n\r:./")),
+                    preceded(ws, char(':')),
+                    preceded(ws, opt(is_not("\n\r:./"))),
                     char('/'),
-                    preceded(ws, is_not("\n\r:./")),
+                    preceded(ws, opt(is_not("\n\r:./"))),
                 ))
             ),
             |(path, _, action, _, percept)| Fact{path, action, percept}

@@ -88,7 +88,8 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
         // let hpos = 1024.0 * ((lpos + rpos) / 2.0);
         let orig_width = (viewbox_width as f64) * (rpos - lpos);
         let width = orig_width * width_scale;
-        let hpos = (viewbox_width as f64) * lpos + (0.05 * orig_width);
+        // let hpos = (viewbox_width as f64) * lpos + (0.05 * orig_width);
+        let hpos = (viewbox_width as f64) * lpos;
         // let hpos = 1024.0 * lpos + 0.1 * 1024.0 * (rpos - lpos);
         // let width = 1024.0 * 0.9 * (rpos - lpos);
 
@@ -117,12 +118,14 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
             };
 
             let mut path = vec![];
+            // use rand::Rng;
+            // let mut rng = rand::thread_rng();
 
             for (n, hop) in hops.iter().enumerate() {
                 let (lvl, (_mhr, nhr)) = hop;
                 let hn = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
                 let spos = ss[hn];
-                let hpos = (viewbox_width as f64) * (spos + offset);
+                let hpos = ((viewbox_width as f64) * (spos + offset)).round(); // + rng.gen_range(-0.1..0.1));
                 let vpos = ((lvl-1) as f64) * height_scale + vpad;
                 let vpos2 = (*lvl as f64) * height_scale + vpad;
 
@@ -158,7 +161,7 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
     for node in nodes {
         match node {
             Node::Div{key, label, hpos, vpos, width} => {
-                children.push(rsx! {
+                children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
                         class: "absolute border border-black text-center z-10 bg-white",
@@ -169,10 +172,10 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                             "{label}"
                         }
                     }
-                });
+                }));
             },
             Node::Svg{key, path} => {
-                children.push(rsx!{
+                children.push(cx.render(rsx!{
                     div {
                         key: "{key}",
                         class: "absolute",
@@ -190,11 +193,11 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                             }
                         }
                     }
-                });
+                }));
             },
         }
     }
-    cx.render(rsx!(children))
+    dbg!(cx.render(rsx!(children)))
 }
 
 const PLACEHOLDER: &str = indoc!("
@@ -215,7 +218,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let (model, set_model) = use_state(&cx, || String::from(PLACEHOLDER));
     let (drawing, set_drawing) = use_state(&cx, Vec::new);
 
-    use_coroutine(&cx, || {
+    use_coroutine(&cx, |_: UnboundedReceiver<()>| {
         let receiver = cx.props.drawing_receiver.take();
         let set_drawing = set_drawing.to_owned();
         async move {
