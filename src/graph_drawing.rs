@@ -79,11 +79,14 @@ pub struct Vcg<'s> {
     /// Node weights must be unique.
     pub vert: Graph<&'s str, &'s str>,
 
-    /// v_nodes maps node weights in vert to node-indices.
-    pub v_nodes: HashMap<&'s str, NodeIndex>,
+    /// vert_vxmap maps node weights in vert to node-indices.
+    pub vert_vxmap: HashMap<&'s str, NodeIndex>,
 
-    /// h_name maps node weights to display names/labels.
-    pub h_name: HashMap<&'s str, String>,
+    /// vert_node_labels maps node weights in vert to display names/labels.
+    pub vert_node_labels: HashMap<&'s str, String>,
+
+    /// vert_edge_labels maps (v,w,rel) node weight pairs to display edge labels.
+    pub vert_edge_labels: HashMap<(&'s str, &'s str, &'s str), Vec<&'s str>>,
 }
 
 #[non_exhaustive]
@@ -178,9 +181,10 @@ impl ExtractSpanTrace for Error {
 pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
     event!(Level::TRACE, "CALCULATE_VCG");
     let vert = Graph::<&str, &str>::new();
-    let v_nodes = HashMap::<&str, NodeIndex>::new();
-    let h_name = HashMap::new();
-    let mut vcg = Vcg{vert, v_nodes, h_name};
+    let vert_vxmap = HashMap::<&str, NodeIndex>::new();
+    let vert_node_labels = HashMap::new();
+    let vert_edge_labels = HashMap::new();
+    let mut vcg = Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels};
 
     let _ = v;
 
@@ -188,8 +192,8 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
         for n in 0..path.len()-1 {
             let src = path[n];
             let dst = path[n+1];
-            let src_ix = or_insert(&mut vcg.vert, &mut vcg.v_nodes, src);
-            let dst_ix = or_insert(&mut vcg.vert, &mut vcg.v_nodes, dst);
+            let src_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, src);
+            let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst);
 
             // TODO: record associated action/percept texts.
             let action = action.map(str::trim);
@@ -198,23 +202,29 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
                 if !action.is_empty() {
                     vcg.vert.add_edge(src_ix, dst_ix, "actuates");
                 }
+                if n == 0 {
+                    vcg.vert_edge_labels.entry((src, dst, "actuates")).or_default().push(action);
+                }
             }
             if let Some(percept) = percept {
                 if !percept.is_empty() {
                     vcg.vert.add_edge(src_ix, dst_ix, "senses");
                 }
+                if n == 0 {
+                    vcg.vert_edge_labels.entry((src, dst, "senses")).or_default().push(percept);
+                }
             }
         }
         for node in path {
-            vcg.h_name.insert(*node, node.to_title_case());
+            vcg.vert_node_labels.insert(*node, node.to_title_case());
         }
     }
 
     let roots = roots(&vcg.vert)?;
-    let root_ix = or_insert(&mut vcg.vert, &mut vcg.v_nodes, "root");
-    vcg.h_name.insert("root", "".to_string());
+    let root_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, "root");
+    vcg.vert_node_labels.insert("root", "".to_string());
     for node in roots.iter() {
-        let node_ix = vcg.v_nodes[node];
+        let node_ix = vcg.vert_vxmap[node];
         vcg.vert.add_edge(root_ix, node_ix, "fake");
     }
 

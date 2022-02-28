@@ -20,7 +20,7 @@ pub fn tikz_escape(s: &str) -> String {
 
 pub fn render(v: Vec<Fact>) -> Result<(), Error> {
 
-    let Vcg{vert, v_nodes, h_name} = calculate_vcg(&v)?;
+    let Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels} = calculate_vcg(&v)?;
 
     eprintln!("VERT: {:?}", Dot::new(&vert));
 
@@ -38,7 +38,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
     
     let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
-    let LayoutSolution{ls, rs, ss} = position_sols(&vert, &v_nodes, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
+    let LayoutSolution{ls, rs, ss} = position_sols(&vert, &vert_vxmap, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
 
     let LayoutProblem{all_locs, sol_by_loc, sol_by_hop, ..} = layout_problem;
 
@@ -68,7 +68,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
             Loc::Node(vl) => {
                 println!(indoc!(r#"
                     \node[minimum width = {}cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
-                    width, vl, hpos, vpos, h_name[*vl]);
+                    width, vl, hpos, vpos, vert_node_labels[*vl]);
             },
             Loc::Hop(_, vl, wl) => {
                 let hn = sol_by_hop[&(*ovr, *ohr, *vl, *wl)];
@@ -84,6 +84,10 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
 
     for cer in condensed.edge_references() {
         for (vl, wl, ew) in cer.weight().iter() {
+            let label_text = vert_edge_labels.get(&(*vl, *wl, *ew))
+                .map(|v| v.join("\n"))
+                .unwrap_or_else(|| ew.to_string());
+
             let (ovr, ohr) = node_to_loc[&Loc::Node(*vl)];
             let (ovrd, ohrd) = node_to_loc[&Loc::Node(*wl)];
 
@@ -125,7 +129,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
             let dir = match *ew {
                 "actuates" | "rides" => "-{Stealth[]}",
                 "senses" => "{Stealth[]}-",
-                _ => "--",
+                _ => "-",
             };
 
             let anchor = match *ew {
@@ -138,8 +142,8 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
                 0 => { unreachable!(); }
                 1 => {
                     println!(indoc!(r#"
-                        \draw [{}, postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
-                        dir, vl, arr_src_frac, vl, anchor, ew, wl, arr_dst_frac, wl    
+                        \draw [{}] ($({}.south west)!{}!({}.south east)$)        to[]  node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} ($({}.north west)!{}!({}.north east)$);"#),
+                        dir, vl, arr_src_frac, vl, anchor, label_text, wl, arr_dst_frac, wl    
                     );
                 },
                 2 => {
@@ -147,12 +151,12 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
                     let (ovr, ohr) = (lvl+1, nhr);
                     // BUG? -- intermediate node needs to be at aux_{ovr}_{ohr}?
                     println!(indoc!(r#"
-                        \draw [rounded corners, {},postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
-                        dir, vl, arr_src_frac, vl, anchor, ew, ovr, ohr, wl, arr_dst_frac, wl    
+                        \draw [rounded corners, {}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
+                        dir, vl, arr_src_frac, vl, anchor, label_text, ovr, ohr, wl, arr_dst_frac, wl    
                     );
                 },
                 max_levels => {
-                    print!(indoc!(r#"\draw [rounded corners, {}, postaction={{decorate}}] ($({}.south west)!{}!({}.south east)$)"#), 
+                    print!(indoc!(r#"\draw [rounded corners, {}] ($({}.south west)!{}!({}.south east)$)"#), 
                         dir, vl, arr_src_frac, vl);
                     let mid = max_levels / 2;
                     let mut mid_ovr = 0;
@@ -175,8 +179,8 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
                         }
                     }
                     println!(indoc!(r#" -- ($({}.north west)!{}!({}.north east)$);"#), wl, arr_dst_frac, wl);
-                    println!(indoc!(r#"\node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] (mid_{}_{}_{}) at ($(aux_{}_{})!0.5!(aux_{}_{})$) {{{}}};"#), 
-                        anchor, vl, wl, ew, mid_ovr, mid_ohr, mid_ovrd, mid_ohrd, ew);
+                    println!(indoc!(r#"\node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0] (mid_{}_{}_{}) at ($(aux_{}_{})!0.5!(aux_{}_{})$) {{{}}};"#), 
+                        anchor, vl, wl, ew, mid_ovr, mid_ohr, mid_ovrd, mid_ohrd, label_text);
                 },
             }
         }

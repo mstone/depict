@@ -20,9 +20,16 @@ use tracing_error::{InstrumentResult, ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub struct Label {
+    pub text: String,
+    pub hpos: f64,
+    pub vpos: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Node {
   Div { key: String, label: String, hpos: f64, vpos: f64, width: f64 },
-  Svg { key: String, path: String },
+  Svg { key: String, path: String, rel: String, label: Option<Label> },
 }
 
 #[instrument(skip(data))]
@@ -36,7 +43,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
         .in_current_span()?
         .1;
 
-    let Vcg{vert, v_nodes, h_name} = calculate_vcg(&v)?;
+    let Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels} = calculate_vcg(&v)?;
 
     // diagrams::graph_drawing::draw(v, &mut vcg)?;
 
@@ -59,7 +66,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
-    let LayoutSolution{ls, rs, ss} = position_sols(&vert, &v_nodes, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
+    let LayoutSolution{ls, rs, ss} = position_sols(&vert, &vert_vxmap, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
 
     let LayoutProblem{sol_by_loc, sol_by_hop, ..} = layout_problem;
 
@@ -95,7 +102,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
         if let Loc::Node(vl) = node {
             let key = vl.to_string();
-            let label = h_name
+            let label = vert_node_labels
                 .get(*vl)
                 .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                 .clone();
@@ -108,16 +115,22 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
     for cer in condensed.edge_references() {
         for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
             if *vl == "root" { continue; }
+
+            let label_text = vert_edge_labels.get(&(*vl, *wl, *ew))
+                .map(|v| v.join("\n"));
+
             let hops = &hops_by_edge[&(*vl, *wl)];
             // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
 
             let offset = match *ew { 
-                "actuates" | "actuator" => 0.0125,
-                "senses" | "sensor" => -0.0125,
+                "actuates" | "actuator" => -0.0125,
+                "senses" | "sensor" => 0.0125,
                 _ => 0.0,
             };
 
             let mut path = vec![];
+            let mut label_hpos = None;
+            let mut label_vpos = None;
             // use rand::Rng;
             // let mut rng = rand::thread_rng();
 
@@ -133,13 +146,29 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
                     path.push(format!("M {hpos} {vpos}"));
                 }
 
+                if n == 0 && *ew == "actuates" {
+                    label_hpos = Some(hpos);
+                    label_vpos = Some(vpos);
+                }
+
+                if n == 0 && *ew == "senses" {
+                    label_hpos = Some(hpos);
+                    label_vpos = Some(vpos);
+                }
+
                 path.push(format!("L {hpos} {vpos2}"));
 
             }
 
             let key = format!("{vl}_{wl}_{ew}_{m}");
             let path = path.join(" ");
-            arrows.push(Node::Svg{key, path});
+
+            let mut label = None;
+
+            if let (Some(label_text), Some(label_hpos), Some(label_vpos)) = (label_text, label_hpos, label_vpos) {
+                label = Some(Label{text: label_text, hpos: label_hpos, vpos: label_vpos})
+            }
+            arrows.push(Node::Svg{key, path, rel: ew.to_string(), label});
         }
     }
 
@@ -164,7 +193,7 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                 children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
-                        class: "absolute border border-black text-center z-10 bg-white",
+                        class: "absolute border border-black text-center z-10 bg-white", // bg-opacity-50
                         top: "{vpos}px",
                         left: "{hpos}px",
                         width: "{width}px",
@@ -174,7 +203,29 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                     }
                 }));
             },
-            Node::Svg{key, path} => {
+            Node::Svg{key, path, rel, label} => {
+                let rendered_label = match label {
+                    Some(Label{text, hpos, vpos}) => {
+                        match rel.as_str() {
+                            "actuates" => rsx!(div {
+                                class: "absolute whitespace-pre border-r-2 border-red-500 px-2 bg-red-500 bg-opacity-50",
+                                right: "calc({hpos}px + 4ex)",
+                                // top: "calc({vpos}px + 1.5em)",
+                                // top: "calc({vpos}px + 57px)",
+                                top: "calc({vpos}px + 40px)",
+                                "{text}"
+                            }),
+                            _ => rsx!(div {
+                                class: "absolute whitespace-pre border-l-2 border-blue-500 px-2 bg-blue-500 bg-opacity-50",
+                                left: "calc({hpos}px + 1ex)",
+                                // top: "calc({vpos}px + 25px)",
+                                top: "calc({vpos}px + 40px)",
+                                "{text}"
+                            }),
+                        }
+                    },
+                    _ => rsx!(div {}),
+                };
                 children.push(cx.render(rsx!{
                     div {
                         key: "{key}",
@@ -192,6 +243,7 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                                 d: "{path}",
                             }
                         }
+                        rendered_label
                     }
                 }));
             },
