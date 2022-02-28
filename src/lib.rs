@@ -75,7 +75,7 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], action: "bar ", percept: "baz "}
+                super::Fact{path: vec!["hello"], action: Some("bar "), percept: Some("baz ")}
             ])));
         }
     }

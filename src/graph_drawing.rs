@@ -165,11 +165,11 @@ impl ExtractSpanTrace for Error {
     fn span_trace(&self) -> Option<&SpanTrace> {
         use std::error::Error as _;
         match self {
-            Error::ParsingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
-            Error::TypeError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
-            Error::GraphDrawingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
-            Error::RankingError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
-            Error::LayoutError{source} => source.source().map(ExtractSpanTrace::span_trace).flatten(),
+            Error::ParsingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
+            Error::TypeError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
+            Error::GraphDrawingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
+            Error::RankingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
+            Error::LayoutError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
         }
     }
 }

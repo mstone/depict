@@ -1,5 +1,5 @@
 // clang -g -Wall -framework Cocoa -o main main.m
-use cocoa::{self, foundation::{NSAutoreleasePool, NSProcessInfo, NSString, NSRect, NSPoint, NSSize}, base::{nil, selector, NO, id}, appkit::{NSApplication, NSMenu, NSMenuItem, NSWindow, NSBackingStoreType::NSBackingStoreBuffered, NSWindowStyleMask, NSRunningApplication, NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps, NSApp, NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular, NSButton, NSTextField}};
+use cocoa::{self, foundation::{NSAutoreleasePool, NSProcessInfo, NSString, NSRect, NSPoint, NSSize}, base::{nil, selector, NO, id}, appkit::{NSApplication, NSMenu, NSMenuItem, NSWindow, NSBackingStoreType::NSBackingStoreBuffered, NSWindowStyleMask, NSRunningApplication, NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps, NSApp, NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular, NSTextField}};
 use objc::{class, declare::ClassDecl, runtime::{Object, Sel}, sel, sel_impl, msg_send};
 
 // https://ar.al/2018/09/17/workaround-for-unclickable-app-menu-bug-with-window.makekeyandorderfront-and-nsapp.activate-on-macos/

@@ -14,7 +14,7 @@ use petgraph::dot::{Dot};
 
 pub fn tikz_escape(s: &str) -> String {
     s
-        .replace("$", "\\$")
+        .replace('$', "\\$")
         .replace("\\n", "\\\\")
 }
 
