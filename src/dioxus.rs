@@ -204,28 +204,6 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                 }));
             },
             Node::Svg{key, path, rel, label} => {
-                let rendered_label = match label {
-                    Some(Label{text, hpos, vpos}) => {
-                        match rel.as_str() {
-                            "actuates" => rsx!(div {
-                                class: "absolute whitespace-pre border-r-2 border-red-500 px-2 bg-red-500 bg-opacity-50",
-                                right: "calc({hpos}px + 4ex)",
-                                // top: "calc({vpos}px + 1.5em)",
-                                // top: "calc({vpos}px + 57px)",
-                                top: "calc({vpos}px + 40px)",
-                                "{text}"
-                            }),
-                            _ => rsx!(div {
-                                class: "absolute whitespace-pre border-l-2 border-blue-500 px-2 bg-blue-500 bg-opacity-50",
-                                left: "calc({hpos}px + 1ex)",
-                                // top: "calc({vpos}px + 25px)",
-                                top: "calc({vpos}px + 40px)",
-                                "{text}"
-                            }),
-                        }
-                    },
-                    _ => rsx!(div {}),
-                };
                 children.push(cx.render(rsx!{
                     div {
                         key: "{key}",
@@ -243,7 +221,26 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                                 d: "{path}",
                             }
                         }
-                        rendered_label
+                        {match label { 
+                            Some(Label{text, hpos, vpos}) => {
+                                let translate = if rel == "actuates" { 
+                                    "translate(calc(-100% - 1.5ex))"
+                                } else { 
+                                    "translate(1.5ex)"
+                                };
+                                rsx!(div {
+                                    class: "absolute",
+                                    left: "{hpos}px",
+                                    top: "calc({vpos}px + 40px)",
+                                    div {
+                                        class: "whitespace-pre bg-opacity-50 border-box",
+                                        transform: "{translate}",
+                                        "{text}"
+                                    }
+                                })
+                            },
+                            _ => rsx!(div {}),
+                        }}
                     }
                 }));
             },
