@@ -47,13 +47,15 @@ pub mod parser {
                 "fact",
                 tuple((
                     many1(preceded(ws, normal)),
-                    preceded(ws, char(':')),
-                    preceded(ws, opt(is_not("\n\r:./"))),
-                    char('/'),
-                    preceded(ws, opt(is_not("\n\r:./"))),
+                    opt(tuple((
+                        ws, 
+                        char(':'), 
+                        preceded(ws, opt(is_not("\n\r:./"))),
+                        opt(preceded(char('/'),
+                        preceded(ws, opt(is_not("\n\r:./")))))))),
                 ))
             ),
-            |(path, _, action, _, percept)| Fact{path, action, percept}
+            |(path, tail)| Fact{path, action: tail.and_then(|t| t.2), percept: tail.and_then(|t| t.3.flatten())}
         )(s)
     }
 
@@ -76,6 +78,30 @@ pub mod parser {
             }
             assert_eq!(y, Ok(("", vec![
                 super::Fact{path: vec!["hello"], action: Some("bar "), percept: Some("baz ")}
+            ])));
+        }
+
+        #[test]
+        fn action_works() {
+            let s = "hello: bar /  ";
+            let y = super::parse(s);
+            if let Err(nom::Err::Error(ref y2)) = y {
+                println!("{}", convert_error(s, y2.clone()))
+            }
+            assert_eq!(y, Ok(("", vec![
+                super::Fact{path: vec!["hello"], action: Some("bar "), percept: None}
+            ])));
+        }
+
+        #[test]
+        fn percept_works() {
+            let s = "hello:  / baz ";
+            let y = super::parse(s);
+            if let Err(nom::Err::Error(ref y2)) = y {
+                println!("{}", convert_error(s, y2.clone()))
+            }
+            assert_eq!(y, Ok(("", vec![
+                super::Fact{path: vec!["hello"], action: None, percept: Some("baz ")}
             ])));
         }
     }

@@ -214,8 +214,12 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
                     vcg.vert_edge_labels.entry((src, dst, "senses")).or_default().push(percept);
                 }
             }
+            if let (None, None) = (action, percept) {
+                vcg.vert.add_edge(src_ix, dst_ix, "fake");
+            }
         }
         for node in path {
+            or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node);
             vcg.vert_node_labels.insert(*node, node.to_title_case());
         }
     }

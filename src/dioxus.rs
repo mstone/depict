@@ -114,7 +114,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     for cer in condensed.edge_references() {
         for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
-            if *vl == "root" { continue; }
+            if *vl == "root" || *ew == "fake" { continue; }
 
             let label_text = vert_edge_labels.get(&(*vl, *wl, *ew))
                 .map(|v| v.join("\n"));
@@ -140,9 +140,15 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
                 let spos = ss[hn];
                 let hpos = ((viewbox_width as f64) * (spos + offset)).round(); // + rng.gen_range(-0.1..0.1));
                 let vpos = ((lvl-1) as f64) * height_scale + vpad;
-                let vpos2 = (*lvl as f64) * height_scale + vpad;
+                let mut vpos2 = (*lvl as f64) * height_scale + vpad;
 
                 if n == 0 {
+                    let mut vpos = vpos;
+                    if *ew == "actuates" {
+                        vpos += 26.0;
+                    } else {
+                        vpos += 33.0; // box height + arrow length
+                    }
                     path.push(format!("M {hpos} {vpos}"));
                 }
 
@@ -154,6 +160,10 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
                 if n == 0 && *ew == "senses" {
                     label_hpos = Some(hpos);
                     label_vpos = Some(vpos);
+                }
+
+                if n == hops.len() - 1 && *ew == "actuates" { 
+                    vpos2 -= 7.0; // arrowhead length
                 }
 
                 path.push(format!("L {hpos} {vpos2}"));
@@ -193,7 +203,7 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                 children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
-                        class: "absolute border border-black text-center z-10 bg-white", // bg-opacity-50
+                        class: "absolute border border-black text-center z-10 bg-white bg-opacity-50", //
                         top: "{vpos}px",
                         left: "{hpos}px",
                         width: "{width}px",
@@ -204,6 +214,7 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                 }));
             },
             Node::Svg{key, path, rel, label} => {
+                let marker_orient = if rel == "actuates" { "auto" } else { "auto-start-reverse" };
                 children.push(cx.render(rsx!{
                     div {
                         key: "{key}",
@@ -217,8 +228,31 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                             view_box: "0 0 {viewbox_width} {viewbox_height}",
                             width: "{viewbox_width}px",
                             height: "{viewbox_height}px",
-                            path {
-                                d: "{path}",
+                            marker {
+                                id: "arrowhead",
+                                markerWidth: "7",
+                                markerHeight: "10",
+                                refX: "0",
+                                refY: "5",
+                                orient: "{marker_orient}",
+                                view_box: "0 0 10 10",
+                                path {
+                                    d: "M 0 0 L 10 5 L 0 10 z",
+                                    fill: "#000",
+                                }
+                            }
+                            { 
+                                if rel == "actuates" {
+                                    rsx!(path {
+                                        d: "{path}",
+                                        "marker-end": "url(#arrowhead)",
+                                    })
+                                } else {
+                                    rsx!(path {
+                                        d: "{path}",
+                                        "marker-start": "url(#arrowhead)",
+                                    })
+                                }
                             }
                         }
                         {match label { 
@@ -233,7 +267,7 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                                     left: "{hpos}px",
                                     top: "calc({vpos}px + 40px)",
                                     div {
-                                        class: "whitespace-pre bg-opacity-50 border-box",
+                                        class: "whitespace-pre bg-opacity-50 border-box text-sm",
                                         transform: "{translate}",
                                         "{text}"
                                     }
