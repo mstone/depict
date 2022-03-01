@@ -177,7 +177,7 @@ impl ExtractSpanTrace for Error {
     }
 }
 
-#[instrument(skip(v))]
+#[instrument()]
 pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
     event!(Level::TRACE, "CALCULATE_VCG");
     let vert = Graph::<&str, &str>::new();
@@ -188,7 +188,7 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
 
     let _ = v;
 
-    for Fact{path, action, percept} in v {
+    for Fact{path, labels} in v {
         for n in 0..path.len()-1 {
             let src = path[n];
             let dst = path[n+1];
@@ -196,25 +196,26 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
             let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst);
 
             // TODO: record associated action/percept texts.
-            let action = action.map(str::trim);
-            let percept = percept.map(str::trim);
-            if let Some(action) = action {
-                if !action.is_empty() {
-                    vcg.vert.add_edge(src_ix, dst_ix, "actuates");
+            let label = labels.get(n);
+            if let Some((action, percept)) = label {
+                let action = action.map(str::trim);
+                let percept = percept.map(str::trim);
+                if let Some(action) = action {
+                    if !action.is_empty() {
+                        vcg.vert.add_edge(src_ix, dst_ix, "actuates");
+                        vcg.vert_edge_labels.entry((src, dst, "actuates")).or_default().push(action);
+                    }
                 }
-                if n == 0 {
-                    vcg.vert_edge_labels.entry((src, dst, "actuates")).or_default().push(action);
+                if let Some(percept) = percept {
+                    if !percept.is_empty() {
+                        vcg.vert.add_edge(src_ix, dst_ix, "senses");
+                        vcg.vert_edge_labels.entry((src, dst, "senses")).or_default().push(percept);
+                    }
                 }
-            }
-            if let Some(percept) = percept {
-                if !percept.is_empty() {
-                    vcg.vert.add_edge(src_ix, dst_ix, "senses");
+                if let (None, None) = (action, percept) {
+                    vcg.vert.add_edge(src_ix, dst_ix, "fake");
                 }
-                if n == 0 {
-                    vcg.vert_edge_labels.entry((src, dst, "senses")).or_default().push(percept);
-                }
-            }
-            if let (None, None) = (action, percept) {
+            } else {
                 vcg.vert.add_edge(src_ix, dst_ix, "fake");
             }
         }

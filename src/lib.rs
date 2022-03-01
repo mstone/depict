@@ -6,15 +6,14 @@ pub mod parser {
     // use nom::character::{is_space};
     use nom::character::complete::{char};
     use nom::combinator::{map, opt};
-    use nom::multi::{many1};
+    use nom::multi::{many1, many0};
     use nom::sequence::{preceded, terminated, tuple};
     use std::hash::Hash;
 
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub struct Fact<'s> {
         pub path: Vec<&'s str>,
-        pub action: Option<&'s str>,
-        pub percept: Option<&'s str>,
+        pub labels: Vec<(Option<&'s str>, Option<&'s str>)>,
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -47,15 +46,16 @@ pub mod parser {
                 "fact",
                 tuple((
                     many1(preceded(ws, normal)),
-                    opt(tuple((
+                    many0(map(tuple((
                         ws, 
                         char(':'), 
                         preceded(ws, opt(is_not("\n\r:./"))),
                         opt(preceded(char('/'),
-                        preceded(ws, opt(is_not("\n\r:./")))))))),
+                        preceded(ws, opt(is_not("\n\r:./")))))
+                    )), |(_, _, action, percept)| (action, percept.flatten()))),
                 ))
             ),
-            |(path, tail)| Fact{path, action: tail.and_then(|t| t.2), percept: tail.and_then(|t| t.3.flatten())}
+            |(path, labels)| Fact{path, labels}
         )(s)
     }
 
@@ -77,7 +77,7 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], action: Some("bar "), percept: Some("baz ")}
+                super::Fact{path: vec!["hello"], labels: vec![(Some("bar "), Some("baz "))]}
             ])));
         }
 
@@ -89,7 +89,7 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], action: Some("bar "), percept: None}
+                super::Fact{path: vec!["hello"], labels: vec![(Some("bar "), None)]}
             ])));
         }
 
@@ -101,7 +101,19 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], action: None, percept: Some("baz ")}
+                super::Fact{path: vec!["hello"], labels: vec![(None, Some("baz "))]}
+            ])));
+        }
+
+        #[test]
+        fn multiple_labels_works() {
+            let s = "hello: bar / baz : foo / quux";
+            let y = super::parse(s);
+            if let Err(nom::Err::Error(ref y2)) = y {
+                println!("{}", convert_error(s, y2.clone()))
+            }
+            assert_eq!(y, Ok(("", vec![
+                super::Fact{path: vec!["hello"], labels: vec![(Some("bar "), Some("baz ")), (Some("foo "), Some("quux"))]}
             ])));
         }
     }

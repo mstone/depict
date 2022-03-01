@@ -380,9 +380,13 @@ pub fn main() -> io::Result<()> {
                 let mut prev_model: Option<String> = None;
                 while let Some(model) = model_receiver.next().await {
                     if Some(&model) != prev_model.as_ref() {
-                        let nodes = catch_unwind(|| {
-                            draw(model.clone())
-                        });
+                        let nodes = if model.trim().is_empty() {
+                            Ok(Ok(vec![]))
+                        } else {
+                            catch_unwind(|| {
+                                draw(model.clone())
+                            })
+                        };
                         let model = model.clone();
                         match nodes {
                             Ok(Ok(nodes)) => {
