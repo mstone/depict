@@ -1,4 +1,6 @@
 pub mod parser {
+    use futures::TryFutureExt;
+    use nom::branch::alt;
     // use crate::data::*;
     use nom::{IResult};
     use nom::error::{VerboseError, context};
@@ -6,14 +8,14 @@ pub mod parser {
     // use nom::character::{is_space};
     use nom::character::complete::{char};
     use nom::combinator::{map, opt};
-    use nom::multi::{many1, many0};
-    use nom::sequence::{preceded, terminated, tuple};
+    use nom::multi::{many1, separated_list0, separated_list1};
+    use nom::sequence::{preceded, terminated, tuple, separated_pair, pair};
     use std::hash::Hash;
 
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub struct Fact<'s> {
         pub path: Vec<&'s str>,
-        pub labels: Vec<(Option<&'s str>, Option<&'s str>)>,
+        pub labels_by_level: Vec<Vec<(Option<&'s str>, Option<&'s str>)>>,
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -37,7 +39,7 @@ pub mod parser {
     }
 
     pub fn normal(s: &str) -> IResult<&str, &str, VerboseError<&str>> {
-        is_not(" \n\r:./")(s)
+        is_not(" \n\r:.,/")(s)
     }
 
     pub fn fact(s: &str) -> IResult<&str, Fact, VerboseError<&str>> {
@@ -46,16 +48,45 @@ pub mod parser {
                 "fact",
                 tuple((
                     many1(preceded(ws, normal)),
-                    many0(map(tuple((
-                        ws, 
-                        char(':'), 
-                        preceded(ws, opt(is_not("\n\r:./"))),
-                        opt(preceded(char('/'),
-                        preceded(ws, opt(is_not("\n\r:./")))))
-                    )), |(_, _, action, percept)| (action, percept.flatten()))),
+                    opt(char(':')),
+                    map(opt(separated_list0(
+                        preceded(ws, char(':')),
+                        separated_list0(
+                            preceded(ws, char(',')),
+                            separated_pair(
+                                preceded(ws, opt(is_not("\n\r:.,/"))),
+                                preceded(ws, opt(char('/'))),
+                                preceded(ws, opt(is_not("\n\r:.,/"))),
+                            ),
+                            // alt((
+                            //     map(
+                            //         separated_pair(
+                            //             preceded(ws, is_not("\n\r:.,/")),
+                            //             preceded(ws, char('/')),
+                            //             preceded(ws, is_not("\n\r:.,/")),
+                            //         ),
+                            //         |(action, percept)| (Some(action), Some(percept))
+                            //     ),
+                            //     map(
+                            //         pair(
+                            //             preceded(ws, char('/')),
+                            //             preceded(ws, is_not("\n\r:.,/")),
+                            //         ),
+                            //         |(_, percept)| (None, Some(percept))
+                            //     ),
+                            //     map(
+                            //         pair(
+                            //             preceded(ws, is_not("\n\r:.,/")),
+                            //             preceded(ws, opt(char('/'))),
+                            //         ),
+                            //         |(action, _)| (Some(action), None)
+                            //     ),
+                            // ))
+                        )
+                    )), |x| x.unwrap_or_default())
                 ))
             ),
-            |(path, labels)| Fact{path, labels}
+            |(path, _, labels_by_level)| Fact{path, labels_by_level}
         )(s)
     }
 
@@ -77,7 +108,7 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels: vec![(Some("bar "), Some("baz "))]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(Some("bar "), Some("baz "))]]}
             ])));
         }
 
@@ -89,7 +120,7 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels: vec![(Some("bar "), None)]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(Some("bar "), None)]]}
             ])));
         }
 
@@ -101,19 +132,31 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels: vec![(None, Some("baz "))]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(None, Some("baz "))]]}
             ])));
         }
 
         #[test]
-        fn multiple_labels_works() {
+        fn multiple_levels_works() {
             let s = "hello: bar / baz : foo / quux";
             let y = super::parse(s);
             if let Err(nom::Err::Error(ref y2)) = y {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels: vec![(Some("bar "), Some("baz ")), (Some("foo "), Some("quux"))]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(Some("bar "), Some("baz "))], vec![(Some("foo "), Some("quux"))]]}
+            ])));
+        }
+
+        #[test]
+        fn multiple_labels_works() {
+            let s = "hello: bar / baz, foo / quux";
+            let y = super::parse(s);
+            if let Err(nom::Err::Error(ref y2)) = y {
+                println!("{}", convert_error(s, y2.clone()))
+            }
+            assert_eq!(y, Ok(("", vec![
+                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(Some("bar "), Some("baz")), (Some("foo "), Some("quux"))]]}
             ])));
         }
     }

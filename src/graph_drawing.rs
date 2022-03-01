@@ -188,7 +188,7 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
 
     let _ = v;
 
-    for Fact{path, labels} in v {
+    for Fact{path, labels_by_level} in v {
         for n in 0..path.len()-1 {
             let src = path[n];
             let dst = path[n+1];
@@ -196,26 +196,28 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
             let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst);
 
             // TODO: record associated action/percept texts.
-            let label = labels.get(n);
-            if let Some((action, percept)) = label {
+            let empty = vec![];
+            let labels = labels_by_level.get(n).unwrap_or(&empty);
+            let mut needs_fake_edge = true;
+            for (action, percept) in labels {
                 let action = action.map(str::trim);
-                let percept = percept.map(str::trim);
                 if let Some(action) = action {
                     if !action.is_empty() {
                         vcg.vert.add_edge(src_ix, dst_ix, "actuates");
                         vcg.vert_edge_labels.entry((src, dst, "actuates")).or_default().push(action);
+                        needs_fake_edge = false;
                     }
                 }
+                let percept = percept.map(str::trim);
                 if let Some(percept) = percept {
                     if !percept.is_empty() {
                         vcg.vert.add_edge(src_ix, dst_ix, "senses");
                         vcg.vert_edge_labels.entry((src, dst, "senses")).or_default().push(percept);
+                        needs_fake_edge = false;
                     }
                 }
-                if let (None, None) = (action, percept) {
-                    vcg.vert.add_edge(src_ix, dst_ix, "fake");
-                }
-            } else {
+            }
+            if needs_fake_edge {
                 vcg.vert.add_edge(src_ix, dst_ix, "fake");
             }
         }
