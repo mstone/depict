@@ -114,7 +114,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     for cer in condensed.edge_references() {
         for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
-            if *vl == "root" || *ew == "fake" { continue; }
+            if *vl == "root" { continue; }
 
             let label_text = vert_edge_labels.get(&(*vl, *wl, *ew))
                 .map(|v| v.join("\n"));
@@ -144,20 +144,15 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
                 if n == 0 {
                     let mut vpos = vpos;
-                    if *ew == "actuates" {
-                        vpos += 26.0;
-                    } else {
+                    if *ew == "senses" {
                         vpos += 33.0; // box height + arrow length
+                    } else {
+                        vpos += 26.0;
                     }
                     path.push(format!("M {hpos} {vpos}"));
                 }
 
-                if n == 0 && *ew == "actuates" {
-                    label_hpos = Some(hpos);
-                    label_vpos = Some(vpos);
-                }
-
-                if n == 0 && *ew == "senses" {
+                if n == 0 {
                     label_hpos = Some(hpos);
                     label_vpos = Some(vpos);
                 }
@@ -215,13 +210,15 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
             },
             Node::Svg{key, path, rel, label} => {
                 let marker_orient = if rel == "actuates" { "auto" } else { "auto-start-reverse" };
+                let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
+                let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
                 children.push(cx.render(rsx!{
                     div {
                         key: "{key}",
                         class: "absolute",
                         svg {
                             fill: "none",
-                            stroke: "currentColor",
+                            stroke: "{stroke_color}",
                             stroke_linecap: "round",
                             stroke_linejoin: "round",
                             stroke_width: "1",
@@ -242,16 +239,26 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                                 }
                             }
                             { 
-                                if rel == "actuates" {
-                                    rsx!(path {
-                                        d: "{path}",
-                                        "marker-end": "url(#arrowhead)",
-                                    })
-                                } else {
-                                    rsx!(path {
-                                        d: "{path}",
-                                        "marker-start": "url(#arrowhead)",
-                                    })
+                                match rel.as_str() {
+                                    "actuates" => {
+                                        rsx!(path {
+                                            d: "{path}",
+                                            marker_end: "url(#arrowhead)",
+                                        })
+                                    },
+                                    "senses" => {
+                                        rsx!(path {
+                                            d: "{path}",
+                                            "marker-start": "url(#arrowhead)",
+                                            // marker_start: "url(#arrowhead)", // BUG: should work, but doesn't.
+                                        })
+                                    },
+                                    _ => {
+                                        rsx!(path {
+                                            d: "{path}",
+                                            stroke_dasharray: "{stroke_dasharray}",
+                                        })
+                                    }
                                 }
                             }
                         }
@@ -285,12 +292,11 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
 
 const PLACEHOLDER: &str = indoc!("
 driver wheel car: turn / wheel angle
+driver accel car: accelerate / accelerator pedal position
+driver brakes car: brake / brake pedal position
+driver screen computer: press screen / read display
+computer thermostat car: set temperature / measure temperature
 ");
-
-// driver accel car: accelerate / accelerator pedal position
-// driver brakes car: brake / brake pedal position
-// driver screen computer: press screen / read display
-// computer thermostat car: set temperature / measure temperature
 
 pub struct AppProps {
     model_sender: Option<UnboundedSender<String>>,

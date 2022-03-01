@@ -219,6 +219,7 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
             }
             if needs_fake_edge {
                 vcg.vert.add_edge(src_ix, dst_ix, "fake");
+                vcg.vert_edge_labels.entry((src, dst, "fake")).or_default().push("?");
             }
         }
         for node in path {

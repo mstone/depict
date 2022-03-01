@@ -1,6 +1,4 @@
 pub mod parser {
-    use futures::TryFutureExt;
-    use nom::branch::alt;
     // use crate::data::*;
     use nom::{IResult};
     use nom::error::{VerboseError, context};
@@ -8,8 +6,8 @@ pub mod parser {
     // use nom::character::{is_space};
     use nom::character::complete::{char};
     use nom::combinator::{map, opt};
-    use nom::multi::{many1, separated_list0, separated_list1};
-    use nom::sequence::{preceded, terminated, tuple, separated_pair, pair};
+    use nom::multi::{many1, separated_list0};
+    use nom::sequence::{preceded, terminated, tuple, separated_pair};
     use std::hash::Hash;
 
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -58,30 +56,6 @@ pub mod parser {
                                 preceded(ws, opt(char('/'))),
                                 preceded(ws, opt(is_not("\n\r:.,/"))),
                             ),
-                            // alt((
-                            //     map(
-                            //         separated_pair(
-                            //             preceded(ws, is_not("\n\r:.,/")),
-                            //             preceded(ws, char('/')),
-                            //             preceded(ws, is_not("\n\r:.,/")),
-                            //         ),
-                            //         |(action, percept)| (Some(action), Some(percept))
-                            //     ),
-                            //     map(
-                            //         pair(
-                            //             preceded(ws, char('/')),
-                            //             preceded(ws, is_not("\n\r:.,/")),
-                            //         ),
-                            //         |(_, percept)| (None, Some(percept))
-                            //     ),
-                            //     map(
-                            //         pair(
-                            //             preceded(ws, is_not("\n\r:.,/")),
-                            //             preceded(ws, opt(char('/'))),
-                            //         ),
-                            //         |(action, _)| (Some(action), None)
-                            //     ),
-                            // ))
                         )
                     )), |x| x.unwrap_or_default())
                 ))
