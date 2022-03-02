@@ -62,7 +62,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
 
-    let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
+    let (_crossing_number, solved_locs) = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
 
     let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 

@@ -34,7 +34,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
 
     // std::process::exit(0);
 
-    let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
+    let (_crossing_number, solved_locs) = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
     
     let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 

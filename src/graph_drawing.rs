@@ -475,11 +475,11 @@ pub fn calculate_locs_and_hops<'s, V, E>(
 pub fn minimize_edge_crossing<'s, V>(
     locs_by_level: &'s BTreeMap<usize, Vec<usize>>,
     hops_by_level: &'s BTreeMap<usize, SortedVec<Hop<V>>>
-) -> Result<BTreeMap<usize, BTreeMap<usize, usize>>, Error> where
+) -> Result<(usize, BTreeMap<usize, BTreeMap<usize, usize>>), Error> where
     V: Clone + Debug + Display + Ord + Hash
 {
     if hops_by_level.is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok((0, BTreeMap::new()));
     }
     #[allow(clippy::unwrap_used)]
     let max_level = *hops_by_level.keys().max().unwrap();
@@ -598,7 +598,7 @@ pub fn minimize_edge_crossing<'s, V>(
     
     let crossing_number = cn_line
         .trim()
-        .parse::<i32>()
+        .parse::<usize>()
         .expect("unable to parse crossing number");
 
     // std::process::exit(0);
@@ -640,7 +640,7 @@ pub fn minimize_edge_crossing<'s, V>(
     }
     event!(Level::DEBUG, ?solved_locs, "SOLVED_LOCS");
 
-    Ok(solved_locs)
+    Ok((crossing_number, solved_locs))
 }
 
 pub struct LocRow<V: Clone + Debug + Display + Ord + Hash> {
@@ -1006,4 +1006,109 @@ pub fn position_sols<'s, V, E>(
     });
     event!(Level::DEBUG, ?res, "PY");
     res.map_err(|e| Error::from(LayoutError::from(e).in_current_span()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse;
+    use tracing_error::InstrumentResult;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]    
+    pub fn no_swaps() -> Result<(), Error> {
+        let data = "A c q: y / z. d e af: w / x".to_string();
+        let v = parse(&data[..])
+            .map_err(|e| match e {
+                nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
+                nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
+                nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
+            })
+            .in_current_span()?
+            .1;
+
+        let Vcg{vert, vert_vxmap, ..} = calculate_vcg(&v)?;
+        let vx = vert_vxmap["e"];
+        let wx = vert_vxmap["af"];
+        assert_eq!(vert.node_weight(vx), Some(&"e"));
+        assert_eq!(vert.node_weight(wx), Some(&"af"));
+
+        let Cvcg{condensed, condensed_vxmap} = condense(&vert)?;
+        let cvx = condensed_vxmap["e"];
+        let cwx = condensed_vxmap["af"];
+        assert_eq!(condensed.node_weight(cvx), Some(&"e"));
+        assert_eq!(condensed.node_weight(cwx), Some(&"af"));
+
+        let roots = roots(&condensed)?;
+
+        let paths_by_rank = rank(&condensed, &roots)?;
+        assert_eq!(paths_by_rank[&3][0], ("root", "af"));
+
+        let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+        let nv: Loc<&str, &str> = Loc::Node("e");
+        let nw: Loc<&str, &str> = Loc::Node("af");
+        let np: Loc<&str, &str> = Loc::Node("c");
+        let nq: Loc<&str, &str> = Loc::Node("q");
+        let lv = node_to_loc[&nv];
+        let lw = node_to_loc[&nw];
+        let lp = node_to_loc[&np];
+        let lq = node_to_loc[&nq];
+        assert_eq!(lv, (2, 1));
+        assert_eq!(lw, (3, 0));
+        assert_eq!(lp, (2, 0));
+        assert_eq!(lq, (3, 1));
+        assert_eq!(lv.1 + lw.1, 1); // lv.1 != lw.1
+        assert_eq!(lp.1 + lq.1, 1); // lp.1 != lq.1
+
+        let nv2 = &loc_to_node[&lv];
+        let nw2 = &loc_to_node[&lw];
+        let np2 = &loc_to_node[&lp];
+        let nq2 = &loc_to_node[&lq];
+        assert_eq!(nv2, &nv);
+        assert_eq!(nw2, &nw);
+        assert_eq!(np2, &np);
+        assert_eq!(nq2, &nq);
+        
+        let (crossing_number, solved_locs) = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
+        assert_eq!(crossing_number, 0);
+        // let sv = solved_locs[&2][&1];
+        // let sw = solved_locs[&3][&0];
+        // let sp = solved_locs[&2][&0];
+        // let sq = solved_locs[&3][&1];
+        let sv = solved_locs[&lv.0][&lv.1];
+        let sw = solved_locs[&lw.0][&lw.1];
+        let sp = solved_locs[&lp.0][&lp.1];
+        let sq = solved_locs[&lq.0][&lq.1];
+        // assert_eq!(sv, 1);
+        // assert_eq!(sw, 1);
+        // assert_eq!(sp, 0);
+        // assert_eq!(sq, 0);
+        assert_eq!(sv, sw); // uncrossing happened
+        assert_eq!(sp, sq);
+
+        let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
+        let all_locs = &layout_problem.all_locs;
+        let lrv = all_locs.iter().find(|lr| lr.loc == nv).unwrap();
+        let lrw = all_locs.iter().find(|lr| lr.loc == nw).unwrap();
+        let lrp = all_locs.iter().find(|lr| lr.loc == np).unwrap();
+        let lrq = all_locs.iter().find(|lr| lr.loc == nq).unwrap();
+        assert_eq!(lrv.ovr, lv.0);
+        assert_eq!(lrw.ovr, lw.0);
+        assert_eq!(lrp.ovr, lp.0);
+        assert_eq!(lrq.ovr, lq.0);
+        assert_eq!(lrv.ohr, lv.1);
+        assert_eq!(lrw.ohr, lw.1);
+        assert_eq!(lrp.ohr, lp.1);
+        assert_eq!(lrq.ohr, lq.1);
+        assert_eq!(lrv.shr, sv);
+        assert_eq!(lrw.shr, sw);
+        assert_eq!(lrp.shr, sp);
+        assert_eq!(lrq.shr, sq);
+
+        let LayoutSolution{ls, rs, ss} = position_sols(&vert, &vert_vxmap, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
+
+        let LayoutProblem{sol_by_loc, sol_by_hop, ..} = layout_problem;
+
+        Ok(())
+    }
 }
