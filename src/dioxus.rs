@@ -117,7 +117,11 @@ fn draw(data: String) -> Result<(Option<usize>, Vec<Node>), Error> {
         for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
             if *vl == "root" { continue; }
 
-            let label_text = vert_edge_labels.get(&(*vl, *wl, *ew))
+            let label_text = vert_edge_labels
+                .get(vl)
+                .and_then(|dsts| dsts
+                    .get(wl)
+                    .and_then(|rels| rels.get(ew)))
                 .map(|v| v.join("\n"));
 
             let hops = &hops_by_edge[&(*vl, *wl)];

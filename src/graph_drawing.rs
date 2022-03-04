@@ -86,7 +86,7 @@ pub struct Vcg<'s> {
     pub vert_node_labels: HashMap<&'s str, String>,
 
     /// vert_edge_labels maps (v,w,rel) node weight pairs to display edge labels.
-    pub vert_edge_labels: HashMap<(&'s str, &'s str, &'s str), Vec<&'s str>>,
+    pub vert_edge_labels: HashMap<&'s str, HashMap<&'s str, HashMap<&'s str, Vec<&'s str>>>>,
 }
 
 #[non_exhaustive]
@@ -198,33 +198,38 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
             // TODO: record associated action/percept texts.
             let empty = vec![];
             let labels = labels_by_level.get(n).unwrap_or(&empty);
-            let mut needs_fake_edge = true;
+            let rels = vcg.vert_edge_labels.entry(src).or_default().entry(dst).or_default();
             for (action, percept) in labels {
                 let action = action.map(str::trim);
                 if let Some(action) = action {
                     if !action.is_empty() {
                         vcg.vert.add_edge(src_ix, dst_ix, "actuates");
-                        vcg.vert_edge_labels.entry((src, dst, "actuates")).or_default().push(action);
-                        needs_fake_edge = false;
+                        rels.entry("actuates").or_default().push(action);
                     }
                 }
                 let percept = percept.map(str::trim);
                 if let Some(percept) = percept {
                     if !percept.is_empty() {
                         vcg.vert.add_edge(src_ix, dst_ix, "senses");
-                        vcg.vert_edge_labels.entry((src, dst, "senses")).or_default().push(percept);
-                        needs_fake_edge = false;
+                        rels.entry("senses").or_default().push(percept);
                     }
                 }
-            }
-            if needs_fake_edge {
-                vcg.vert.add_edge(src_ix, dst_ix, "fake");
-                vcg.vert_edge_labels.entry((src, dst, "fake")).or_default().push("?");
             }
         }
         for node in path {
             or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node);
             vcg.vert_node_labels.insert(*node, node.to_string());
+        }
+    }
+
+    for (src, dsts) in vcg.vert_edge_labels.iter_mut() {
+        for (dst, rels) in dsts.iter_mut() {
+            if rels.is_empty() {
+                let src_ix = vcg.vert_vxmap[src];
+                let dst_ix = vcg.vert_vxmap[dst];
+                vcg.vert.add_edge(src_ix, dst_ix, "fake");
+                rels.entry("fake").or_default().push("?");
+            }
         }
     }
 
@@ -753,7 +758,7 @@ pub struct LayoutSolution {
 pub fn position_sols<'s, V, E>(
     dag: &'s Graph<V, E>,
     dag_map: &'s HashMap::<V, NodeIndex>,
-    dag_edge_labels: &'s HashMap::<(V, V, V), Vec<V>>,
+    dag_edge_labels: &'s HashMap::<V, HashMap<V, HashMap<V, Vec<V>>>>,
     hops_by_edge: &'s BTreeMap<(V, V), HopMap>,
     node_to_loc: &'s HashMap::<Loc<V, V>, (usize, usize)>,
     solved_locs: &'s BTreeMap<usize, BTreeMap<usize, usize>>,
@@ -769,9 +774,10 @@ pub fn position_sols<'s, V, E>(
         let (ovr, _ohr) = loc;
         if let Loc::Node(vl) = node {
             let height_max = edge_label_heights.entry(*ovr).or_default();
-            for ((vl2, _wl, _rel), edge_labels) in dag_edge_labels.iter() {
+            for (vl2, dsts) in dag_edge_labels.iter() {
                 if vl == vl2 {
-                    *height_max = max(*height_max, max(0, (edge_labels.len() as i32) - 1) as usize);
+                    let edge_labels = dsts.iter().flat_map(|(_, rels)| rels.iter().map(|(_, labels)| labels.len())).max().unwrap_or(1);
+                    *height_max = max(*height_max, max(0, (edge_labels as i32) - 1) as usize);
                 } 
             }
         }

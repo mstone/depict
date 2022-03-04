@@ -84,7 +84,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
 
     for cer in condensed.edge_references() {
         for (vl, wl, ew) in cer.weight().iter() {
-            let label_text = vert_edge_labels.get(&(*vl, *wl, *ew))
+            let label_text = vert_edge_labels.get(vl).and_then(|dsts| dsts.get(wl).and_then(|rels| rels.get(ew)))
                 .map(|v| v.join("\n"))
                 .unwrap_or_else(|| ew.to_string());
 
