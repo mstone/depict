@@ -38,7 +38,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
     
     let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
-    let LayoutSolution{ls, rs, ss} = position_sols(&vert, &vert_vxmap, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
+    let LayoutSolution{ls, rs, ss, ..} = position_sols(&vert, &vert_vxmap, &vert_edge_labels, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
 
     let LayoutProblem{all_locs, sol_by_loc, sol_by_hop, ..} = layout_problem;
 

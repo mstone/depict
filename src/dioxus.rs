@@ -15,6 +15,7 @@ use color_spantrace::colorize;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
 use indoc::indoc;
+use inflector::Inflector;
 use tracing::{instrument, event, Level};
 use tracing_error::{InstrumentResult, ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -66,7 +67,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
-    let LayoutSolution{ls, rs, ss} = position_sols(&vert, &vert_vxmap, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
+    let LayoutSolution{ls, rs, ss, ts} = position_sols(&vert, &vert_vxmap, &vert_edge_labels, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
 
     let LayoutProblem{sol_by_loc, sol_by_hop, ..} = layout_problem;
 
@@ -74,14 +75,9 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
     let width_scale = 1.0;
     let height_scale = 80.0;
     let vpad = 50.0;
+    let line_height = 20.0;
 
     let mut texts = vec![];
-
-    // use std::collections::hash_map::DefaultHasher;
-    // use std::hash::{Hasher, Hash};
-    // let mut hasher = DefaultHasher::new();
-    // data.hash(&mut hasher);
-    // let data_hash = hasher.finish();
 
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
@@ -91,7 +87,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
         let lpos = ls[n];
         let rpos = rs[n];
 
-        let vpos = height_scale * ((ovr-1) as f64) + vpad;
+        let vpos = height_scale * ((ovr-1) as f64) + vpad + ts[*ovr] * line_height;
         // let hpos = 1024.0 * ((lpos + rpos) / 2.0);
         let orig_width = (viewbox_width as f64) * (rpos - lpos);
         let width = orig_width * width_scale;
@@ -102,10 +98,13 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
         if let Loc::Node(vl) = node {
             let key = vl.to_string();
-            let label = vert_node_labels
+            let mut label = vert_node_labels
                 .get(*vl)
                 .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                 .clone();
+            if !label.is_screaming_snake_case() {
+                label = label.to_title_case();
+            }
             texts.push(Node::Div{key, label, hpos, vpos, width});
         }
     }
@@ -139,8 +138,8 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
                 let hn = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
                 let spos = ss[hn];
                 let hpos = ((viewbox_width as f64) * (spos + offset)).round(); // + rng.gen_range(-0.1..0.1));
-                let vpos = ((lvl-1) as f64) * height_scale + vpad;
-                let mut vpos2 = (*lvl as f64) * height_scale + vpad;
+                let vpos = ((lvl-1) as f64) * height_scale + vpad + ts[*lvl] * line_height;
+                let mut vpos2 = (*lvl as f64) * height_scale + vpad + ts[lvl+1] * line_height;
 
                 if n == 0 {
                     let mut vpos = vpos;
@@ -292,8 +291,8 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
 
 const PLACEHOLDER: &str = indoc!("
 driver wheel car: turn / wheel angle
-driver accel car: accelerate / accelerator pedal position
-driver brakes car: brake / brake pedal position
+driver accel car: accelerate / pedal position
+driver brakes car: brake /  pedal position
 driver screen computer: press screen / read display
 computer thermostat car: set temperature / measure temperature
 ");
@@ -353,6 +352,29 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             model_sender.unbounded_send(e.value.clone()).unwrap(); 
                         },
                         "{model}"
+                    }
+                }
+                div {
+                    class: "text-sm text-gray-400 width-full grid grid-cols-2 gap-4",
+                    div {
+                        span {
+                            class: "text-black",
+                            "Syntax: "
+                        }
+                        span {
+                            class: "italic",
+                            "node+ : ^:^ (^,^ (action? / percept?))"
+                        }
+                    }
+                    div {
+                        span {
+                            class: "text-black",
+                            "Example: "
+                        }
+                        span {
+                            class: "italic",
+                            "driver brakes car: a / b : c / d, e / f"
+                        },
                     }
                 }
             }

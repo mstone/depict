@@ -1,5 +1,4 @@
 #![deny(clippy::unwrap_used)]
-use inflector::Inflector;
 use petgraph::graph::{Graph, NodeIndex};
 use petgraph::dot::{Dot};
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
@@ -10,6 +9,7 @@ use petgraph::algo::{floyd_warshall, NegativeCycle};
 use pyo3::types::{PyModule, IntoPyDict, PyList};
 use sorted_vec::SortedVec;
 use tracing_error::{TracedError, InstrumentError, ExtractSpanTrace, SpanTrace};
+use std::cmp::max;
 use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
 use std::fmt::{Debug, Display};
@@ -224,7 +224,7 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
         }
         for node in path {
             or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node);
-            vcg.vert_node_labels.insert(*node, node.to_title_case());
+            vcg.vert_node_labels.insert(*node, node.to_string());
         }
     }
 
@@ -747,11 +747,13 @@ pub struct LayoutSolution {
     pub ls: Vec<f64>,
     pub rs: Vec<f64>,
     pub ss: Vec<f64>,
+    pub ts: Vec<f64>,
 }
 
 pub fn position_sols<'s, V, E>(
     dag: &'s Graph<V, E>,
     dag_map: &'s HashMap::<V, NodeIndex>,
+    dag_edge_labels: &'s HashMap::<(V, V, V), Vec<V>>,
     hops_by_edge: &'s BTreeMap<(V, V), HopMap>,
     node_to_loc: &'s HashMap::<Loc<V, V>, (usize, usize)>,
     solved_locs: &'s BTreeMap<usize, BTreeMap<usize, usize>>,
@@ -761,6 +763,27 @@ pub fn position_sols<'s, V, E>(
     E: Clone + Debug
 {
     let LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop} = layout_problem;
+
+    let mut edge_label_heights = BTreeMap::<usize, usize>::new();
+    for (node, loc) in node_to_loc.iter() {
+        let (ovr, _ohr) = loc;
+        if let Loc::Node(vl) = node {
+            let height_max = edge_label_heights.entry(*ovr).or_default();
+            for ((vl2, _wl, _rel), edge_labels) in dag_edge_labels.iter() {
+                if vl == vl2 {
+                    *height_max = max(*height_max, max(0, (edge_labels.len() as i32) - 1) as usize);
+                } 
+            }
+        }
+    }
+    let mut row_height_offsets = BTreeMap::<usize, f64>::new();
+    let mut cumulative_offset = 0.0;
+    for (lvl, max_height) in edge_label_heights {
+        row_height_offsets.insert(lvl, cumulative_offset);
+        cumulative_offset += max_height as f64;
+    }
+    event!(Level::TRACE, ?row_height_offsets, "ROW HEIGHT OFFSETS");
+    
     
     let num_locs = all_locs.len();
     let num_hops = all_hops.len();
@@ -784,7 +807,7 @@ pub fn position_sols<'s, V, E>(
         let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
         let eps = var.call((), Some([("pos", true)].into_py_dict(py)))?;
-        let sep = as_constantf(0.05)?;
+        let sep = as_constantf(0.01)?;
         let mut cvec: Vec<&PyAny> = vec![];
         let mut obj = zero;
 
@@ -992,6 +1015,9 @@ pub fn position_sols<'s, V, E>(
         event!(Level::DEBUG, ?is_dcp_str, "IS_DCP");
 
         prb.call_method1("solve", ())?;
+        let status = prb.getattr("status")?;
+        let status_str = status.str()?;
+        event!(Level::DEBUG, ?status_str, "PROBLEM STATUS");
 
         let lv = get_value(l)?;
         let lv = lv.as_slice()?;
@@ -1005,11 +1031,13 @@ pub fn position_sols<'s, V, E>(
         // eprintln!("L: {:.2?}\n", lv);
         // eprintln!("R: {:.2?}\n", rv);
         // eprintln!("S: {:.2?}\n", sv);
+        let ts = row_height_offsets.values().copied().collect::<Vec<_>>();
 
-        Ok(LayoutSolution{ls: lv.to_vec(), rs: rv.to_vec(), ss: sv.to_vec()})
+        Ok(LayoutSolution{ls: lv.to_vec(), rs: rv.to_vec(), ss: sv.to_vec(), ts})
     });
     event!(Level::DEBUG, ?res, "PY");
-    res.map_err(|e| Error::from(LayoutError::from(e).in_current_span()))
+    res
+        .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))
 }
 
 #[cfg(test)]
@@ -1108,10 +1136,6 @@ mod tests {
         assert_eq!(lrw.shr, sw);
         assert_eq!(lrp.shr, sp);
         assert_eq!(lrq.shr, sq);
-
-        let LayoutSolution{ls, rs, ss} = position_sols(&vert, &vert_vxmap, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
-
-        let LayoutProblem{sol_by_loc, sol_by_hop, ..} = layout_problem;
 
         Ok(())
     }
