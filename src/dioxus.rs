@@ -33,8 +33,10 @@ pub enum Node {
   Svg { key: String, path: String, rel: String, label: Option<Label> },
 }
 
+const VIEWBOX_WIDTH: usize = 1024;
+
 #[instrument(skip(data))]
-fn draw(data: String) -> Result<Vec<Node>, Error> {
+fn draw(data: String) -> Result<(Option<usize>, Vec<Node>), Error> {
     let v = parse(&data[..])
         .map_err(|e| match e {
             nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
@@ -63,7 +65,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
 
-    let (_crossing_number, solved_locs) = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
+    let (crossing_number, solved_locs) = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
 
     let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
@@ -71,7 +73,7 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     let LayoutProblem{sol_by_loc, sol_by_hop, ..} = layout_problem;
 
-    let viewbox_width = 1024;
+    let viewbox_width = VIEWBOX_WIDTH;
     let width_scale = 1.0;
     let height_scale = 80.0;
     let vpad = 50.0;
@@ -183,11 +185,11 @@ fn draw(data: String) -> Result<Vec<Node>, Error> {
 
     event!(Level::TRACE, ?nodes, "NODES");
 
-    Ok(nodes)
+    Ok((Some(crossing_number), nodes))
 }
 
-pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
-    let viewbox_width = 1024;
+pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>)-> Option<VNode> {
+    let viewbox_width = VIEWBOX_WIDTH;
     let viewbox_height = 768;
     let mut children = vec![];
     nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -197,7 +199,7 @@ pub fn render<P>(cx: Scope<P>, mut nodes: Vec<Node>) -> Option<VNode> {
                 children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
-                        class: "absolute border border-black text-center z-10 bg-white bg-opacity-50", //
+                        class: "absolute border border-black text-center z-10 bg-white", // bg-opacity-50
                         top: "{vpos}px",
                         left: "{hpos}px",
                         width: "{width}px",
@@ -299,12 +301,13 @@ computer thermostat car: set temperature / measure temperature
 
 pub struct AppProps {
     model_sender: Option<UnboundedSender<String>>,
-    drawing_receiver: Cell<Option<UnboundedReceiver<Vec<Node>>>>,
+    #[allow(clippy::type_complexity)]
+    drawing_receiver: Cell<Option<UnboundedReceiver<(Option<usize>, Vec<Node>)>>>,
 }
 
 pub fn app(cx: Scope<AppProps>) -> Element {
     let (model, set_model) = use_state(&cx, || String::from(PLACEHOLDER));
-    let (drawing, set_drawing) = use_state(&cx, Vec::new);
+    let (drawing, set_drawing) = use_state(&cx, || (None, Vec::new()));
 
     use_coroutine(&cx, |_: UnboundedReceiver<()>| {
         let receiver = cx.props.drawing_receiver.take();
@@ -323,9 +326,15 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     // let window = use_window(&cx);
     // window.devtool();
 
-    let nodes = render(cx, drawing.to_owned());
+    let nodes = render(cx, drawing.1.to_owned());
     let model_sender = cx.props.model_sender.clone().unwrap();
     model_sender.unbounded_send(model.clone()).unwrap();
+
+    let viewbox_width = VIEWBOX_WIDTH;
+    let crossing_number = cx.render(rsx!(match drawing.0 {
+        Some(cn) => rsx!(span { "{cn}" }),
+        None => rsx!(div{}),
+    }));
 
     cx.render(rsx!{
         link { href:"https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css", rel:"stylesheet" }
@@ -377,13 +386,24 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         },
                     }
                 }
+                div {
+                    class: "text-sm text-gray-400 width-full",
+                    span {
+                        class: "text-black",
+                        "Crossing Number: "
+                    }
+                    span {
+                        class: "italic",
+                        crossing_number
+                    }
+                }
             }
         }
         div {
             class: "width-full",
             div {
                 class: "relative mx-auto",
-                width: "1024px",
+                width: "{viewbox_width}px",
                 nodes
             }
         }
@@ -397,7 +417,7 @@ pub fn main() -> io::Result<()> {
         .init();
 
     let (model_sender, mut model_receiver) = futures_channel::mpsc::unbounded::<String>();
-    let (drawing_sender, drawing_receiver) = futures_channel::mpsc::unbounded::<Vec<Node>>();
+    let (drawing_sender, drawing_receiver) = futures_channel::mpsc::unbounded::<(Option<usize>, Vec<Node>)>();
 
     std::thread::spawn(move || {
         tokio::runtime::Builder::new_multi_thread()
@@ -409,7 +429,7 @@ pub fn main() -> io::Result<()> {
                 while let Some(model) = model_receiver.next().await {
                     if Some(&model) != prev_model.as_ref() {
                         let nodes = if model.trim().is_empty() {
-                            Ok(Ok(vec![]))
+                            Ok(Ok((None, vec![])))
                         } else {
                             catch_unwind(|| {
                                 draw(model.clone())
@@ -417,9 +437,9 @@ pub fn main() -> io::Result<()> {
                         };
                         let model = model.clone();
                         match nodes {
-                            Ok(Ok(nodes)) => {
+                            Ok(Ok((crossing_number, nodes))) => {
                                 prev_model = Some(model);
-                                drawing_sender.unbounded_send(nodes).unwrap();
+                                drawing_sender.unbounded_send((crossing_number, nodes)).unwrap();
                             },
                             Ok(Err(err)) => {
                                 if let Some(st) = err.span_trace() {
