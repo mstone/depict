@@ -310,16 +310,16 @@ pub struct AppProps {
 }
 
 pub fn app(cx: Scope<AppProps>) -> Element {
-    let (model, set_model) = use_state(&cx, || String::from(PLACEHOLDER));
-    let (drawing, set_drawing) = use_state(&cx, || (None, Vec::new()));
+    let model = use_state(&cx, || String::from(PLACEHOLDER));
+    let drawing = use_state(&cx, || (None, Vec::new()));
 
     use_coroutine(&cx, |_: UnboundedReceiver<()>| {
         let receiver = cx.props.drawing_receiver.take();
-        let set_drawing = set_drawing.to_owned();
+        let drawing = drawing.to_owned();
         async move {
             if let Some(mut receiver) = receiver {
                 while let Some(msg) = receiver.next().await {
-                    set_drawing(msg);
+                    drawing.set(msg);
                 }
             }
         }
@@ -332,7 +332,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let nodes = render(cx, drawing.1.to_owned());
     let model_sender = cx.props.model_sender.clone().unwrap();
-    model_sender.unbounded_send(model.clone()).unwrap();
+    model_sender.unbounded_send(model.get().clone()).unwrap();
 
     let viewbox_width = VIEWBOX_WIDTH;
     let crossing_number = cx.render(rsx!(match drawing.0 {
@@ -361,7 +361,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         // placeholder: "",
                         oninput: move |e| { 
                             event!(Level::TRACE, "INPUT");
-                            set_model(e.value.clone());
+                            model.set(e.value.clone());
                             model_sender.unbounded_send(e.value.clone()).unwrap(); 
                         },
                         "{model}"
@@ -467,8 +467,29 @@ pub fn main() -> io::Result<()> {
             model_sender: Some(model_sender), 
             drawing_receiver: Cell::new(Some(drawing_receiver)) 
         },
-        |c| c.with_window(|c| 
-            c.with_inner_size(LogicalSize::new(1200.0, 700.0))));
+        |c| c.with_window(|c| {
+            let mut menu_bar = tao::menu::MenuBar::new();
+            let mut app_menu = tao::menu::MenuBar::new();
+            let mut edit_menu = tao::menu::MenuBar::new();
+            
+            edit_menu.add_native_item(tao::menu::MenuItem::Undo);
+            edit_menu.add_native_item(tao::menu::MenuItem::Redo);
+            edit_menu.add_native_item(tao::menu::MenuItem::Separator);
+            edit_menu.add_native_item(tao::menu::MenuItem::Cut);
+            edit_menu.add_native_item(tao::menu::MenuItem::Copy);
+            edit_menu.add_native_item(tao::menu::MenuItem::Paste);
+            edit_menu.add_native_item(tao::menu::MenuItem::Separator);
+            edit_menu.add_native_item(tao::menu::MenuItem::SelectAll);
+
+            app_menu.add_native_item(tao::menu::MenuItem::CloseWindow);
+            app_menu.add_native_item(tao::menu::MenuItem::Quit);
+            menu_bar.add_submenu("STAMPEDE", true, app_menu);
+            menu_bar.add_submenu("Edit", true, edit_menu);
+
+            c
+                .with_inner_size(LogicalSize::new(1200.0f64, 700.0f64))
+                .with_menu(menu_bar)
+        }));
 
     // let mut vdom = VirtualDom::new(app);
     // let _ = vdom.rebuild();
