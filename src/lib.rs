@@ -13,7 +13,7 @@ pub mod parser {
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub struct Fact<'s> {
         pub path: Vec<&'s str>,
-        pub labels_by_level: Vec<Vec<(Option<&'s str>, Option<&'s str>)>>,
+        pub labels_by_level: Vec<(Vec<Option<&'s str>>, Vec<Option<&'s str>>)>,
     }
 
     pub fn is_ws(chr: char) -> bool {
@@ -49,14 +49,17 @@ pub mod parser {
                     opt(char(':')),
                     map(opt(separated_list0(
                         preceded(ws, char(':')),
-                        separated_list0(
-                            preceded(ws, char(',')),
                             separated_pair(
-                                preceded(ws, opt(is_not("\n\r:.,/"))),
+                                separated_list0(
+                                    preceded(ws, char(',')),
+                                    preceded(ws, opt(is_not("\n\r:.,/"))),
+                                ),
                                 preceded(ws, opt(char('/'))),
-                                preceded(ws, opt(is_not("\n\r:.,/"))),
+                                separated_list0(
+                                    preceded(ws, char(',')),
+                                    preceded(ws, opt(is_not("\n\r:.,/"))),
+                                ),
                             ),
-                        )
                     )), |x| x.unwrap_or_default())
                 ))
             ),
@@ -82,7 +85,7 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(Some("bar "), Some("baz "))]]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![(vec![Some("bar ")], vec![Some("baz ")])]}
             ])));
         }
 
@@ -94,7 +97,7 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(Some("bar "), None)]]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![(vec![Some("bar ")], vec![None])]}
             ])));
         }
 
@@ -106,7 +109,7 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(None, Some("baz "))]]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![(vec![None], vec![Some("baz ")])]}
             ])));
         }
 
@@ -118,19 +121,19 @@ pub mod parser {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(Some("bar "), Some("baz "))], vec![(Some("foo "), Some("quux"))]]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![(vec![Some("bar ")], vec![Some("baz ")]), (vec![Some("foo ")], vec![Some("quux")])]}
             ])));
         }
 
         #[test]
         fn multiple_labels_works() {
-            let s = "hello: bar / baz, foo / quux";
+            let s = "hello: bar, foo / baz, quux";
             let y = super::parse(s);
             if let Err(nom::Err::Error(ref y2)) = y {
                 println!("{}", convert_error(s, y2.clone()))
             }
             assert_eq!(y, Ok(("", vec![
-                super::Fact{path: vec!["hello"], labels_by_level: vec![vec![(Some("bar "), Some("baz")), (Some("foo "), Some("quux"))]]}
+                super::Fact{path: vec!["hello"], labels_by_level: vec![(vec![Some("bar"), Some("foo ")], vec![Some("baz"), Some("quux")])]}
             ])));
         }
     }

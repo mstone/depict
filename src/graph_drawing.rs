@@ -196,10 +196,10 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
             let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst);
 
             // TODO: record associated action/percept texts.
-            let empty = vec![];
-            let labels = labels_by_level.get(n).unwrap_or(&empty);
+            let empty = (vec![], vec![]);
+            let (actions, percepts) = labels_by_level.get(n).unwrap_or(&empty);
             let rels = vcg.vert_edge_labels.entry(src).or_default().entry(dst).or_default();
-            for (action, percept) in labels {
+            for action in actions {
                 let action = action.map(str::trim);
                 if let Some(action) = action {
                     if !action.is_empty() {
@@ -207,6 +207,8 @@ pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
                         rels.entry("actuates").or_default().push(action);
                     }
                 }
+            }
+            for percept in percepts {
                 let percept = percept.map(str::trim);
                 if let Some(percept) = percept {
                     if !percept.is_empty() {

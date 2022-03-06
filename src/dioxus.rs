@@ -376,7 +376,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         }
                         span {
                             class: "italic",
-                            "node+ : ^:^ (^,^ (action? / percept?))"
+                            "node+ : ^:^ ((^,^ action?) (/ (^,^ percept?))?)"
                         }
                     }
                     div {
