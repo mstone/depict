@@ -820,7 +820,6 @@ pub fn position_sols<'s, V, E>(
         let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
-        let eps = var.call((), Some([("pos", true)].into_py_dict(py)))?;
         let sep = as_constantf(20.0)?;
         let tenf = as_constantf(10.0)?;
         let mut cvec: Vec<&PyAny> = vec![];
@@ -829,7 +828,6 @@ pub fn position_sols<'s, V, E>(
         let root_n = sol_by_loc[&(0, 0)];
         // cvec.push(eq(get(l,root_n)?, zero)?);
         // cvec.push(eq(get(r,root_n)?, one)?);
-        cvec.push(geq(eps, tenf)?);
         obj = add(obj, get(r, root_n)?)?;
 
         for LocRow{ovr, ohr, loc, ..} in all_locs.iter() {
@@ -1026,7 +1024,7 @@ pub fn position_sols<'s, V, E>(
             // ORDER, SYMMETRY
             if bundle_src_pos == 0 {
                 // eprint!("C1: ");
-                cvec.push(geq(get(s, n)?, add(get(l, ln)?, add(eps, add(sep, as_constantf(action_width)?)?)?)?)?);
+                cvec.push(geq(get(s, n)?, add(get(l, ln)?, add(sep, as_constantf(action_width)?)?)?)?);
                 // eprintln!("s{} >= l{}+ε", n, ln);
                 obj = add(obj, square(sub(get(s, n)?, get(l, ln)?)?)?)?;
             }
@@ -1038,7 +1036,7 @@ pub fn position_sols<'s, V, E>(
                 let (lvll, (mhrl, _nhrl)) = hopsl.iter().next().unwrap();
                 let nl = sol_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())];
                 let percept_width_l = width_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())].1;
-                cvec.push(geq(get(s, n)?, add(get(s, nl)?, add(eps, add(sep, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?)?)?);
+                cvec.push(geq(get(s, n)?, add(get(s, nl)?, add(sep, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?)?);
                 // eprintln!("s{} >= s{}+ε", n, nl);
                 event!(Level::TRACE, %bundle_src_pos, %vll, %wll, %lvll, %mhrl, %n, %nl, "C2");
                 obj = add(obj, square(sub(get(s, nl)?, get(s, n)?)?)?)?;
@@ -1051,12 +1049,12 @@ pub fn position_sols<'s, V, E>(
                 let (lvlr, (mhrr, _nhrr)) = hopsr.iter().next().unwrap();
                 let nr = sol_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())];
                 let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
-                cvec.push(leq(get(s, n)?, sub(get(s, nr)?, add(eps, add(sep, add(sep, as_constantf(percept_width + action_width_r)?)?)?)?)?)?);
+                cvec.push(leq(get(s, n)?, sub(get(s, nr)?, add(sep, add(sep, as_constantf(percept_width + action_width_r)?)?)?)?)?);
                 // eprintln!("s{} <= s{}-ε", n, nr);
             }
             if bundle_src_pos == v_outs.len()-1 {
                 // eprint!("C4: ");
-                cvec.push(leq(get(s, n)?, sub(get(r, rn)?, add(eps, add(sep, as_constantf(percept_width)?)?)?)?)?);
+                cvec.push(leq(get(s, n)?, sub(get(r, rn)?, add(sep, as_constantf(percept_width)?)?)?)?);
                 // eprintln!("s{} <= r{}-ε", n, rn);
                 obj = add(obj, square(sub(get(s, n)?, get(r, rn)?)?)?)?;
             }
@@ -1082,7 +1080,7 @@ pub fn position_sols<'s, V, E>(
             // ORDER, SYMMETRY
             if bundle_dst_pos == 0 {
                 // eprint!("C5: ");
-                cvec.push(geq(get(s, nd)?, add(get(l, lnd)?, add(eps, add(sep, as_constantf(action_width)?)?)?)?)?);
+                cvec.push(geq(get(s, nd)?, add(get(l, lnd)?, add(sep, as_constantf(action_width)?)?)?)?);
                 // eprintln!("s{} >= l{}+ε", nd, lnd);
                 obj = add(obj, square(sub(get(s, nd)?, get(l, lnd)?)?)?)?;
             }
@@ -1094,7 +1092,7 @@ pub fn position_sols<'s, V, E>(
                 let (lvll, (mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
                 let ndl = sol_by_hop[&(lvll+1, *nhrl, vll.clone(), wll.clone())];
                 let percept_width_l = width_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())].1;
-                cvec.push(geq(get(s, nd)?, add(add(get(s, ndl)?, eps)?, add(sep, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?)?);
+                cvec.push(geq(get(s, nd)?, add(get(s, ndl)?, add(sep, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?)?);
                 // eprintln!("s{} >= s{}+ε", nd, ndl);
                 obj = add(obj, square(sub(get(s, ndl)?, get(s, nd)?)?)?)?;
             }
@@ -1106,19 +1104,18 @@ pub fn position_sols<'s, V, E>(
                 let (lvlr, (mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
                 let ndr = sol_by_hop[&(lvlr+1, *nhrr, vlr.clone(), wlr.clone())];
                 let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
-                cvec.push(leq(get(s, nd)?, sub(sub(sub(sub(get(s, ndr)?, eps)?, sep)?, sep)?, as_constantf(percept_width + action_width_r)?)?)?);
+                cvec.push(leq(get(s, nd)?, sub(sub(sub(get(s, ndr)?, sep)?, sep)?, as_constantf(percept_width + action_width_r)?)?)?);
                 // eprintln!("s{} <= s{}-ε", nd, ndr);
             }
             if bundle_dst_pos == w_ins.len()-1 {
                 // eprint!("C8: ");
-                cvec.push(leq(get(s, nd)?, sub(get(r, rnd)?, add(eps, add(sep, as_constantf(percept_width)?)?)?)?)?);
+                cvec.push(leq(get(s, nd)?, sub(get(r, rnd)?, add(sep, as_constantf(percept_width)?)?)?)?);
                 // eprintln!("s{} <= r{}-ε", nd, rnd);
                 obj = add(obj, square(sub(get(s, nd)?, get(r, rnd)?)?)?)?;
             }
         }
 
         // SPACE
-        obj = sub(obj, mul(ten, eps)?)?;
         obj = minimize.call1((obj,))?;
         
         let constr = PyList::new(py, cvec);
