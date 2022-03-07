@@ -9,7 +9,7 @@ use petgraph::algo::{floyd_warshall, NegativeCycle};
 use pyo3::types::{PyModule, IntoPyDict, PyList};
 use sorted_vec::SortedVec;
 use tracing_error::{TracedError, InstrumentError, ExtractSpanTrace, SpanTrace};
-use std::cmp::max;
+use std::cmp::{max, max_by};
 use std::collections::{HashMap, BTreeMap};
 use std::collections::hash_map::{Entry};
 use std::fmt::{Debug, Display};
@@ -677,6 +677,8 @@ pub struct LayoutProblem<V: Clone + Debug + Display + Ord + Hash> {
     pub all_hops: Vec<HopRow<V>>,
     pub sol_by_loc: HashMap<(usize, usize), usize>,
     pub sol_by_hop: HashMap<(usize, usize, V, V), usize>,
+    pub width_by_loc: HashMap<LocIx, f64>,
+    pub width_by_hop: HashMap<(usize, usize, V, V), (f64, f64)>,
 }
 
 /// ovr, ohr
@@ -746,7 +748,10 @@ pub fn calculate_sols<'s, V>(
         sol_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), *n);
     }
 
-    LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop}
+    let width_by_loc = HashMap::new();
+    let width_by_hop = HashMap::new();
+
+    LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop}
 }
 
 #[derive(Debug)]
@@ -769,7 +774,7 @@ pub fn position_sols<'s, V, E>(
     V: Clone + Debug + Display + Ord + Hash,
     E: Clone + Debug
 {
-    let LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop} = layout_problem;
+    let LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop} = layout_problem;
 
     let mut edge_label_heights = BTreeMap::<usize, usize>::new();
     for (node, loc) in node_to_loc.iter() {
@@ -791,6 +796,7 @@ pub fn position_sols<'s, V, E>(
         cumulative_offset += max_height as f64;
     }
     event!(Level::TRACE, ?row_height_offsets, "ROW HEIGHT OFFSETS");
+    event!(Level::TRACE, ?width_by_hop, "WIDTH BY HOP");
     
     
     let num_locs = all_locs.len();
@@ -808,32 +814,121 @@ pub fn position_sols<'s, V, E>(
         let as_constantf = |a: f64| { constant.call1((a.into_py(py),)) };
         let hundred: &PyAny = as_constant(100)?;
         let thousand: &PyAny = as_constant(1000)?;
-        let _ten: &PyAny = as_constant(10)?;
+        let ten: &PyAny = as_constant(10)?;
         let one: &PyAny = as_constant(1)?;
         let zero: &PyAny = as_constant(0)?;
         let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
         let eps = var.call((), Some([("pos", true)].into_py_dict(py)))?;
-        let sep = as_constantf(0.01)?;
+        let sep = as_constantf(20.0)?;
+        let tenf = as_constantf(10.0)?;
         let mut cvec: Vec<&PyAny> = vec![];
         let mut obj = zero;
 
-        // let root_n = sol_by_loc[&(0, 0)];
+        let root_n = sol_by_loc[&(0, 0)];
         // cvec.push(eq(get(l,root_n)?, zero)?);
         // cvec.push(eq(get(r,root_n)?, one)?);
-        cvec.push(geq(eps, sep)?);
+        cvec.push(geq(eps, tenf)?);
+        obj = add(obj, get(r, root_n)?)?;
 
-        for LocRow{ovr, ohr, ..} in all_locs.iter() {
+        for LocRow{ovr, ohr, loc, ..} in all_locs.iter() {
             let ovr = *ovr; 
             let ohr = *ohr;
             let locs = &solved_locs[&ovr];
             let shr = locs[&ohr];
             let n = sol_by_loc[&(ovr, ohr)];
+            let mut min_width = *width_by_loc.get(&(ovr, ohr))
+                .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>(format!("missing node width: {ovr}, {ohr}")))?;
+            if let Loc::Node(vl) = loc {
+                let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
+                let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
+                let mut v_dsts = v_ers
+                    .iter()
+                    .map(|er| { 
+                        dag
+                            .node_weight(er.target())
+                            .map(Clone::clone)
+                            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>("missing node weight"))
+                    })
+                    .into_iter()
+                    .collect::<Result<Vec<_>, PyErr>>()?;
+                let mut w_srcs = w_ers
+                    .iter()
+                    .map(|er| { 
+                        dag
+                            .node_weight(er.source())
+                            .map(Clone::clone)
+                            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>("missing node weight"))
+                    })
+                    .into_iter()
+                    .collect::<Result<Vec<_>, PyErr>>()?;
+
+                v_dsts.sort(); v_dsts.dedup();
+                v_dsts.sort_by_key(|dst| {
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
+                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+                    (shr, -(svr as i32))
+                });
+                let v_outs = v_dsts
+                    .iter()
+                    .map(|dst| { (vl.clone(), dst.clone()) })
+                    .collect::<Vec<_>>();
+
+                w_srcs.sort(); w_srcs.dedup();
+                w_srcs.sort_by_key(|src| {
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
+                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+                    (shr, -(svr as i32))
+                });
+                let w_ins = w_srcs
+                    .iter()
+                    .map(|src| { (src.clone(), vl.clone()) })
+                    .collect::<Vec<_>>();
+
+                let v_out_first_hops = v_outs
+                    .iter()
+                    .map(|(vl, wl)| {
+                        #[allow(clippy::unwrap_used)]
+                        let (lvl, (mhr, _nhr)) = hops_by_edge[&(vl.clone(), wl.clone())].iter().next().unwrap();
+                        (*lvl, *mhr, vl.clone(), wl.clone())
+                    })
+                    .collect::<Vec<_>>();
+                let w_in_last_hops = w_ins
+                    .iter()
+                    .map(|(vl, wl)| {
+                        #[allow(clippy::unwrap_used)]
+                        let (lvl, (mhr, _nhr)) = hops_by_edge[&(vl.clone(), wl.clone())].iter().rev().next().unwrap();
+                        (*lvl, *mhr, vl.clone(), wl.clone())
+                    })
+                    .collect::<Vec<_>>();
+                
+                let out_width: f64 = v_out_first_hops
+                    .iter()
+                    .map(|idx| {
+                        let widths = width_by_hop.get(idx).unwrap_or(&(0.0, 0.0));
+                        widths.0 + widths.1
+                    })
+                    .sum();
+                let in_width: f64 = w_in_last_hops
+                    .iter()
+                    .map(|idx| {
+                        let widths = width_by_hop.get(idx).unwrap_or(&(0.0, 0.0));
+                        widths.0 + widths.1
+                    })
+                    .sum();
+                    
+                min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
+                event!(Level::TRACE, %min_width, "MIN WIDTH");
+                // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
+            }
             // if loc.is_node() { 
                 // eprint!("C0: ");
+                cvec.push(geq(get(l,n)?, get(l,root_n)?)?);
+                cvec.push(leq(get(r,n)?, get(r,root_n)?)?);
+
                 // eprint!("r{} >= l{} + S, ", n, n);
-                cvec.push(geq(get(r,n)?, add(get(l,n)?, sep)?)?);
+                cvec.push(geq(get(r,n)?, add(get(l,n)?, as_constantf(min_width)?)?)?);
                 // WIDTH
                 obj = add(obj, sub(get(l,n)?, get(r,n)?)?)?;
                 if shr > 0 {
@@ -852,10 +947,10 @@ pub fn position_sols<'s, V, E>(
                     cvec.push(leq(get(r,n)?, sub(get(l,nn)?, sep)?)?);
                     // eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
                 }
-                if shr == locs.len()-1 {
-                    cvec.push(leq(get(r,n)?, one)?);
+                // if shr == locs.len()-1 {
+                    // cvec.push(leq(get(r,n)?, one)?);
                     // eprint!("r{:?} <= 1", (ovr, ohr, shr, n));
-                }
+                // }
                 // eprintln!();  
             // }
         }
@@ -920,10 +1015,18 @@ pub fn position_sols<'s, V, E>(
             let mut n = n;
             let mut nd = nd;
 
+            let (action_width, percept_width) = {
+                #[allow(clippy::unwrap_used)]
+                let (lvl, (mhr, _nhr)) = hops.iter().next().unwrap();
+                width_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).unwrap_or(&(10.0, 10.0))
+            };
+            let action_width = *action_width;
+            let percept_width = *percept_width;
+
             // ORDER, SYMMETRY
             if bundle_src_pos == 0 {
                 // eprint!("C1: ");
-                cvec.push(geq(get(s, n)?, add(get(l, ln)?, eps)?)?);
+                cvec.push(geq(get(s, n)?, add(get(l, ln)?, add(eps, add(sep, as_constantf(action_width)?)?)?)?)?);
                 // eprintln!("s{} >= l{}+ε", n, ln);
                 obj = add(obj, square(sub(get(s, n)?, get(l, ln)?)?)?)?;
             }
@@ -934,8 +1037,10 @@ pub fn position_sols<'s, V, E>(
                 #[allow(clippy::unwrap_used)]
                 let (lvll, (mhrl, _nhrl)) = hopsl.iter().next().unwrap();
                 let nl = sol_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())];
-                cvec.push(geq(get(s, n)?, add(get(s, nl)?, eps)?)?);
+                let percept_width_l = width_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())].1;
+                cvec.push(geq(get(s, n)?, add(get(s, nl)?, add(eps, add(sep, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?)?)?);
                 // eprintln!("s{} >= s{}+ε", n, nl);
+                event!(Level::TRACE, %bundle_src_pos, %vll, %wll, %lvll, %mhrl, %n, %nl, "C2");
                 obj = add(obj, square(sub(get(s, nl)?, get(s, n)?)?)?)?;
             }
             if bundle_src_pos < v_outs.len()-1 {
@@ -945,16 +1050,17 @@ pub fn position_sols<'s, V, E>(
                 #[allow(clippy::unwrap_used)]
                 let (lvlr, (mhrr, _nhrr)) = hopsr.iter().next().unwrap();
                 let nr = sol_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())];
-                cvec.push(leq(get(s, n)?, sub(get(s, nr)?, eps)?)?);
+                let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
+                cvec.push(leq(get(s, n)?, sub(get(s, nr)?, add(eps, add(sep, add(sep, as_constantf(percept_width + action_width_r)?)?)?)?)?)?);
                 // eprintln!("s{} <= s{}-ε", n, nr);
             }
             if bundle_src_pos == v_outs.len()-1 {
                 // eprint!("C4: ");
-                cvec.push(leq(get(s, n)?, sub(get(r, rn)?, eps)?)?);
+                cvec.push(leq(get(s, n)?, sub(get(r, rn)?, add(eps, add(sep, as_constantf(percept_width)?)?)?)?)?);
                 // eprintln!("s{} <= r{}-ε", n, rn);
                 obj = add(obj, square(sub(get(s, n)?, get(r, rn)?)?)?)?;
             }
-
+            
             // AGREEMENT
             for (i, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
                 if i < hops.len() {
@@ -976,7 +1082,7 @@ pub fn position_sols<'s, V, E>(
             // ORDER, SYMMETRY
             if bundle_dst_pos == 0 {
                 // eprint!("C5: ");
-                cvec.push(geq(get(s, nd)?, add(get(l, lnd)?, eps)?)?);
+                cvec.push(geq(get(s, nd)?, add(get(l, lnd)?, add(eps, add(sep, as_constantf(action_width)?)?)?)?)?);
                 // eprintln!("s{} >= l{}+ε", nd, lnd);
                 obj = add(obj, square(sub(get(s, nd)?, get(l, lnd)?)?)?)?;
             }
@@ -985,9 +1091,10 @@ pub fn position_sols<'s, V, E>(
                 let (vll, wll) = &w_ins[bundle_dst_pos-1];
                 let hopsl = &hops_by_edge[&(vll.clone(), wll.clone())];
                 #[allow(clippy::unwrap_used)]
-                let (lvll, (_mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
+                let (lvll, (mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
                 let ndl = sol_by_hop[&(lvll+1, *nhrl, vll.clone(), wll.clone())];
-                cvec.push(geq(get(s, nd)?, add(get(s, ndl)?, eps)?)?);
+                let percept_width_l = width_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())].1;
+                cvec.push(geq(get(s, nd)?, add(add(get(s, ndl)?, eps)?, add(sep, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?)?);
                 // eprintln!("s{} >= s{}+ε", nd, ndl);
                 obj = add(obj, square(sub(get(s, ndl)?, get(s, nd)?)?)?)?;
             }
@@ -996,21 +1103,22 @@ pub fn position_sols<'s, V, E>(
                 let (vlr, wlr) = &w_ins[bundle_dst_pos+1];
                 let hopsr = &hops_by_edge[&(vlr.clone(), wlr.clone())];
                 #[allow(clippy::unwrap_used)]
-                let (lvlr, (_mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
+                let (lvlr, (mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
                 let ndr = sol_by_hop[&(lvlr+1, *nhrr, vlr.clone(), wlr.clone())];
-                cvec.push(leq(get(s, nd)?, sub(get(s, ndr)?, eps)?)?);
+                let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
+                cvec.push(leq(get(s, nd)?, sub(sub(sub(sub(get(s, ndr)?, eps)?, sep)?, sep)?, as_constantf(percept_width + action_width_r)?)?)?);
                 // eprintln!("s{} <= s{}-ε", nd, ndr);
             }
             if bundle_dst_pos == w_ins.len()-1 {
                 // eprint!("C8: ");
-                cvec.push(leq(get(s, nd)?, sub(get(r, rnd)?, eps)?)?);
+                cvec.push(leq(get(s, nd)?, sub(get(r, rnd)?, add(eps, add(sep, as_constantf(percept_width)?)?)?)?)?);
                 // eprintln!("s{} <= r{}-ε", nd, rnd);
                 obj = add(obj, square(sub(get(s, nd)?, get(r, rnd)?)?)?)?;
             }
         }
 
         // SPACE
-        obj = sub(obj, mul(hundred, eps)?)?;
+        obj = sub(obj, mul(ten, eps)?)?;
         obj = minimize.call1((obj,))?;
         
         let constr = PyList::new(py, cvec);
