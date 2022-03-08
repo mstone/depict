@@ -209,12 +209,12 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
     let mut texts = vec![];
 
-    let root_n = sol_by_loc[&(VerticalRank(0), 0)];
+    let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
     let root_width = rs[root_n] - ls[root_n];
 
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
-        if (*ovr, *ohr) == (VerticalRank(0), 0) { continue; }
+        if (*ovr, *ohr) == (VerticalRank(0), OriginalHorizontalRank(0)) { continue; }
         let n = sol_by_loc[&(*ovr, *ohr)];
 
         let lpos = ls[n];

@@ -172,9 +172,9 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
                             print!(r#" -- (aux_{}_{}.center)"#, ovr, ohr);
                             if n == mid {
                                 mid_ovr = lvl.0;
-                                mid_ohr = *mhr;
+                                mid_ohr = mhr.0;
                                 mid_ovrd = (*lvl+1).0;
-                                mid_ohrd = *nhr;
+                                mid_ohrd = nhr.0;
                             }
                         }
                     }
