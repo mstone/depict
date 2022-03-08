@@ -814,16 +814,16 @@ pub fn position_sols<'s, V, E>(
         let square = |a: &PyAny| {sq.call1((a,))};
         let as_constant = |a: i32| { constant.call1((a.into_py(py),)) };
         let as_constantf = |a: f64| { constant.call1((a.into_py(py),)) };
-        let hundred: &PyAny = as_constant(100)?;
+        let _hundred: &PyAny = as_constant(100)?;
         let thousand: &PyAny = as_constant(1000)?;
-        let ten: &PyAny = as_constant(10)?;
-        let one: &PyAny = as_constant(1)?;
+        let _ten: &PyAny = as_constant(10)?;
+        let _one: &PyAny = as_constant(1)?;
         let zero: &PyAny = as_constant(0)?;
         let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
         let sep = as_constantf(40.0)?;
-        let tenf = as_constantf(10.0)?;
+        let _tenf = as_constantf(10.0)?;
         let mut cvec: Vec<&PyAny> = vec![];
         let mut obj = zero;
 
@@ -838,7 +838,7 @@ pub fn position_sols<'s, V, E>(
             let locs = &solved_locs[&ovr];
             let shr = locs[&ohr];
             let n = sol_by_loc[&(ovr, ohr)];
-            let mut min_width = *width_by_loc.get(&(ovr, ohr))
+            let min_width = *width_by_loc.get(&(ovr, ohr))
                 .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>(format!("missing node width: {ovr}, {ohr}")))?;
 
             if let Loc::Node(vl) = loc {

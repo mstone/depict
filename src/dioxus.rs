@@ -34,8 +34,93 @@ pub enum Node {
   Svg { key: String, path: String, rel: String, label: Option<Label> },
 }
 
+#[derive(Clone, Debug)]
+pub struct Drawing {
+    pub crossing_number: Option<usize>,
+    pub viewbox_width: f64,
+    pub nodes: Vec<Node>,
+}
+
+impl Default for Drawing {
+    fn default() -> Self {
+        Self { crossing_number: Default::default(), viewbox_width: 1024.0, nodes: Default::default() }
+    }
+}
+
+fn estimate_widths<'s>(
+    vcg: &Vcg, 
+    cvcg: &Cvcg<&'s str, &'s str>,
+    placement: &Placement<&'s str>,
+    layout_problem: &mut LayoutProblem<&'s str>
+) -> Result<(), Error> {
+    let char_width = 8.67;
+    let arrow_width = 40.0;
+    
+    let vert_node_labels = &vcg.vert_node_labels;
+    let vert_edge_labels = &vcg.vert_edge_labels;
+    let width_by_loc = &mut layout_problem.width_by_loc;
+    let width_by_hop = &mut layout_problem.width_by_hop;
+    let hops_by_edge = &placement.hops_by_edge;
+    let loc_to_node = &placement.loc_to_node;
+    let condensed = &cvcg.condensed;
+    let condensed_vxmap = &cvcg.condensed_vxmap;
+    
+    for (loc, node) in loc_to_node.iter() {
+        let (ovr, ohr) = loc;
+        if let Loc::Node(vl) = node {
+            let mut label = vert_node_labels
+                .get(vl)
+                .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
+                .clone();
+            if !label.is_screaming_snake_case() {
+                label = label.to_title_case();
+            }
+            width_by_loc.insert((*ovr, *ohr), char_width * label.len() as f64);
+        }
+    }
+
+    for ((vl, wl), hops) in hops_by_edge.iter() {
+        let mut action_width = 10.0;
+        let mut percept_width = 10.0;
+        let cex = condensed.find_edge(condensed_vxmap[vl], condensed_vxmap[wl]).unwrap();
+        let cew = condensed.edge_weight(cex).unwrap();
+        for (vl, wl, ew) in cew.iter() {
+            let label_width = vert_edge_labels
+                .get(vl)
+                .and_then(|dsts| dsts
+                    .get(wl)
+                    .and_then(|rels| rels.get(ew)))
+                    .and_then(|labels| labels
+                        .iter()
+                        .map(|label| label.len())
+                        .max()
+                    );
+
+            match *ew {
+                "senses" => {
+                    percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
+                }
+                "actuates" => {
+                    action_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
+                }
+                _ => {}
+            }
+        }
+
+        for (lvl, (mhr, _nhr)) in hops.iter() {
+            width_by_hop.insert((*lvl, *mhr, vl, wl), (action_width, percept_width));
+            if width_by_loc.get(&(*lvl, *mhr)).is_none() {
+                width_by_loc.insert((*lvl, *mhr), action_width + percept_width);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+
 #[instrument(skip(data))]
-fn draw(data: String) -> Result<(Option<usize>, f64, Vec<Node>), Error> {
+fn draw(data: String) -> Result<Drawing, Error> {
     let v = parse(&data[..])
         .map_err(|e| match e {
             nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
@@ -45,7 +130,8 @@ fn draw(data: String) -> Result<(Option<usize>, f64, Vec<Node>), Error> {
         .in_current_span()?
         .1;
 
-    let Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels} = calculate_vcg(&v)?;
+    let vcg = calculate_vcg(&v)?;
+    let Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels} = &vcg;
 
     // diagrams::graph_drawing::draw(v, &mut vcg)?;
 
@@ -56,78 +142,23 @@ fn draw(data: String) -> Result<(Option<usize>, f64, Vec<Node>), Error> {
 
     // eprintln!("VERT: {:?}", Dot::new(&vert));
 
-    let Cvcg{condensed, condensed_vxmap} = condense(&vert)?;
+    let cvcg = condense(vert)?;
+    let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
 
-    let roots = roots(&condensed)?;
+    let roots = roots(condensed)?;
 
-    let paths_by_rank = rank(&condensed, &roots)?;
+    let paths_by_rank = rank(condensed, &roots)?;
 
-    let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+    let placement = calculate_locs_and_hops(condensed, &paths_by_rank)?;
+    let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = &placement;
 
-    let (crossing_number, solved_locs) = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
+    let (crossing_number, solved_locs) = minimize_edge_crossing(locs_by_level, hops_by_level)?;
 
-    let mut layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
+    let mut layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
 
-    let char_width = 8.67;
-    // let arrow_width = 20.0;
-    let arrow_width = 40.0;
+    estimate_widths(&vcg, &cvcg, &placement, &mut layout_problem)?;
 
-    {
-        let width_by_loc = &mut layout_problem.width_by_loc;
-        let width_by_hop = &mut layout_problem.width_by_hop;
-        
-        for (loc, node) in loc_to_node.iter() {
-            let (ovr, ohr) = loc;
-            if let Loc::Node(vl) = node {
-                let mut label = vert_node_labels
-                    .get(*vl)
-                    .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
-                    .clone();
-                if !label.is_screaming_snake_case() {
-                    label = label.to_title_case();
-                }
-                width_by_loc.insert((*ovr, *ohr), char_width * label.len() as f64);
-            }
-        }
-
-        for ((vl, wl), hops) in hops_by_edge.iter() {
-            let mut action_width = 10.0;
-            let mut percept_width = 10.0;
-            let cex = condensed.find_edge(condensed_vxmap[vl], condensed_vxmap[wl]).unwrap();
-            let cew = condensed.edge_weight(cex).unwrap();
-            for (vl, wl, ew) in cew.iter() {
-                let label_width = vert_edge_labels
-                    .get(vl)
-                    .and_then(|dsts| dsts
-                        .get(wl)
-                        .and_then(|rels| rels.get(ew)))
-                        .and_then(|labels| labels
-                            .iter()
-                            .map(|label| label.len())
-                            .max()
-                        );
-    
-                match *ew {
-                    "senses" => {
-                        percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
-                    }
-                    "actuates" => {
-                        action_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
-                    }
-                    _ => {}
-                }
-            }
-
-            for (lvl, (mhr, _nhr)) in hops.iter() {
-                width_by_hop.insert((*lvl, *mhr, vl, wl), (action_width, percept_width));
-                if width_by_loc.get(&(*lvl, *mhr)).is_none() {
-                    width_by_loc.insert((*lvl, *mhr), action_width + percept_width);
-                }
-            }
-        }
-    }
-
-    let LayoutSolution{ls, rs, ss, ts} = position_sols(&vert, &vert_vxmap, &vert_edge_labels, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
+    let LayoutSolution{ls, rs, ss, ts} = position_sols(vert, vert_vxmap, vert_edge_labels, hops_by_edge, node_to_loc, &solved_locs, &layout_problem)?;
 
     let LayoutProblem{sol_by_loc, sol_by_hop, ..} = layout_problem;
 
@@ -139,7 +170,6 @@ fn draw(data: String) -> Result<(Option<usize>, f64, Vec<Node>), Error> {
 
     let root_n = sol_by_loc[&(0, 0)];
     let root_width = rs[root_n] - ls[root_n];
-    let viewbox_width = root_width.round();
 
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
@@ -257,7 +287,10 @@ fn draw(data: String) -> Result<(Option<usize>, f64, Vec<Node>), Error> {
 
     event!(Level::TRACE, %root_width, ?nodes, "NODES");
 
-    Ok((Some(crossing_number), root_width, nodes))
+    Ok(Drawing{
+        crossing_number: Some(crossing_number), 
+        viewbox_width: root_width, 
+        nodes})
 }
 
 pub fn render<P>(cx: Scope<P>, root_width: f64, mut nodes: Vec<Node>)-> Option<VNode> {
@@ -336,7 +369,7 @@ pub fn render<P>(cx: Scope<P>, root_width: f64, mut nodes: Vec<Node>)-> Option<V
                             }
                         }
                         {match label { 
-                            Some(Label{text, hpos, width, vpos}) => {
+                            Some(Label{text, hpos, width: _, vpos}) => {
                                 let translate = if rel == "actuates" { 
                                     "translate(calc(-100% - 1.5ex))"
                                 } else { 
@@ -508,7 +541,7 @@ pub fn main() -> io::Result<()> {
                 while let Some(model) = model_receiver.next().await {
                     if Some(&model) != prev_model.as_ref() {
                         let nodes = if model.trim().is_empty() {
-                            Ok(Ok((None, 1024.0, vec![])))
+                            Ok(Ok(Drawing::default()))
                         } else {
                             catch_unwind(|| {
                                 draw(model.clone())
@@ -516,9 +549,9 @@ pub fn main() -> io::Result<()> {
                         };
                         let model = model.clone();
                         match nodes {
-                            Ok(Ok((crossing_number, root_width, nodes))) => {
+                            Ok(Ok(Drawing{crossing_number, viewbox_width, nodes})) => {
                                 prev_model = Some(model);
-                                drawing_sender.unbounded_send((crossing_number, root_width, nodes)).unwrap();
+                                drawing_sender.unbounded_send((crossing_number, viewbox_width, nodes)).unwrap();
                             },
                             Ok(Err(err)) => {
                                 if let Some(st) = err.span_trace() {

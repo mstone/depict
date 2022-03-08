@@ -10,10 +10,12 @@ pub mod parser {
     use nom::sequence::{preceded, terminated, tuple, separated_pair};
     use std::hash::Hash;
 
+    pub type Labels<'s> = Vec<Option<&'s str>>;
+
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub struct Fact<'s> {
         pub path: Vec<&'s str>,
-        pub labels_by_level: Vec<(Vec<Option<&'s str>>, Vec<Option<&'s str>>)>,
+        pub labels_by_level: Vec<(Labels<'s>, Labels<'s>)>,
     }
 
     pub fn is_ws(chr: char) -> bool {
