@@ -194,7 +194,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
     for ((vl, wl), hops) in hops_by_edge.iter() {
         for (lvl, (mhr, nhr)) in hops.iter() {
             let sol = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
-            let sold = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
+            let sold = sol_by_hop[&(*lvl+1, *nhr, *vl, *wl)];
             let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sol}"));
             let soldx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sold}"));
             layout_debug.add_edge(solx, soldx, format!("{vl}, {wl}, {lvl}, {mhr}, {nhr}"));
@@ -209,18 +209,18 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
     let mut texts = vec![];
 
-    let root_n = sol_by_loc[&(0, 0)];
+    let root_n = sol_by_loc[&(VerticalRank(0), 0)];
     let root_width = rs[root_n] - ls[root_n];
 
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
-        if (*ovr, *ohr) == (0, 0) { continue; }
+        if (*ovr, *ohr) == (VerticalRank(0), 0) { continue; }
         let n = sol_by_loc[&(*ovr, *ohr)];
 
         let lpos = ls[n];
         let rpos = rs[n];
 
-        let vpos = height_scale * ((ovr-1) as f64) + vpad + ts[*ovr] * line_height;
+        let vpos = height_scale * ((*ovr-1).0 as f64) + vpad + ts[*ovr] * line_height;
         let width = (rpos - lpos).round();
         let hpos = lpos.round();
 
@@ -268,11 +268,11 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
             for (n, hop) in hops.iter().enumerate() {
                 let (lvl, (_mhr, nhr)) = hop;
-                let hn = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
+                let hn = sol_by_hop[&(*lvl+1, *nhr, *vl, *wl)];
                 let spos = ss[hn];
                 let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
-                let vpos = ((lvl-1) as f64) * height_scale + vpad + ts[*lvl] * line_height;
-                let mut vpos2 = (*lvl as f64) * height_scale + vpad + ts[lvl+1] * line_height;
+                let vpos = ((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height;
+                let mut vpos2 = (lvl.0 as f64) * height_scale + vpad + ts[(*lvl+1)] * line_height;
 
                 if n == 0 {
                     let mut vpos = vpos;
@@ -285,7 +285,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 }
 
                 if n == 0 {
-                    let n = sol_by_loc[&((lvl+1), *nhr)];
+                    let n = sol_by_loc[&((*lvl+1), *nhr)];
                     label_hpos = Some(match *ew {
                         "senses" => {
                             // ls[n]
@@ -298,7 +298,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
                         _ => hpos
                     });
                     label_width = Some(rs[n] - ls[n]);
-                    label_vpos = Some(((lvl-1) as f64) * height_scale + vpad + ts[*lvl] * line_height);
+                    label_vpos = Some(((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height);
                 }
 
                 if n == hops.len() - 1 && *ew == "actuates" { 

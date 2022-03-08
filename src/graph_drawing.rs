@@ -15,10 +15,13 @@ use std::collections::hash_map::{Entry};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::io::{Write};
+use std::ops::{Add, Sub};
 use std::process::{Command, Stdio};
 use ndarray::{Array2};
 use numpy::{PyArray1, PyReadonlyArray1};
 use tracing::{event, Level, instrument};
+use typed_index_collections::TiVec;
+use derive_more::{From, Into};
 use crate::parser::Fact;
 
 pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V) -> NodeIndex where V: Eq + Hash + Clone {
@@ -62,7 +65,7 @@ pub fn eq<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone)]
 pub enum Loc<V,E> {
     Node(V),
-    Hop(usize, E, E),
+    Hop(VerticalRank, E, E),
 }
 
 pub fn get_value(a: &PyAny) -> PyResult<PyReadonlyArray1<f64>> {
@@ -317,7 +320,38 @@ pub fn roots<V: Clone + Debug + Ord, E>(dag: &Graph<V, E>) -> Result<SortedVec<V
     Ok(roots)
 }
 
-pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s SortedVec<V>) -> Result<BTreeMap<usize, SortedVec<(V, V)>>, Error> {
+#[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+pub struct VerticalRank(pub usize);
+
+#[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+pub struct OriginalHorizontalRank(pub usize);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SolvedHorizontalRank(pub usize);
+
+impl Add<usize> for VerticalRank {
+    type Output = Self;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl Sub<usize> for VerticalRank {
+    type Output = Self;
+
+    fn sub(self, rhs: usize) -> Self::Output {
+        Self(self.0 - rhs)
+    }
+}
+
+impl Display for VerticalRank {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
+    }
+}
+
+pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s SortedVec<V>) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
     let paths_fw = floyd_warshall(&dag, |_ex| { -1 })
         .map_err(|cycle| 
             Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
@@ -353,7 +387,7 @@ pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s Sort
     let mut paths_by_rank = BTreeMap::new();
     for (wgt, vx, wx) in paths_from_roots.iter() {
         paths_by_rank
-            .entry(*wgt)
+            .entry(VerticalRank(*wgt))
             .or_insert_with(SortedVec::new)
             .insert((vx.clone(), wx.clone()));
     }
@@ -368,19 +402,21 @@ pub struct Hop<V: Clone + Debug + Display + Ord + Hash> {
     pub nhr: usize,
     pub vl: V,
     pub wl: V,
-    pub lvl: usize,
+    pub lvl: VerticalRank,
 }
 pub struct Placement<V: Clone + Debug + Display + Ord + Hash> {
-    pub locs_by_level: BTreeMap<usize, Vec<usize>>, 
-    pub hops_by_level: BTreeMap<usize, SortedVec<Hop<V>>>,
-    pub hops_by_edge: BTreeMap<(V, V), BTreeMap<usize, (usize, usize)>>,
-    pub loc_to_node: HashMap<(usize, usize), Loc<V, V>>,
-    pub node_to_loc: HashMap<Loc<V, V>, (usize, usize)>
+    pub locs_by_level: BTreeMap<VerticalRank, Vec<usize>>, 
+    pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
+    pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (usize, usize)>>,
+    pub loc_to_node: HashMap<(VerticalRank, usize), Loc<V, V>>,
+    pub node_to_loc: HashMap<Loc<V, V>, (VerticalRank, usize)>
 }
+
+pub type RankedPaths<V> = BTreeMap<VerticalRank, SortedVec<(V, V)>>;
 
 pub fn calculate_locs_and_hops<'s, V, E>(
     dag: &'s Graph<V, E>, 
-    paths_by_rank: &'s BTreeMap<usize, SortedVec<(V, V)>>
+    paths_by_rank: &'s RankedPaths<V>
 ) -> Result<Placement<V>, Error>
         where 
     V: Clone + Debug + Display + Ord + Hash, 
@@ -434,7 +470,8 @@ pub fn calculate_locs_and_hops<'s, V, E>(
         let whr = *hx_rank.get(wl).unwrap();
         
         let mut mhrs = vec![vhr];
-        for mid_level in (vvr+1)..(wvr) {
+        for mid_level in (vvr+1).0..(wvr.0) {
+            let mid_level = VerticalRank(mid_level); // pending https://github.com/rust-lang/rust/issues/42168
             let mhr = locs_by_level.get(&mid_level).map_or(0, |v| v.len());
             locs_by_level.entry(mid_level).or_insert_with(Vec::new).push(mhr);
             loc_to_node.insert((mid_level, mhr), Loc::Hop(mid_level, vl.clone(), wl.clone()));
@@ -445,9 +482,10 @@ pub fn calculate_locs_and_hops<'s, V, E>(
 
         event!(Level::DEBUG, %vl, %wl, %vvr, %wvr, %vhr, %whr, ?mhrs, "HOP");
         
-        for lvl in vvr..wvr {
-            let mx = (lvl as i32 - vvr as i32) as usize;
-            let nx = (lvl as i32 + 1 - vvr as i32) as usize;
+        for lvl in vvr.0..wvr.0 {
+            let lvl = VerticalRank(lvl); // pending https://github.com/rust-lang/rust/issues/42168
+            let mx = (lvl.0 as i32 - vvr.0 as i32) as usize;
+            let nx = (lvl.0 as i32 + 1 - vvr.0 as i32) as usize;
             let mhr = mhrs[mx];
             let nhr = mhrs[nx];
             hops_by_level
@@ -464,12 +502,12 @@ pub fn calculate_locs_and_hops<'s, V, E>(
 
     event!(Level::DEBUG, ?hops_by_level, "HOPS_BY_LEVEL");
 
-    let mut g_hops = Graph::<(usize, usize), (usize, V, V)>::new();
+    let mut g_hops = Graph::<(VerticalRank, usize), (VerticalRank, V, V)>::new();
     let mut g_hops_vx = HashMap::new();
     for (_rank, hops) in hops_by_level.iter() {
         for Hop{mhr, nhr, vl, wl, lvl} in hops.iter() {
             let gvx = or_insert(&mut g_hops, &mut g_hops_vx, (*lvl, *mhr));
-            let gwx = or_insert(&mut g_hops, &mut g_hops_vx, (lvl+1, *nhr));
+            let gwx = or_insert(&mut g_hops, &mut g_hops_vx, (*lvl+1, *nhr));
             g_hops.add_edge(gvx, gwx, (*lvl, vl.clone(), wl.clone()));
         }
     }
@@ -482,9 +520,9 @@ pub fn calculate_locs_and_hops<'s, V, E>(
 /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
 #[allow(clippy::type_complexity)]
 pub fn minimize_edge_crossing<'s, V>(
-    locs_by_level: &'s BTreeMap<usize, Vec<usize>>,
-    hops_by_level: &'s BTreeMap<usize, SortedVec<Hop<V>>>
-) -> Result<(usize, BTreeMap<usize, BTreeMap<usize, usize>>), Error> where
+    locs_by_level: &'s BTreeMap<VerticalRank, Vec<usize>>,
+    hops_by_level: &'s BTreeMap<VerticalRank, SortedVec<Hop<V>>>
+) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<usize, usize>>), Error> where
     V: Clone + Debug + Display + Ord + Hash
 {
     if hops_by_level.is_empty() {
@@ -506,6 +544,7 @@ pub fn minimize_edge_crossing<'s, V>(
         csp.push_str(&format!("BOOL x{}[{},{}]\n", rank, locs.len(), locs.len()));
     }
     for rank in 0..locs_by_level.len() - 1 {
+        let rank = VerticalRank(rank);
         let w1 = locs_by_level[&rank].len();
         let w2 = locs_by_level[&(rank+1)].len();
         csp.push_str(&format!("BOOL c{}[{},{},{},{}]\n", rank, w1, w2, w1, w2));
@@ -546,8 +585,8 @@ pub fn minimize_edge_crossing<'s, V>(
                 for Hop{mhr: u2, nhr: v2, ..}  in hops.iter() {
                     // if (u1,v1) != (u2,v2) { // BUG!
                     if u1 != u2 && v1 != v2 {
-                        csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u2},{u1}],x{j}[{v1},{v2}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=k+1));
-                        csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u1},{u2}],x{j}[{v2},{v1}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=k+1));
+                        csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u2},{u1}],x{j}[{v1},{v2}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=*k+1));
+                        csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u1},{u2}],x{j}[{v2},{v1}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=*k+1));
                         // csp.push_str(&format!("sumleq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
                         // csp.push_str(&format!("sumgeq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
                     }
@@ -556,7 +595,7 @@ pub fn minimize_edge_crossing<'s, V>(
         }
     }
     csp.push_str("\nsumleq([");
-    for rank in 0..=max_level {
+    for rank in 0..=max_level.0 {
         if rank > 0 {
             csp.push(',');
         }
@@ -564,7 +603,7 @@ pub fn minimize_edge_crossing<'s, V>(
     }
     csp.push_str("],csum)\n");
     csp.push_str("sumgeq([");
-    for rank in 0..max_level {
+    for rank in 0..max_level.0 {
         if rank > 0 {
             csp.push(',');
         }
@@ -619,7 +658,7 @@ pub fn minimize_edge_crossing<'s, V>(
     let mut perm = Vec::<Array2<i32>>::new();
     for (rank, locs) in locs_by_level.iter() {
         let mut arr = Array2::<i32>::zeros((locs.len(), locs.len()));
-        let parsed_solns = solns[*rank]
+        let parsed_solns = solns[rank.0]
             .split(' ')
             .filter_map(|s| {
                 s
@@ -641,6 +680,7 @@ pub fn minimize_edge_crossing<'s, V>(
 
     let mut solved_locs = BTreeMap::new();
     for (n, p) in perm.iter().enumerate() {
+        let n = VerticalRank(n);
         let mut sums = p.rows().into_iter().enumerate().map(|(i, r)| (i, r.sum() as usize)).collect::<Vec<_>>();
         sums.sort_by_key(|(_i,s)| *s);
         // eprintln!("row sums: {:?}", sums);
@@ -656,7 +696,7 @@ pub fn minimize_edge_crossing<'s, V>(
 
 #[derive(Clone, Debug)]
 pub struct LocRow<V: Clone + Debug + Display + Ord + Hash> {
-    pub ovr: usize,
+    pub ovr: VerticalRank,
     pub ohr: usize,
     pub shr: usize,
     pub loc: Loc<V, V>,
@@ -665,7 +705,7 @@ pub struct LocRow<V: Clone + Debug + Display + Ord + Hash> {
 
 #[derive(Clone, Debug)]
 pub struct HopRow<V: Clone + Debug + Display + Ord + Hash> {
-    pub lvl: usize,
+    pub lvl: VerticalRank,
     pub mhr: usize,
     pub nhr: usize,
     pub vl: V,
@@ -678,25 +718,25 @@ pub struct LayoutProblem<V: Clone + Debug + Display + Ord + Hash> {
     pub all_locs: Vec<LocRow<V>>,
     pub all_hops0: Vec<HopRow<V>>,
     pub all_hops: Vec<HopRow<V>>,
-    pub sol_by_loc: HashMap<(usize, usize), usize>,
-    pub sol_by_hop: HashMap<(usize, usize, V, V), usize>,
+    pub sol_by_loc: HashMap<(VerticalRank, usize), usize>,
+    pub sol_by_hop: HashMap<(VerticalRank, usize, V, V), usize>,
     pub width_by_loc: HashMap<LocIx, f64>,
-    pub width_by_hop: HashMap<(usize, usize, V, V), (f64, f64)>,
+    pub width_by_hop: HashMap<(VerticalRank, usize, V, V), (f64, f64)>,
 }
 
 /// ovr, ohr
-pub type LocIx = (usize, usize);
+pub type LocIx = (VerticalRank, usize);
 
 /// ovr, ohr -> loc
 pub type LocNodeMap<V> = HashMap<LocIx, Loc<V, V>>;
 
 /// lvl -> (mhr, nhr)
-pub type HopMap = BTreeMap<usize, (usize, usize)>;
+pub type HopMap = BTreeMap<VerticalRank, (usize, usize)>;
 
 pub fn calculate_sols<'s, V>(
-    solved_locs: &'s BTreeMap<usize, BTreeMap<usize, usize>>,
+    solved_locs: &'s BTreeMap<VerticalRank, BTreeMap<usize, usize>>,
     loc_to_node: &'s HashMap<LocIx, Loc<V, V>>,
-    hops_by_level: &'s BTreeMap<usize, SortedVec<Hop<V>>>,
+    hops_by_level: &'s BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
     hops_by_edge: &'s BTreeMap<(V, V), HopMap>,
 ) -> LayoutProblem<V> where
     V: Clone + Debug + Display + Ord + Hash
@@ -737,7 +777,7 @@ pub fn calculate_sols<'s, V>(
             hops_by_edge.iter().map(|((vl, wl), hops)| {
                     #[allow(clippy::unwrap_used)] // an edge with no hops really should panic
                     let (lvl, (_mhr, nhr)) = hops.iter().rev().next().unwrap();
-                    (*nhr, std::usize::MAX, vl.clone(), wl.clone(), lvl+1)
+                    (*nhr, std::usize::MAX, vl.clone(), wl.clone(), *lvl+1)
             }) 
         )
         .enumerate()
@@ -762,7 +802,7 @@ pub struct LayoutSolution {
     pub ls: Vec<f64>,
     pub rs: Vec<f64>,
     pub ss: Vec<f64>,
-    pub ts: Vec<f64>,
+    pub ts: TiVec<VerticalRank, f64>,
 }
 
 pub fn position_sols<'s, V, E>(
@@ -770,8 +810,8 @@ pub fn position_sols<'s, V, E>(
     dag_map: &'s HashMap::<V, NodeIndex>,
     dag_edge_labels: &'s HashMap::<V, HashMap<V, HashMap<V, Vec<V>>>>,
     hops_by_edge: &'s BTreeMap<(V, V), HopMap>,
-    node_to_loc: &'s HashMap::<Loc<V, V>, (usize, usize)>,
-    solved_locs: &'s BTreeMap<usize, BTreeMap<usize, usize>>,
+    node_to_loc: &'s HashMap::<Loc<V, V>, LocIx>,
+    solved_locs: &'s BTreeMap<VerticalRank, BTreeMap<usize, usize>>,
     layout_problem: &'s LayoutProblem<V>,
 ) -> Result<LayoutSolution, Error> where 
     V: Clone + Debug + Display + Ord + Hash,
@@ -779,7 +819,7 @@ pub fn position_sols<'s, V, E>(
 {
     let LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop} = layout_problem;
 
-    let mut edge_label_heights = BTreeMap::<usize, usize>::new();
+    let mut edge_label_heights = BTreeMap::<VerticalRank, usize>::new();
     for (node, loc) in node_to_loc.iter() {
         let (ovr, _ohr) = loc;
         if let Loc::Node(vl) = node {
@@ -792,7 +832,7 @@ pub fn position_sols<'s, V, E>(
             }
         }
     }
-    let mut row_height_offsets = BTreeMap::<usize, f64>::new();
+    let mut row_height_offsets = BTreeMap::<VerticalRank, f64>::new();
     let mut cumulative_offset = 0.0;
     for (lvl, max_height) in edge_label_heights {
         row_height_offsets.insert(lvl, cumulative_offset);
@@ -828,7 +868,7 @@ pub fn position_sols<'s, V, E>(
         let mut cvec: Vec<&PyAny> = vec![];
         let mut obj = zero;
 
-        let root_n = sol_by_loc[&(0, 0)];
+        let root_n = sol_by_loc[&(VerticalRank(0), 0)];
         // cvec.push(eq(get(l,root_n)?, zero)?);
         // cvec.push(eq(get(r,root_n)?, one)?);
         obj = add(obj, mul(thousand, get(r, root_n)?)?)?;
@@ -870,7 +910,7 @@ pub fn position_sols<'s, V, E>(
                 v_dsts.sort_by_key(|dst| {
                     let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
                     let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                    (shr, -(svr as i32))
+                    (shr, -(svr.0 as i32))
                 });
                 let v_outs = v_dsts
                     .iter()
@@ -881,7 +921,7 @@ pub fn position_sols<'s, V, E>(
                 w_srcs.sort_by_key(|src| {
                     let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
                     let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                    (shr, -(svr as i32))
+                    (shr, -(svr.0 as i32))
                 });
                 let w_ins = w_srcs
                     .iter()
@@ -989,7 +1029,7 @@ pub fn position_sols<'s, V, E>(
             v_dsts.sort_by_key(|dst| {
                 let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
                 let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                (shr, -(svr as i32))
+                (shr, -(svr.0 as i32))
             });
             let v_outs = v_dsts
                 .iter()
@@ -1000,7 +1040,7 @@ pub fn position_sols<'s, V, E>(
             w_srcs.sort_by_key(|src| {
                 let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
                 let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                (shr, -(svr as i32))
+                (shr, -(svr.0 as i32))
             });
             let w_ins = w_srcs
                 .iter()
@@ -1017,7 +1057,7 @@ pub fn position_sols<'s, V, E>(
             let ln = sol_by_loc[&(*lvl, *mhr)];
             let rn = ln;
             let n = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
-            let nd = sol_by_hop[&(lvl+1, *nhr, vl.clone(), wl.clone())];
+            let nd = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
             let mut n = n;
             let mut nd = nd;
 
@@ -1078,7 +1118,7 @@ pub fn position_sols<'s, V, E>(
                 if i < hops.len() {
                     // s, t are really indexed by hops.
                     let n2 = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
-                    let nd2 = sol_by_hop[&(lvl+1, *nhr, vl.clone(), wl.clone())];
+                    let nd2 = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
                     n = n2;
                     nd = nd2;
                     obj = add(obj, mul(thousand, square(sub(get(s,n)?, get(s,nd)?)?)?)?)?;
@@ -1105,7 +1145,7 @@ pub fn position_sols<'s, V, E>(
                 let hopsl = &hops_by_edge[&(vll.clone(), wll.clone())];
                 #[allow(clippy::unwrap_used)]
                 let (lvll, (mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
-                let ndl = sol_by_hop[&(lvll+1, *nhrl, vll.clone(), wll.clone())];
+                let ndl = sol_by_hop[&(*lvll+1, *nhrl, vll.clone(), wll.clone())];
                 let percept_width_l = width_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())].1;
                 cvec.push(geq(get(s, nd)?, add(get(s, ndl)?, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?);
                 // eprintln!("s{} >= s{}+ε", nd, ndl);
@@ -1117,7 +1157,7 @@ pub fn position_sols<'s, V, E>(
                 let hopsr = &hops_by_edge[&(vlr.clone(), wlr.clone())];
                 #[allow(clippy::unwrap_used)]
                 let (lvlr, (mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
-                let ndr = sol_by_hop[&(lvlr+1, *nhrr, vlr.clone(), wlr.clone())];
+                let ndr = sol_by_hop[&(*lvlr+1, *nhrr, vlr.clone(), wlr.clone())];
                 let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
                 cvec.push(leq(get(s, nd)?, sub(sub(get(s, ndr)?, sep)?, as_constantf(percept_width + action_width_r)?)?)?);
                 // eprintln!("s{} <= s{}-ε", nd, ndr);
@@ -1160,7 +1200,7 @@ pub fn position_sols<'s, V, E>(
         // eprintln!("L: {:.2?}\n", lv);
         // eprintln!("R: {:.2?}\n", rv);
         // eprintln!("S: {:.2?}\n", sv);
-        let ts = row_height_offsets.values().copied().collect::<Vec<_>>();
+        let ts = row_height_offsets.values().copied().collect::<TiVec<VerticalRank, _>>();
 
         Ok(LayoutSolution{ls: lv.to_vec(), rs: rv.to_vec(), ss: sv.to_vec(), ts})
     });
@@ -1203,7 +1243,7 @@ mod tests {
         let roots = roots(&condensed)?;
 
         let paths_by_rank = rank(&condensed, &roots)?;
-        assert_eq!(paths_by_rank[&3][0], ("root", "af"));
+        assert_eq!(paths_by_rank[&VerticalRank(3)][0], ("root", "af"));
 
         let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
         let nv: Loc<&str, &str> = Loc::Node("e");

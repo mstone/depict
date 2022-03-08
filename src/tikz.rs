@@ -60,7 +60,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
         let lpos = ls[n];
         let rpos = rs[n];
 
-        let vpos = -1.5 * (*ovr as f64);
+        let vpos = -1.5 * (ovr.0 as f64);
         let hpos = 10.0 * ((lpos + rpos) / 2.0);
         let width = 10.0 * width_scale * (rpos - lpos);
 
@@ -148,7 +148,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
                 },
                 2 => {
                     let (lvl, (_mhr, nhr)) = hops.iter().next().unwrap();
-                    let (ovr, ohr) = (lvl+1, nhr);
+                    let (ovr, ohr) = (*lvl+1, nhr);
                     // BUG? -- intermediate node needs to be at aux_{ovr}_{ohr}?
                     println!(indoc!(r#"
                         \draw [rounded corners, {}] ($({}.south west)!{}!({}.south east)$) -- node[scale=0.8, anchor={}, fill=white, fill opacity = 0.8, text opacity = 1.0, draw, ultra thin] {{{}}} at ({},{}) -- ($({}.north west)!{}!({}.north east)$);"#),
@@ -166,14 +166,14 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
                     for (n, hop) in hops.iter().enumerate() {
                         if n < max_levels-1 {
                             let (lvl, (mhr, nhr)) = hop;
-                            let (ovr, ohr) = (lvl+1, nhr);
+                            let (ovr, ohr) = (*lvl+1, nhr);
                             // let (ovr, ohr) = (lvl, mhr);
                             println!("% HOP {} {:?}", n, hop);
                             print!(r#" -- (aux_{}_{}.center)"#, ovr, ohr);
                             if n == mid {
-                                mid_ovr = *lvl;
+                                mid_ovr = lvl.0;
                                 mid_ohr = *mhr;
-                                mid_ovrd = lvl+1;
+                                mid_ovrd = (*lvl+1).0;
                                 mid_ohrd = *nhr;
                             }
                         }
@@ -195,7 +195,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
         let lpos = ls[n];
         let rpos = rs[n];
 
-        let vpos = -1.5 * (*ovr as f64) + 0.5 - rng.gen_range(0.25..0.75);
+        let vpos = -1.5 * (ovr.0 as f64) + 0.5 - rng.gen_range(0.25..0.75);
         let hpos = 10.0 * ((lpos + rpos) / 2.0);
         let hposl = 10.0 * lpos;
         let hposr = 10.0 * rpos;
@@ -220,7 +220,7 @@ pub fn render(v: Vec<Fact>) -> Result<(), Error> {
         let spos = ss[*n];
 
         // let vpos = -1.5 * (*lvl as f64) - 0.5 + rng.gen_range(0.5..1.0);
-        let vpos = -1.5 * (*lvl as f64);
+        let vpos = -1.5 * (lvl.0 as f64);
         let hpos = 10.0 * (spos);// + rng.gen_range(0.0..0.25);
         
         println!(indoc!(r#"%\draw [fill, black] ({}, {}) circle (1pt);"#), hpos, vpos);
