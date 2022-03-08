@@ -68,7 +68,8 @@ fn draw(data: String) -> Result<(Option<usize>, f64, Vec<Node>), Error> {
 
     let mut layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
 
-    let char_width = 8.0;
+    let char_width = 8.67;
+    // let arrow_width = 20.0;
     let arrow_width = 40.0;
 
     {
@@ -95,19 +96,23 @@ fn draw(data: String) -> Result<(Option<usize>, f64, Vec<Node>), Error> {
             let cex = condensed.find_edge(condensed_vxmap[vl], condensed_vxmap[wl]).unwrap();
             let cew = condensed.edge_weight(cex).unwrap();
             for (vl, wl, ew) in cew.iter() {
-                let label_text = vert_edge_labels
+                let label_width = vert_edge_labels
                     .get(vl)
                     .and_then(|dsts| dsts
                         .get(wl)
                         .and_then(|rels| rels.get(ew)))
-                    .map(|v| v.join("\n"));
+                        .and_then(|labels| labels
+                            .iter()
+                            .map(|label| label.len())
+                            .max()
+                        );
     
                 match *ew {
                     "senses" => {
-                        percept_width = label_text.map(|label| arrow_width + char_width * label.len() as f64).unwrap_or(20.0);
+                        percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
                     }
-                    "action" => {
-                        action_width = label_text.map(|label| arrow_width + char_width * label.len() as f64).unwrap_or(20.0);
+                    "actuates" => {
+                        action_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
                     }
                     _ => {}
                 }
@@ -115,7 +120,9 @@ fn draw(data: String) -> Result<(Option<usize>, f64, Vec<Node>), Error> {
 
             for (lvl, (mhr, _nhr)) in hops.iter() {
                 width_by_hop.insert((*lvl, *mhr, vl, wl), (action_width, percept_width));
-                width_by_loc.insert((*lvl, *mhr), action_width + percept_width + arrow_width * 2.0);
+                if width_by_loc.get(&(*lvl, *mhr)).is_none() {
+                    width_by_loc.insert((*lvl, *mhr), action_width + percept_width);
+                }
             }
         }
     }
