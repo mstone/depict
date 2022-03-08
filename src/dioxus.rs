@@ -160,7 +160,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
     let LayoutSolution{ls, rs, ss, ts} = position_sols(vert, vert_vxmap, vert_edge_labels, hops_by_edge, node_to_loc, &solved_locs, &layout_problem)?;
 
-    let LayoutProblem{sol_by_loc, sol_by_hop, ..} = layout_problem;
+    let LayoutProblem{sol_by_loc, sol_by_hop, ..} = &layout_problem;
 
     let height_scale = 80.0;
     let vpad = 50.0;
@@ -293,8 +293,9 @@ fn draw(data: String) -> Result<Drawing, Error> {
         nodes})
 }
 
-pub fn render<P>(cx: Scope<P>, root_width: f64, mut nodes: Vec<Node>)-> Option<VNode> {
-    let viewbox_width = root_width;
+pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
+    let viewbox_width = drawing.viewbox_width;
+    let mut nodes = drawing.nodes;
     let viewbox_height = 768;
     let mut children = vec![];
     nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -414,12 +415,12 @@ computer thermostat car: set temperature / measure temperature
 pub struct AppProps {
     model_sender: Option<UnboundedSender<String>>,
     #[allow(clippy::type_complexity)]
-    drawing_receiver: Cell<Option<UnboundedReceiver<(Option<usize>, f64, Vec<Node>)>>>,
+    drawing_receiver: Cell<Option<UnboundedReceiver<Drawing>>>,
 }
 
 pub fn app(cx: Scope<AppProps>) -> Element {
     let model = use_state(&cx, || String::from(PLACEHOLDER));
-    let drawing = use_state(&cx, || (None, 1024.0, Vec::new()));
+    let drawing = use_state(&cx, Drawing::default);
 
     use_coroutine(&cx, |_: UnboundedReceiver<()>| {
         let receiver = cx.props.drawing_receiver.take();
@@ -438,12 +439,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     // let window = use_window(&cx);
     // window.devtool();
 
-    let nodes = render(cx, drawing.1, drawing.2.to_owned());
+    let nodes = render(cx, drawing.get().clone());
     let model_sender = cx.props.model_sender.clone().unwrap();
     model_sender.unbounded_send(model.get().clone()).unwrap();
 
-    let viewbox_width = drawing.1;
-    let crossing_number = cx.render(rsx!(match drawing.0 {
+    let viewbox_width = drawing.get().viewbox_width;
+    let crossing_number = cx.render(rsx!(match drawing.get().crossing_number {
         Some(cn) => rsx!(span { "{cn}" }),
         None => rsx!(div{}),
     }));
@@ -529,7 +530,7 @@ pub fn main() -> io::Result<()> {
         .init();
 
     let (model_sender, mut model_receiver) = futures_channel::mpsc::unbounded::<String>();
-    let (drawing_sender, drawing_receiver) = futures_channel::mpsc::unbounded::<(Option<usize>, f64, Vec<Node>)>();
+    let (drawing_sender, drawing_receiver) = futures_channel::mpsc::unbounded::<Drawing>();
 
     std::thread::spawn(move || {
         tokio::runtime::Builder::new_multi_thread()
@@ -549,9 +550,9 @@ pub fn main() -> io::Result<()> {
                         };
                         let model = model.clone();
                         match nodes {
-                            Ok(Ok(Drawing{crossing_number, viewbox_width, nodes})) => {
+                            Ok(Ok(drawing)) => {
                                 prev_model = Some(model);
-                                drawing_sender.unbounded_send((crossing_number, viewbox_width, nodes)).unwrap();
+                                drawing_sender.unbounded_send(drawing).unwrap();
                             },
                             Ok(Err(err)) => {
                                 if let Some(st) = err.span_trace() {

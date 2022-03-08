@@ -654,7 +654,7 @@ pub fn minimize_edge_crossing<'s, V>(
     Ok((crossing_number, solved_locs))
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LocRow<V: Clone + Debug + Display + Ord + Hash> {
     pub ovr: usize,
     pub ohr: usize,
@@ -663,7 +663,7 @@ pub struct LocRow<V: Clone + Debug + Display + Ord + Hash> {
     pub n: usize,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct HopRow<V: Clone + Debug + Display + Ord + Hash> {
     pub lvl: usize,
     pub mhr: usize,
@@ -673,6 +673,7 @@ pub struct HopRow<V: Clone + Debug + Display + Ord + Hash> {
     pub n: usize,
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct LayoutProblem<V: Clone + Debug + Display + Ord + Hash> {
     pub all_locs: Vec<LocRow<V>>,
     pub all_hops0: Vec<HopRow<V>>,
