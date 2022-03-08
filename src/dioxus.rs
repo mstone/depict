@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::io;
 use std::panic::catch_unwind;
 
@@ -6,16 +7,23 @@ use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
 
 use dioxus_desktop::tao::dpi::{LogicalSize};
+// use dioxus_desktop::use_window;
 
 use diagrams::parser::{parse};
 use diagrams::graph_drawing::*;
 
 use color_spantrace::colorize;
-// use dioxus_desktop::use_window;
+
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::StreamExt;
+
 use indoc::indoc;
+
 use inflector::Inflector;
+
+use petgraph::Graph;
+use petgraph::dot::Dot;
+
 use tracing::{instrument, event, Level};
 use tracing_error::{InstrumentResult, ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -38,12 +46,18 @@ pub enum Node {
 pub struct Drawing {
     pub crossing_number: Option<usize>,
     pub viewbox_width: f64,
+    pub layout_debug: Graph<String, String>,
     pub nodes: Vec<Node>,
 }
 
 impl Default for Drawing {
     fn default() -> Self {
-        Self { crossing_number: Default::default(), viewbox_width: 1024.0, nodes: Default::default() }
+        Self { 
+            crossing_number: Default::default(), 
+            viewbox_width: 1024.0, 
+            layout_debug: Default::default(),
+            nodes: Default::default() 
+        }
     }
 }
 
@@ -161,6 +175,33 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let LayoutSolution{ls, rs, ss, ts} = position_sols(vert, vert_vxmap, vert_edge_labels, hops_by_edge, node_to_loc, &solved_locs, &layout_problem)?;
 
     let LayoutProblem{sol_by_loc, sol_by_hop, ..} = &layout_problem;
+
+    let mut layout_debug = Graph::<String, String>::new();
+    let mut layout_debug_vxmap = HashMap::new();
+    for ((lvl, mhr), loc) in loc_to_node.iter() {
+        let sol = sol_by_loc[&(*lvl, *mhr)];
+        match loc {
+            Loc::Node(wl) => {
+                let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("NODE LOC {sol}"));
+                layout_debug.add_edge(solx, solx, format!("{lvl}, {mhr}, wl: {wl}"));
+            },
+            Loc::Hop(_lvl, vl, wl) => {
+                let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP LOC {sol}"));
+                layout_debug.add_edge(solx, solx, format!("{lvl}, {mhr}, vl: {vl}, wl: {wl}"));
+            }
+        }
+    }
+    for ((vl, wl), hops) in hops_by_edge.iter() {
+        for (lvl, (mhr, nhr)) in hops.iter() {
+            let sol = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
+            let sold = sol_by_hop[&(lvl+1, *nhr, *vl, *wl)];
+            let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sol}"));
+            let soldx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sold}"));
+            layout_debug.add_edge(solx, soldx, format!("{vl}, {wl}, {lvl}, {mhr}, {nhr}"));
+        }
+    }
+    let layout_debug_dot = Dot::new(&layout_debug);
+    event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
 
     let height_scale = 80.0;
     let vpad = 50.0;
@@ -290,7 +331,9 @@ fn draw(data: String) -> Result<Drawing, Error> {
     Ok(Drawing{
         crossing_number: Some(crossing_number), 
         viewbox_width: root_width, 
-        nodes})
+        layout_debug,
+        nodes
+    })
 }
 
 pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
