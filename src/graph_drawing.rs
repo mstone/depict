@@ -87,20 +87,20 @@ pub fn get_value(a: &PyAny) -> PyResult<PyReadonlyArray1<f64>> {
 }
 
 #[derive(Debug)]
-pub struct Vcg<'s> {
+pub struct Vcg<V, E> {
     /// vert is a vertical constraint graph. 
     /// Edges (v, w) in vert indicate that v needs to be placed above w. 
     /// Node weights must be unique.
-    pub vert: Graph<&'s str, &'s str>,
+    pub vert: Graph<V, E>,
 
     /// vert_vxmap maps node weights in vert to node-indices.
-    pub vert_vxmap: HashMap<&'s str, NodeIndex>,
+    pub vert_vxmap: HashMap<V, NodeIndex>,
 
     /// vert_node_labels maps node weights in vert to display names/labels.
-    pub vert_node_labels: HashMap<&'s str, String>,
+    pub vert_node_labels: HashMap<V, String>,
 
     /// vert_edge_labels maps (v,w,rel) node weight pairs to display edge labels.
-    pub vert_edge_labels: HashMap<&'s str, HashMap<&'s str, HashMap<&'s str, Vec<&'s str>>>>,
+    pub vert_edge_labels: HashMap<V, HashMap<V, HashMap<V, Vec<E>>>>,
 }
 
 #[non_exhaustive]
@@ -192,7 +192,7 @@ impl ExtractSpanTrace for Error {
 }
 
 #[instrument()]
-pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<'s>, Error> {
+pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<&'s str, &'s str>, Error> {
     event!(Level::TRACE, "CALCULATE_VCG");
     let vert = Graph::<&str, &str>::new();
     let vert_vxmap = HashMap::<&str, NodeIndex>::new();
@@ -626,12 +626,13 @@ pub fn calculate_locs_and_hops<'s, V, E>(
 
 /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
 #[allow(clippy::type_complexity)]
-pub fn minimize_edge_crossing<'s, V>(
-    locs_by_level: &'s BTreeMap<VerticalRank, TiVec<OriginalHorizontalRank, OriginalHorizontalRank>>,
-    hops_by_level: &'s BTreeMap<VerticalRank, SortedVec<Hop<V>>>
+pub fn minimize_edge_crossing<V>(
+    placement: &Placement<V>
 ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
     V: Clone + Debug + Display + Ord + Hash
 {
+    let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
+    
     if hops_by_level.is_empty() {
         return Ok((0, BTreeMap::new()));
     }
@@ -799,6 +800,36 @@ pub fn minimize_edge_crossing<'s, V>(
     }
     event!(Level::DEBUG, ?solved_locs, "SOLVED_LOCS");
 
+    let mut layout_debug = Graph::<String, String>::new();
+    let mut layout_debug_vxmap = HashMap::new();
+    for ((vl, wl), hops) in hops_by_edge.iter() {
+        // if *vl == "root" { continue; }
+        let vn = node_to_loc[&Loc::Node(vl.clone())];
+        let wn = node_to_loc[&Loc::Node(wl.clone())];
+        let vshr = solved_locs[&vn.0][&vn.1];
+        let wshr = solved_locs[&wn.0][&wn.1];
+
+        let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
+        let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
+
+        for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
+            let shr = solved_locs[lvl][mhr];
+            let shrd = solved_locs[&(*lvl+1)][nhr];
+            let lvl1 = *lvl+1;
+            let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
+            let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
+            layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
+            if n == 0 {
+                layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
+            }
+            if n == hops.len()-1 {
+                layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
+            }
+        }
+    }
+    let layout_debug_dot = Dot::new(&layout_debug);
+    event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
+
     Ok((crossing_number, solved_locs))
 }
 
@@ -937,17 +968,16 @@ pub struct LayoutSolution {
 }
 
 pub fn position_sols<'s, V, E>(
-    dag: &'s Graph<V, E>,
-    dag_map: &'s HashMap::<V, NodeIndex>,
-    dag_edge_labels: &'s HashMap::<V, HashMap<V, HashMap<V, Vec<V>>>>,
-    hops_by_edge: &'s BTreeMap<(V, V), HopMap>,
-    node_to_loc: &'s HashMap::<Loc<V, V>, LocIx>,
+    vcg: &'s Vcg<V, E>,
+    placement: &'s Placement<V>,
     solved_locs: &'s BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
     layout_problem: &'s LayoutProblem<V>,
 ) -> Result<LayoutSolution, Error> where 
-    V: Clone + Debug + Display + Ord + Hash,
+    V: Clone + Debug + Display + Hash + Ord + PartialEq,
     E: Clone + Debug
 {
+    let Vcg{vert: dag, vert_vxmap: dag_map, vert_node_labels: _, vert_edge_labels: dag_edge_labels, ..} = vcg;
+    let Placement{hops_by_edge, loc_to_node, node_to_loc, ..} = placement;
     let LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop} = layout_problem;
 
     let mut edge_label_heights = BTreeMap::<VerticalRank, usize>::new();
@@ -1103,47 +1133,44 @@ pub fn position_sols<'s, V, E>(
                 event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
                 // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
             }
-            
-            // if loc.is_node() { 
-                // eprint!("C0: ");
-                cvec.push(geq(l.get(n)?, l.get(root_n)?)?);
-                cvec.push(leq(r.get(n)?, r.get(root_n)?)?);
 
-                // eprint!("r{} >= l{} + S, ", n, n);
-                event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
-                cvec.push(geq(r.get(n)?, add(l.get(n)?, as_constantf(min_width as f64)?)?)?);
-                // WIDTH
-                obj = add(obj, sub(r.get(n)?, l.get(n)?)?)?;
-                if shr > SolvedHorizontalRank(0) {
-                    #[allow(clippy::unwrap_used)]
-                    let ohrp = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap());
-                    let np = sol_by_loc[&(ovr, ohrp)];
-                    let shrp = locs[&ohrp];
-                    cvec.push(geq(l.get(n)?, add(r.get(np)?, sep)?)?);
-                    // eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
-                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, "X1: l{n} >= r{np} + ε")
-                }
-                if shr < SolvedHorizontalRank(locs.len()-1) {
-                    #[allow(clippy::unwrap_used)]
-                    let ohrn = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap());
-                    let nn = sol_by_loc[&(ovr,ohrn)];
-                    let shrn = locs[&(ohrn)];
-                    cvec.push(leq(r.get(n)?, sub(l.get(nn)?, sep)?)?);
-                    // eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
-                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, "X2: r{n} <= l{nn} - ε")
-                }
-                // if shr == locs.len()-1 {
-                    // cvec.push(leq(r.get(n)?, one)?);
-                    // eprint!("r{:?} <= 1", (ovr, ohr, shr, n));
-                // }
-                // eprintln!();  
-            // }
+            if let Loc::Hop(_lvl, vl, wl) = loc {
+                let ns = sol_by_hop[&(ovr, ohr, vl.clone(), wl.clone())];
+                cvec.push(leq(l.get(n)?, s.get(ns)?)?);
+                cvec.push(leq(s.get(ns)?, r.get(n)?)?);
+                event!(Level::TRACE, ?loc, %n, %min_width, "X3: l{n} <= s{ns} <= r{n}");
+            }
+        
+            cvec.push(geq(l.get(n)?, l.get(root_n)?)?);
+            cvec.push(leq(r.get(n)?, r.get(root_n)?)?);
+
+            event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
+            cvec.push(geq(r.get(n)?, add(l.get(n)?, as_constantf(min_width as f64)?)?)?);
+
+            // WIDTH
+            obj = add(obj, sub(r.get(n)?, l.get(n)?)?)?;
+            if shr > SolvedHorizontalRank(0) {
+                #[allow(clippy::unwrap_used)]
+                let ohrp = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap());
+                let np = sol_by_loc[&(ovr, ohrp)];
+                let shrp = locs[&ohrp];
+                cvec.push(geq(l.get(n)?, add(r.get(np)?, sep)?)?);
+                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, "X1: l{n} >= r{np} + ε")
+            }
+            if shr < SolvedHorizontalRank(locs.len()-1) {
+                #[allow(clippy::unwrap_used)]
+                let ohrn = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap());
+                let nn = sol_by_loc[&(ovr,ohrn)];
+                let shrn = locs[&(ohrn)];
+                cvec.push(leq(r.get(n)?, sub(l.get(nn)?, sep)?)?);
+                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, "X2: r{n} <= l{nn} - ε")
+            }
         }
         for HopRow{lvl, mhr, nhr, vl, wl, ..} in all_hops0.iter() {
             let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
             let w_ers = dag.edges_directed(dag_map[wl], Incoming).into_iter().collect::<Vec<_>>();
 
-            let mut v_dsts = v_ers
+            let v_outs = v_ers
                 .iter()
                 .map(|er| { 
                     dag
@@ -1153,7 +1180,8 @@ pub fn position_sols<'s, V, E>(
                 })
                 .into_iter()
                 .collect::<Result<Vec<_>, PyErr>>()?;
-            let mut w_srcs = w_ers
+
+            let w_ins = w_ers
                 .iter()
                 .map(|er| { 
                     dag
@@ -1164,35 +1192,54 @@ pub fn position_sols<'s, V, E>(
                 .into_iter()
                 .collect::<Result<Vec<_>, PyErr>>()?;
 
-            v_dsts.sort(); v_dsts.dedup();
-            v_dsts.sort_by_key(|dst| {
-                let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
-                let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                // (shr, -(svr.0 as i32))
-                (svr, shr)
-            });
-            let v_outs = v_dsts
-                .iter()
-                .map(|dst| { (vl.clone(), dst.clone()) })
-                .collect::<Vec<_>>();
+            let mut v_outs = v_outs.into_iter().map(|dst| {
+                let hops = &hops_by_edge[&(vl.clone(), dst.clone())];
+                let (mhr, adj_loc) = hops
+                    .get(lvl)
+                    .map_or_else(
+                        || {
+                            let outer_hops = &hops_by_edge[&(vl.clone(), wl.clone())];
+                            let vohr = node_to_loc[&Loc::Node(wl.clone())].1;
+                            event!(Level::ERROR, %lvl, %vl, %dst, %wl, ?mhr, ?nhr, ?vohr, ?hops, ?outer_hops, "V_OUTS INDEXING ERROR");
+                            (vohr, &loc_to_node[&(*lvl, vohr)])
+                        },
+                        |hop| (hop.0, &loc_to_node[&(*lvl, hop.0)])
+                    );
+                (lvl, mhr, adj_loc)
+            }).collect::<Vec<_>>();
 
-            w_srcs.sort(); w_srcs.dedup();
-            w_srcs.sort_by_key(|src| {
-                let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
-                let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                (shr, -(svr.0 as i32))
+            v_outs.sort_by_key(|(ovr, ohr, _loc)| {
+                let (svr, shr) = (ovr, solved_locs[ovr][ohr]);
+                (*svr, shr)
             });
-            let w_ins = w_srcs
-                .iter()
-                .map(|src| { (src.clone(), wl.clone()) })
-                .collect::<Vec<_>>();
+
+            let mut w_ins = w_ins.into_iter().map(|src| {
+                let hops = &hops_by_edge[&(src.clone(), wl.clone())];
+                let (mhr, adj_loc) = hops
+                    .get(lvl)
+                    .map_or_else(
+                        || {
+                            let outer_hops = &hops_by_edge[&(vl.clone(), wl.clone())];
+                            let wohr = node_to_loc[&Loc::Node(vl.clone())].1;
+                            event!(Level::ERROR, %lvl, %vl, %src, %wl, ?mhr, ?nhr, ?wohr, ?hops, ?outer_hops, "W_INS INDEXING ERROR");
+                            (wohr, &loc_to_node[&(*lvl, wohr)])
+                        },
+                        |hop| (hop.0, &loc_to_node[&(*lvl, hop.0)])
+                    );
+                (lvl, mhr, adj_loc)
+                
+            }).collect::<Vec<_>>();
+
+            w_ins.sort_by_key(|(ovr, ohr, _loc)| {
+                let (svr, shr) = (ovr, solved_locs[ovr][ohr]);
+                (*svr, shr)
+            });
 
             #[allow(clippy::unwrap_used)]
-            let bundle_src_pos = v_outs.iter().position(|e| { *e == (vl.clone(), wl.clone()) }).unwrap();
+            let bundle_src_pos = v_outs.iter().position(|(l, m, _loc)| { (*l,m) == (lvl, mhr) }).unwrap();
             #[allow(clippy::unwrap_used)]
-            let bundle_dst_pos = w_ins.iter().position(|e| { *e == (vl.clone(), wl.clone()) }).unwrap();
+            let bundle_dst_pos = w_ins.iter().position(|(l, m, _loc)| { (*l,m) == (lvl, mhr) }).unwrap();
             let hops = &hops_by_edge[&(vl.clone(), wl.clone())];
-            // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
             
             let ln = sol_by_loc[&(*lvl, *mhr)];
             let rn = ln;
@@ -1215,44 +1262,48 @@ pub fn position_sols<'s, V, E>(
 
             // ORDER, SYMMETRY
             if bundle_src_pos == 0 {
-                // eprint!("C1: ");
                 cvec.push(geq(s.get(n)?, add(l.get(ln)?, add(sep, as_constantf(action_width)?)?)?)?);
                 cvec.push(geq(s.get(n)?, add(l.get(root_n)?, as_constantf(action_width)?)?)?);
-                // eprintln!("s{} >= l{}+ε", n, ln);
                 event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %n, %ln, %action_width, "C1: s{n} >= l{ln}+ε + {action_width:.0?}");
                 obj = add(obj, square(sub(s.get(n)?, l.get(ln)?)?)?)?;
             }
             if bundle_src_pos > 0 {
-                // eprint!("C2: ");
-                let (vll, wll) = &v_outs[bundle_src_pos-1];
-                let hopsl = &hops_by_edge[&(vll.clone(), wll.clone())];
-                #[allow(clippy::unwrap_used)]
-                let (lvll, (mhrl, _nhrl)) = hopsl.iter().next().unwrap();
-                let nl = sol_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())];
-                let percept_width_l = width_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())].1;
-                // cvec.push(geq(s.get(n)?, add(s.get(nl)?, add(sep, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?)?);
-                cvec.push(geq(s.get(n)?, add(s.get(nl)?, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?);
-                // eprintln!("s{} >= s{}+ε", n, nl);
-                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vll, %wll, %lvll, %mhrl, %n, %nl, %action_width, %percept_width_l, "C2: s{n} >= s{nl}+ε + {action_width:.0?} + {percept_width_l:.0?}");
-                obj = add(obj, square(sub(s.get(nl)?, s.get(n)?)?)?)?;
+                let (lvll, mhrl, loc_l) = &v_outs[bundle_src_pos-1];
+                match loc_l {
+                    Loc::Node(vll) => {
+                        let nl = sol_by_loc[&(**lvll, *mhrl)];
+                        cvec.push(geq(s.get(n)?, add(r.get(nl)?, add(sep, as_constantf(action_width)?)?)?)?);
+                        obj = add(obj, square(sub(r.get(nl)?, s.get(n)?)?)?)?;
+                        event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vll, %lvll, %mhrl, %n, %nl, %action_width, "C2n: s{n} >= r{nl}+ε + {action_width:.0?}");
+                    },
+                    Loc::Hop(_, vll, wll) => {
+                        let nl = sol_by_hop[&(**lvll, *mhrl, vll.clone(), wll.clone())];
+                        let percept_width_l = width_by_hop[&(**lvll, *mhrl, vll.clone(), wll.clone())].1;
+                        cvec.push(geq(s.get(n)?, add(s.get(nl)?, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?);
+                        obj = add(obj, square(sub(s.get(nl)?, s.get(n)?)?)?)?;
+                        event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vll, %wll, %lvll, %mhrl, %n, %nl, %action_width, %percept_width_l, "C2h: s{n} >= s{nl}+ε + {action_width:.0?} + {percept_width_l:.0?}");
+                    },
+                }
             }
             if bundle_src_pos < v_outs.len()-1 {
-                // eprint!("C3: ");
-                let (vlr, wlr) = &v_outs[bundle_src_pos+1];
-                let hopsr = &hops_by_edge[&(vlr.clone(), wlr.clone())];
-                #[allow(clippy::unwrap_used)]
-                let (lvlr, (mhrr, _nhrr)) = hopsr.iter().next().unwrap();
-                let nr = sol_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())];
-                let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
-                cvec.push(leq(s.get(n)?, sub(s.get(nr)?, add(sep, as_constantf(percept_width + action_width_r)?)?)?)?);
-                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vlr, %wlr, %lvlr, %mhrr, %n, %nr, %percept_width, %action_width_r, "C3: s{n} <= s{nr}-ε - {percept_width:.0?} - {action_width_r:.0?}");
-                // eprintln!("s{} <= s{}-ε", n, nr);
+                let (lvlr, mhrr, loc_r) = &v_outs[bundle_src_pos+1];
+                match loc_r {
+                    Loc::Node(vlr) => {
+                        let nr = sol_by_loc[&(**lvlr, *mhrr)];
+                        // cvec.push(leq(s.get(n)?, sub(l.get(nr)?, add(sep, as_constantf(percept_width)?)?)?)?);
+                        event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vlr, %lvlr, %mhrr, %n, %nr, %percept_width, "C3n: s{n} <= l{nr}-ε - {percept_width:.0?}");
+                    },
+                    Loc::Hop(_, vlr, wlr) => {
+                        let nr = sol_by_hop[&(**lvlr, *mhrr, vlr.clone(), wlr.clone())];
+                        let action_width_r = width_by_hop[&(**lvlr, *mhrr, vlr.clone(), wlr.clone())].1;
+                        cvec.push(leq(s.get(n)?, sub(s.get(nr)?, add(sep, as_constantf(percept_width + action_width_r)?)?)?)?);
+                        event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vlr, %wlr, %lvlr, %mhrr, %n, %nr, %percept_width, %action_width_r, "C3h: s{n} <= s{nr}-ε - {percept_width:.0?} - {action_width_r:.0?}");
+                    },
+                }
             }
             if bundle_src_pos == v_outs.len()-1 {
-                // eprint!("C4: ");
                 cvec.push(leq(s.get(n)?, sub(r.get(rn)?, add(sep, as_constantf(percept_width)?)?)?)?);
-                cvec.push(leq(s.get(n)?, sub(r.get(root_n)?, as_constantf(percept_width)?)?)?); // why does this make things infeasible????
-                // eprintln!("s{} <= r{}-ε", n, rn);
+                cvec.push(leq(s.get(n)?, sub(r.get(root_n)?, as_constantf(percept_width)?)?)?);
                 event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %rn, %percept_width, "C4: s{n} <= r{rn}-ε - {percept_width:.0?}");
                 obj = add(obj, square(sub(s.get(n)?, r.get(rn)?)?)?)?;
             }
@@ -1277,43 +1328,48 @@ pub fn position_sols<'s, V, E>(
             
             // ORDER, SYMMETRY
             if bundle_dst_pos == 0 {
-                // eprint!("C5: ");
                 cvec.push(geq(s.get(nd)?, add(l.get(lnd)?, add(sep, as_constantf(action_width)?)?)?)?);
-                // cvec.push(geq(s.get(nd)?, add(l.get(root_n)?, as_constantf(action_width)?)?)?);
-                // eprintln!("s{} >= l{}+ε", nd, lnd);
+                cvec.push(geq(s.get(nd)?, add(l.get(root_n)?, as_constantf(action_width)?)?)?);
                 event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %nd, %lnd, %action_width, "C5: s{nd} >= l{lnd}+ε + {action_width:.0?}");
                 obj = add(obj, square(sub(s.get(nd)?, l.get(lnd)?)?)?)?;
             }
             if bundle_dst_pos > 0 {
-                // eprint!("C6: ");
-                let (vll, wll) = &w_ins[bundle_dst_pos-1];
-                let hopsl = &hops_by_edge[&(vll.clone(), wll.clone())];
-                #[allow(clippy::unwrap_used)]
-                let (lvll, (mhrl, nhrl)) = hopsl.iter().rev().next().unwrap();
-                let ndl = sol_by_hop[&(*lvll+1, *nhrl, vll.clone(), wll.clone())];
-                let percept_width_l = width_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())].1;
-                cvec.push(geq(s.get(nd)?, add(s.get(ndl)?, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?);
-                // eprintln!("s{} >= s{}+ε", nd, ndl);
-                event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %vll, %wll, %lvll, %mhrl, %nd, %ndl, %action_width, %percept_width_l, "C6: s{nd} >= s{ndl}+ε + {action_width:.0?} + {percept_width_l:.0?}");
-                obj = add(obj, square(sub(s.get(ndl)?, s.get(nd)?)?)?)?;
+                let (lvll, mhrl, loc_l) = &v_outs[bundle_dst_pos-1];
+                match loc_l {
+                    Loc::Node(vll) => {
+                        let ndl = sol_by_loc[&(**lvll, *mhrl)];
+                        cvec.push(geq(s.get(n)?, add(r.get(ndl)?, add(sep, as_constantf(action_width)?)?)?)?);
+                        obj = add(obj, square(sub(r.get(ndl)?, s.get(n)?)?)?)?;
+                        event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %vll, %lvll, %mhrl, %n, %ndl, %action_width, "C6n: s{n} >= r{ndl}+ε + {action_width:.0?}");
+                    },
+                    Loc::Hop(_, vll, wll) => {
+                        let ndl = sol_by_hop[&(**lvll, *mhrl, vll.clone(), wll.clone())];
+                        let percept_width_l = width_by_hop[&(**lvll, *mhrl, vll.clone(), wll.clone())].1;
+                        cvec.push(geq(s.get(n)?, add(s.get(ndl)?, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?);
+                        obj = add(obj, square(sub(s.get(ndl)?, s.get(n)?)?)?)?;
+                        event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %vll, %wll, %lvll, %mhrl, %n, %ndl, %action_width, %percept_width_l, "C6h: s{n} >= s{ndl}+ε + {action_width:.0?} + {percept_width_l:.0?}");
+                    },
+                }
             }
             if bundle_dst_pos < w_ins.len()-1 {
-                // eprint!("C7: ");
-                let (vlr, wlr) = &w_ins[bundle_dst_pos+1];
-                let hopsr = &hops_by_edge[&(vlr.clone(), wlr.clone())];
-                #[allow(clippy::unwrap_used)]
-                let (lvlr, (mhrr, nhrr)) = hopsr.iter().rev().next().unwrap();
-                let ndr = sol_by_hop[&(*lvlr+1, *nhrr, vlr.clone(), wlr.clone())];
-                let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
-                cvec.push(leq(s.get(nd)?, sub(sub(s.get(ndr)?, sep)?, as_constantf(percept_width + action_width_r)?)?)?);
-                // eprintln!("s{} <= s{}-ε", nd, ndr);
-                event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %vlr, %wlr, %lvlr, %mhrr, %nd, %ndr, %percept_width, %action_width_r, "C7: s{nd} <= s{ndr}-ε - {action_width_r:.0?} - {percept_width:.0?}");
+                let (lvlr, mhrr, loc_r) = &v_outs[bundle_dst_pos+1];
+                match loc_r {
+                    Loc::Node(vlr) => {
+                        let ndr = sol_by_loc[&(**lvlr, *mhrr)];
+                        // cvec.push(leq(s.get(n)?, sub(l.get(ndr)?, add(sep, as_constantf(percept_width)?)?)?)?);
+                        event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %vlr, %lvlr, %mhrr, %n, %ndr, %percept_width, "C7n: s{n} <= l{ndr}-ε - {percept_width:.0?}");
+                    },
+                    Loc::Hop(_, vlr, wlr) => {
+                        let ndr = sol_by_hop[&(**lvlr, *mhrr, vlr.clone(), wlr.clone())];
+                        let action_width_r = width_by_hop[&(**lvlr, *mhrr, vlr.clone(), wlr.clone())].1;
+                        cvec.push(leq(s.get(n)?, sub(s.get(ndr)?, add(sep, as_constantf(percept_width + action_width_r)?)?)?)?);
+                        event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %vlr, %wlr, %lvlr, %mhrr, %n, %ndr, %percept_width, %action_width_r, "C7h: s{n} <= s{ndr}-ε - {percept_width:.0?} - {action_width_r:.0?}");
+                    },
+                }
             }
             if bundle_dst_pos == w_ins.len()-1 {
-                // eprint!("C8: ");
                 cvec.push(leq(s.get(nd)?, sub(r.get(rnd)?, add(sep, as_constantf(percept_width)?)?)?)?);
-                // cvec.push(geq(s.get(nd)?, sub(r.get(root_n)?, as_constantf(percept_width)?)?)?);
-                // eprintln!("s{} <= r{}-ε", nd, rnd);
+                cvec.push(leq(s.get(nd)?, sub(r.get(root_n)?, as_constantf(percept_width)?)?)?);
                 event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %nd, %rnd, %percept_width, "C8: s{nd} <= r{rnd}-ε - {percept_width:.0?}");
                 obj = add(obj, square(sub(s.get(nd)?, r.get(rnd)?)?)?)?;
             }
@@ -1396,7 +1452,8 @@ mod tests {
         let paths_by_rank = rank(&condensed, &roots)?;
         assert_eq!(paths_by_rank[&VerticalRank(3)][0], ("root", "af"));
 
-        let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+        let placement = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+        let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
         let nv: Loc<&str, &str> = Loc::Node("e");
         let nw: Loc<&str, &str> = Loc::Node("af");
         let np: Loc<&str, &str> = Loc::Node("c");
@@ -1421,7 +1478,7 @@ mod tests {
         assert_eq!(np2, &np);
         assert_eq!(nq2, &nq);
         
-        let (crossing_number, solved_locs) = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
+        let (crossing_number, solved_locs) = minimize_edge_crossing(&placement)?;
         assert_eq!(crossing_number, 0);
         // let sv = solved_locs[&2][&1];
         // let sw = solved_locs[&3][&0];
@@ -1438,7 +1495,7 @@ mod tests {
         assert_eq!(sv, sw); // uncrossing happened
         assert_eq!(sp, sq);
 
-        let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
+        let layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
         let all_locs = &layout_problem.all_locs;
         let lrv = all_locs.iter().find(|lr| lr.loc == nv).unwrap();
         let lrw = all_locs.iter().find(|lr| lr.loc == nw).unwrap();

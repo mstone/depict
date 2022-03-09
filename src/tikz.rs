@@ -20,25 +20,27 @@ pub fn tikz_escape(s: &str) -> String {
 
 pub fn render(v: Vec<Fact>) -> Result<(), Error> {
 
-    let Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels} = calculate_vcg(&v)?;
+    let vcg = calculate_vcg(&v)?;
+    let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
     eprintln!("VERT: {:?}", Dot::new(&vert));
 
-    let Cvcg{condensed, condensed_vxmap: _} = condense(&vert)?;
+    let Cvcg{condensed, condensed_vxmap: _} = condense(vert)?;
 
     let roots = roots(&condensed)?;
 
     let paths_by_rank = rank(&condensed, &roots)?;
 
-    let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+    let placement = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+    let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
 
     // std::process::exit(0);
 
-    let (_crossing_number, solved_locs) = minimize_edge_crossing(&locs_by_level, &hops_by_level)?;
+    let (_crossing_number, solved_locs) = minimize_edge_crossing(&placement)?;
     
-    let layout_problem = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
+    let layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
 
-    let LayoutSolution{ls, rs, ss, ..} = position_sols(&vert, &vert_vxmap, &vert_edge_labels, &hops_by_edge, &node_to_loc, &solved_locs, &layout_problem)?;
+    let LayoutSolution{ls, rs, ss, ..} = position_sols(&vcg, &placement, &solved_locs, &layout_problem)?;
 
     let LayoutProblem{all_locs, sol_by_loc, sol_by_hop, ..} = layout_problem;
 

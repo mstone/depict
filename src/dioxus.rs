@@ -62,7 +62,7 @@ impl Default for Drawing {
 }
 
 fn estimate_widths<'s>(
-    vcg: &Vcg, 
+    vcg: &Vcg<&'s str, &'s str>, 
     cvcg: &Cvcg<&'s str, &'s str>,
     placement: &Placement<&'s str>,
     layout_problem: &mut LayoutProblem<&'s str>
@@ -145,7 +145,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
         .1;
 
     let vcg = calculate_vcg(&v)?;
-    let Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels} = &vcg;
+    let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
     // diagrams::graph_drawing::draw(v, &mut vcg)?;
 
@@ -164,45 +164,20 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let paths_by_rank = rank(condensed, &roots)?;
 
     let placement = calculate_locs_and_hops(condensed, &paths_by_rank)?;
-    let Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc} = &placement;
+    let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
 
-    let (crossing_number, solved_locs) = minimize_edge_crossing(locs_by_level, hops_by_level)?;
+    let (crossing_number, solved_locs) = minimize_edge_crossing(&placement)?;
 
     let mut layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
 
     estimate_widths(&vcg, &cvcg, &placement, &mut layout_problem)?;
 
-    let LayoutSolution{ls, rs, ss, ts} = position_sols(vert, vert_vxmap, vert_edge_labels, hops_by_edge, node_to_loc, &solved_locs, &layout_problem)?;
+    let LayoutSolution{ls, rs, ss, ts} = position_sols(&vcg, &placement, &solved_locs, &layout_problem)?;
 
     let LayoutProblem{sol_by_loc, sol_by_hop, ..} = &layout_problem;
 
     let mut layout_debug = Graph::<String, String>::new();
     let mut layout_debug_vxmap = HashMap::new();
-    // for ((lvl, mhr), loc) in loc_to_node.iter() {
-    //     let sol = sol_by_loc[&(*lvl, *mhr)];
-    //     let shr = solved_locs[lvl][mhr];
-    //     match loc {
-    //         Loc::Node(wl) => {
-    //             let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("NODE LOC {sol}"));
-    //             layout_debug.add_edge(solx, solx, format!("lvl={lvl}, mhr={mhr}, shr={shr}, wl={wl}"));
-    //         },
-    //         Loc::Hop(_lvl, vl, wl) => {
-    //             let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP LOC {sol}"));
-    //             layout_debug.add_edge(solx, solx, format!("lvl={lvl}, mhr={mhr}, shr={shr}, vl={vl}, wl={wl}"));
-    //         }
-    //     }
-    // }
-    // for ((vl, wl), hops) in hops_by_edge.iter() {
-    //     for (lvl, (mhr, nhr)) in hops.iter() {
-    //         let sol = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
-    //         let sold = sol_by_hop[&(*lvl+1, *nhr, *vl, *wl)];
-    //         let shr = solved_locs[lvl][mhr];
-    //         let shrd = solved_locs[&(*lvl+1)][nhr];
-    //         let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sol}"));
-    //         let soldx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sold}"));
-    //         layout_debug.add_edge(solx, soldx, format!("vl={vl}, wl={wl}, lvl={lvl}, mhr={mhr}, shr={shr}, nhr={nhr}, shrd={shrd}"));
-    //     }
-    // }
     for ((vl, wl), hops) in hops_by_edge.iter() {
         if *vl == "root" { continue; }
         let vn = node_to_loc[&Loc::Node(*vl)];
