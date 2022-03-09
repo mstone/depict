@@ -178,26 +178,54 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
     let mut layout_debug = Graph::<String, String>::new();
     let mut layout_debug_vxmap = HashMap::new();
-    for ((lvl, mhr), loc) in loc_to_node.iter() {
-        let sol = sol_by_loc[&(*lvl, *mhr)];
-        match loc {
-            Loc::Node(wl) => {
-                let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("NODE LOC {sol}"));
-                layout_debug.add_edge(solx, solx, format!("{lvl}, {mhr}, wl: {wl}"));
-            },
-            Loc::Hop(_lvl, vl, wl) => {
-                let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP LOC {sol}"));
-                layout_debug.add_edge(solx, solx, format!("{lvl}, {mhr}, vl: {vl}, wl: {wl}"));
-            }
-        }
-    }
+    // for ((lvl, mhr), loc) in loc_to_node.iter() {
+    //     let sol = sol_by_loc[&(*lvl, *mhr)];
+    //     let shr = solved_locs[lvl][mhr];
+    //     match loc {
+    //         Loc::Node(wl) => {
+    //             let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("NODE LOC {sol}"));
+    //             layout_debug.add_edge(solx, solx, format!("lvl={lvl}, mhr={mhr}, shr={shr}, wl={wl}"));
+    //         },
+    //         Loc::Hop(_lvl, vl, wl) => {
+    //             let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP LOC {sol}"));
+    //             layout_debug.add_edge(solx, solx, format!("lvl={lvl}, mhr={mhr}, shr={shr}, vl={vl}, wl={wl}"));
+    //         }
+    //     }
+    // }
+    // for ((vl, wl), hops) in hops_by_edge.iter() {
+    //     for (lvl, (mhr, nhr)) in hops.iter() {
+    //         let sol = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
+    //         let sold = sol_by_hop[&(*lvl+1, *nhr, *vl, *wl)];
+    //         let shr = solved_locs[lvl][mhr];
+    //         let shrd = solved_locs[&(*lvl+1)][nhr];
+    //         let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sol}"));
+    //         let soldx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sold}"));
+    //         layout_debug.add_edge(solx, soldx, format!("vl={vl}, wl={wl}, lvl={lvl}, mhr={mhr}, shr={shr}, nhr={nhr}, shrd={shrd}"));
+    //     }
+    // }
     for ((vl, wl), hops) in hops_by_edge.iter() {
-        for (lvl, (mhr, nhr)) in hops.iter() {
-            let sol = sol_by_hop[&(*lvl, *mhr, *vl, *wl)];
-            let sold = sol_by_hop[&(*lvl+1, *nhr, *vl, *wl)];
-            let solx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sol}"));
-            let soldx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("HOP {sold}"));
-            layout_debug.add_edge(solx, soldx, format!("{vl}, {wl}, {lvl}, {mhr}, {nhr}"));
+        if *vl == "root" { continue; }
+        let vn = node_to_loc[&Loc::Node(*vl)];
+        let wn = node_to_loc[&Loc::Node(*wl)];
+        let vshr = solved_locs[&vn.0][&vn.1];
+        let wshr = solved_locs[&wn.0][&wn.1];
+
+        let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
+        let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
+
+        for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
+            let shr = solved_locs[lvl][mhr];
+            let shrd = solved_locs[&(*lvl+1)][nhr];
+            let lvl1 = *lvl+1;
+            let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
+            let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
+            layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
+            if n == 0 {
+                layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
+            }
+            if n == hops.len()-1 {
+                layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
+            }
         }
     }
     let layout_debug_dot = Dot::new(&layout_debug);
