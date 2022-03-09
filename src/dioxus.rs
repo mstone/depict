@@ -448,12 +448,17 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
 }
 
 const PLACEHOLDER: &str = indoc!("
-driver wheel car: turn / wheel angle
-driver accel car: accelerate / pedal position
-driver brakes car: brake /  pedal position
-driver screen computer: press screen / read display
-computer thermostat car: set temperature / measure temperature
+a b c
+a b d
+a c
+a d
 ");
+// driver wheel car: turn / wheel angle
+// driver accel car: accelerate / pedal position
+// driver brakes car: brake /  pedal position
+// driver screen computer: press screen / read display
+// computer thermostat car: set temperature / measure temperature
+// ");
 
 pub struct AppProps {
     model_sender: Option<UnboundedSender<String>>,

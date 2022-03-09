@@ -480,7 +480,7 @@ pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s Sort
             .iter()
             .filter_map(|(wgt, vl, wl)| {
                 if *wgt <= 0 && roots.contains(vl) {
-                    Some((-(*wgt) as usize, vl.clone(), wl.clone()))
+                    Some((VerticalRank(-(*wgt) as usize), vl.clone(), wl.clone()))
                 } else {
                     None
                 }
@@ -492,7 +492,7 @@ pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s Sort
     let mut paths_by_rank = BTreeMap::new();
     for (wgt, vx, wx) in paths_from_roots.iter() {
         paths_by_rank
-            .entry(VerticalRank(*wgt))
+            .entry(*wgt)
             .or_insert_with(SortedVec::new)
             .insert((vx.clone(), wx.clone()));
     }
@@ -859,8 +859,15 @@ pub fn calculate_sols<'s, V>(
         .collect::<Vec<_>>();
 
     let mut sol_by_loc = HashMap::new();
-    for LocRow{ovr, ohr, shr: _, loc: _, n} in all_locs.iter() {
+    let mut sol_by_loc2 = HashMap::<LocIx, Vec<_>>::new();
+    for LocRow{ovr, ohr, shr, loc, n} in all_locs.iter() {
         sol_by_loc.insert((*ovr, *ohr), *n);
+        sol_by_loc2.entry((*ovr, *ohr)).or_default().push((shr, loc, *n))
+    }
+    for (loc, duplications) in sol_by_loc2.iter() {
+        if duplications.len() > 1 {
+            event!(Level::ERROR, ?loc, ?duplications, "all_locs DUPLICATION");
+        }
     }
 
     let all_hops0 = hops_by_level
@@ -884,8 +891,8 @@ pub fn calculate_sols<'s, V>(
         .chain(
             hops_by_edge.iter().map(|((vl, wl), hops)| {
                     #[allow(clippy::unwrap_used)] // an edge with no hops really should panic
-                    let (lvl, (_mhr, nhr)) = hops.iter().rev().next().unwrap();
-                    (*nhr, OriginalHorizontalRank(std::usize::MAX), vl.clone(), wl.clone(), *lvl+1)
+                    let (lvl, (mhr, nhr)) = hops.iter().rev().next().unwrap();
+                    (*nhr, OriginalHorizontalRank(std::usize::MAX - mhr.0), vl.clone(), wl.clone(), *lvl+1)
             }) 
         )
         .enumerate()
@@ -895,8 +902,24 @@ pub fn calculate_sols<'s, V>(
         .collect::<Vec<_>>();
     
     let mut sol_by_hop = HashMap::new();
-    for HopRow{lvl, mhr, nhr: _, vl, wl, n} in all_hops.iter() {
+    let mut sol_by_hop2 = HashMap::<(VerticalRank, OriginalHorizontalRank, OriginalHorizontalRank), Vec<_>>::new();
+    let mut sol_by_hop3 = HashMap::<(VerticalRank, OriginalHorizontalRank, OriginalHorizontalRank), Vec<_>>::new();
+    for HopRow{lvl, mhr, nhr, vl, wl, n} in all_hops.iter() {
         sol_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), *n);
+        sol_by_hop2.entry((*lvl, *mhr, *nhr)).or_default().push((vl.clone(), wl.clone(), *nhr, *n));
+    }
+    for HopRow{lvl, mhr, nhr, vl, wl, n} in all_hops0.iter() {
+        sol_by_hop3.entry((*lvl, *mhr, *nhr)).or_default().push((vl.clone(), wl.clone(), *nhr, *n));
+    }
+    for (loc, duplications) in sol_by_hop2.iter() {
+        if duplications.len() > 1 {
+            event!(Level::ERROR, ?loc, ?duplications, "all_hops DUPLICATION");
+        }
+    }
+    for (loc, duplications) in sol_by_hop3.iter() {
+        if duplications.len() > 1 {
+            event!(Level::ERROR, ?loc, ?duplications, "all_hops0 DUPLICATION");
+        }
     }
 
     let width_by_loc = HashMap::new();
@@ -992,6 +1015,7 @@ pub fn position_sols<'s, V, E>(
             let n = sol_by_loc[&(ovr, ohr)];
             let min_width = *width_by_loc.get(&(ovr, ohr))
                 .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>(format!("missing node width: {ovr}, {ohr}")))?;
+            let mut min_width = min_width.round() as usize;
 
             if let Loc::Node(vl) = loc {
                 let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
@@ -1073,36 +1097,40 @@ pub fn position_sols<'s, V, E>(
 
                 let in_width = in_width.round() as usize;
                 let out_width = out_width.round() as usize;
-                let orig_width = min_width.round() as usize;
+                let orig_width = min_width;
                 // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
-                let min_width = max(orig_width, max(in_width, out_width));
+                min_width = max(orig_width, max(in_width, out_width));
                 event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
                 // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
             }
+            
             // if loc.is_node() { 
                 // eprint!("C0: ");
                 cvec.push(geq(l.get(n)?, l.get(root_n)?)?);
                 cvec.push(leq(r.get(n)?, r.get(root_n)?)?);
 
                 // eprint!("r{} >= l{} + S, ", n, n);
-                cvec.push(geq(r.get(n)?, add(l.get(n)?, as_constantf(min_width)?)?)?);
+                event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
+                cvec.push(geq(r.get(n)?, add(l.get(n)?, as_constantf(min_width as f64)?)?)?);
                 // WIDTH
                 obj = add(obj, sub(r.get(n)?, l.get(n)?)?)?;
                 if shr > SolvedHorizontalRank(0) {
                     #[allow(clippy::unwrap_used)]
                     let ohrp = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap());
                     let np = sol_by_loc[&(ovr, ohrp)];
-                    // let _shrp = locs[&ohrp];
+                    let shrp = locs[&ohrp];
                     cvec.push(geq(l.get(n)?, add(r.get(np)?, sep)?)?);
                     // eprint!("l{:?} >= r{:?}, ", (ovr, ohr, shr, n), (ovr, ohrp, shrp, np));
+                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, "X1: l{n} >= r{np} + ε")
                 }
                 if shr < SolvedHorizontalRank(locs.len()-1) {
                     #[allow(clippy::unwrap_used)]
                     let ohrn = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap());
                     let nn = sol_by_loc[&(ovr,ohrn)];
-                    // let _shrn = locs[&(ohr+1)];
+                    let shrn = locs[&(ohrn)];
                     cvec.push(leq(r.get(n)?, sub(l.get(nn)?, sep)?)?);
                     // eprint!("r{:?} <= l{:?}, ", (ovr, ohr, shr, n), (ovr, ohrn, shrn, nn));
+                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, "X2: r{n} <= l{nn} - ε")
                 }
                 // if shr == locs.len()-1 {
                     // cvec.push(leq(r.get(n)?, one)?);
@@ -1140,7 +1168,8 @@ pub fn position_sols<'s, V, E>(
             v_dsts.sort_by_key(|dst| {
                 let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
                 let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                (shr, -(svr.0 as i32))
+                // (shr, -(svr.0 as i32))
+                (svr, shr)
             });
             let v_outs = v_dsts
                 .iter()
@@ -1171,6 +1200,8 @@ pub fn position_sols<'s, V, E>(
             let nd = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
             let mut n = n;
             let mut nd = nd;
+            let shr = solved_locs[lvl][mhr];
+            let shrd = solved_locs[&(*lvl+1)][nhr];
 
             let (action_width, percept_width) = {
                 #[allow(clippy::unwrap_used)]
@@ -1180,13 +1211,15 @@ pub fn position_sols<'s, V, E>(
             let action_width = *action_width;
             let percept_width = *percept_width;
 
+            event!(Level::TRACE, %vl, %wl, %lvl, %shr, %shrd, %bundle_src_pos, %bundle_dst_pos, ?v_outs, ?w_ins, %ln, %rn , %n, %nd, %action_width, %percept_width, ?hops, "POS HOP");
+
             // ORDER, SYMMETRY
             if bundle_src_pos == 0 {
                 // eprint!("C1: ");
                 cvec.push(geq(s.get(n)?, add(l.get(ln)?, add(sep, as_constantf(action_width)?)?)?)?);
                 cvec.push(geq(s.get(n)?, add(l.get(root_n)?, as_constantf(action_width)?)?)?);
                 // eprintln!("s{} >= l{}+ε", n, ln);
-                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %ln, %action_width, "C1");
+                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %n, %ln, %action_width, "C1: s{n} >= l{ln}+ε + {action_width:.0?}");
                 obj = add(obj, square(sub(s.get(n)?, l.get(ln)?)?)?)?;
             }
             if bundle_src_pos > 0 {
@@ -1200,7 +1233,7 @@ pub fn position_sols<'s, V, E>(
                 // cvec.push(geq(s.get(n)?, add(s.get(nl)?, add(sep, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?)?);
                 cvec.push(geq(s.get(n)?, add(s.get(nl)?, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?);
                 // eprintln!("s{} >= s{}+ε", n, nl);
-                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vll, %wll, %lvll, %mhrl, %n, %nl, %action_width, %percept_width_l, "C2");
+                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vll, %wll, %lvll, %mhrl, %n, %nl, %action_width, %percept_width_l, "C2: s{n} >= s{nl}+ε + {action_width:.0?} + {percept_width_l:.0?}");
                 obj = add(obj, square(sub(s.get(nl)?, s.get(n)?)?)?)?;
             }
             if bundle_src_pos < v_outs.len()-1 {
@@ -1212,7 +1245,7 @@ pub fn position_sols<'s, V, E>(
                 let nr = sol_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())];
                 let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
                 cvec.push(leq(s.get(n)?, sub(s.get(nr)?, add(sep, as_constantf(percept_width + action_width_r)?)?)?)?);
-                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vlr, %wlr, %lvlr, %mhrr, %n, %nr, %percept_width, %action_width_r, "C3");
+                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %vlr, %wlr, %lvlr, %mhrr, %n, %nr, %percept_width, %action_width_r, "C3: s{n} <= s{nr}-ε - {percept_width:.0?} - {action_width_r:.0?}");
                 // eprintln!("s{} <= s{}-ε", n, nr);
             }
             if bundle_src_pos == v_outs.len()-1 {
@@ -1220,7 +1253,7 @@ pub fn position_sols<'s, V, E>(
                 cvec.push(leq(s.get(n)?, sub(r.get(rn)?, add(sep, as_constantf(percept_width)?)?)?)?);
                 cvec.push(leq(s.get(n)?, sub(r.get(root_n)?, as_constantf(percept_width)?)?)?); // why does this make things infeasible????
                 // eprintln!("s{} <= r{}-ε", n, rn);
-                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %rn, %percept_width, "C4");
+                event!(Level::TRACE, %vl, %wl, %bundle_src_pos, %rn, %percept_width, "C4: s{n} <= r{rn}-ε - {percept_width:.0?}");
                 obj = add(obj, square(sub(s.get(n)?, r.get(rn)?)?)?)?;
             }
             
@@ -1248,6 +1281,7 @@ pub fn position_sols<'s, V, E>(
                 cvec.push(geq(s.get(nd)?, add(l.get(lnd)?, add(sep, as_constantf(action_width)?)?)?)?);
                 // cvec.push(geq(s.get(nd)?, add(l.get(root_n)?, as_constantf(action_width)?)?)?);
                 // eprintln!("s{} >= l{}+ε", nd, lnd);
+                event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %nd, %lnd, %action_width, "C5: s{nd} >= l{lnd}+ε + {action_width:.0?}");
                 obj = add(obj, square(sub(s.get(nd)?, l.get(lnd)?)?)?)?;
             }
             if bundle_dst_pos > 0 {
@@ -1260,6 +1294,7 @@ pub fn position_sols<'s, V, E>(
                 let percept_width_l = width_by_hop[&(*lvll, *mhrl, vll.clone(), wll.clone())].1;
                 cvec.push(geq(s.get(nd)?, add(s.get(ndl)?, add(sep, as_constantf(action_width + percept_width_l)?)?)?)?);
                 // eprintln!("s{} >= s{}+ε", nd, ndl);
+                event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %vll, %wll, %lvll, %mhrl, %nd, %ndl, %action_width, %percept_width_l, "C6: s{nd} >= s{ndl}+ε + {action_width:.0?} + {percept_width_l:.0?}");
                 obj = add(obj, square(sub(s.get(ndl)?, s.get(nd)?)?)?)?;
             }
             if bundle_dst_pos < w_ins.len()-1 {
@@ -1272,12 +1307,14 @@ pub fn position_sols<'s, V, E>(
                 let action_width_r = width_by_hop[&(*lvlr, *mhrr, vlr.clone(), wlr.clone())].0;
                 cvec.push(leq(s.get(nd)?, sub(sub(s.get(ndr)?, sep)?, as_constantf(percept_width + action_width_r)?)?)?);
                 // eprintln!("s{} <= s{}-ε", nd, ndr);
+                event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %vlr, %wlr, %lvlr, %mhrr, %nd, %ndr, %percept_width, %action_width_r, "C7: s{nd} <= s{ndr}-ε - {action_width_r:.0?} - {percept_width:.0?}");
             }
             if bundle_dst_pos == w_ins.len()-1 {
                 // eprint!("C8: ");
                 cvec.push(leq(s.get(nd)?, sub(r.get(rnd)?, add(sep, as_constantf(percept_width)?)?)?)?);
                 // cvec.push(geq(s.get(nd)?, sub(r.get(root_n)?, as_constantf(percept_width)?)?)?);
                 // eprintln!("s{} <= r{}-ε", nd, rnd);
+                event!(Level::TRACE, %vl, %wl, %bundle_dst_pos, %nd, %rnd, %percept_width, "C8: s{nd} <= r{rnd}-ε - {percept_width:.0?}");
                 obj = add(obj, square(sub(s.get(nd)?, r.get(rnd)?)?)?)?;
             }
         }
