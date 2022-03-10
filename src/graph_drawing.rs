@@ -1236,6 +1236,11 @@ pub fn position_sols<'s, V, E>(
             cvec.push(geq(s.get(n)?, add(l.get(root_n)?, as_constantf(action_width)?)?)?);
             cvec.push(leq(s.get(n)?, add(r.get(root_n)?, as_constantf(percept_width)?)?)?);
 
+            if !terminal {
+                let nd = sol_by_hop[&((*lvl+1), *nhr, (*wl).clone(), (*vl).clone())];
+                obj = add(obj, mul(thousand, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
+            }
+
             event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
             if let Some(Loc2::Node{sol: nd, ..}) = node {
                 #[allow(clippy::if_same_then_else)]
