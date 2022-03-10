@@ -1247,6 +1247,66 @@ pub fn position_sols<'s, V, E>(
             if let Some(Loc2::Node{sol: nd, ..}) = node {
                 cvec.push(geq(s.get(n)?, add(l.get(*nd)?, add(sep, as_constantf(action_width)?)?)?)?);
                 cvec.push(leq(s.get(n)?, sub(r.get(*nd)?, add(sep, as_constantf(percept_width)?)?)?)?);
+
+                if terminal {
+                    let mut terminal_hops = all_objects
+                        .iter()
+                        .filter(|obj| { matches!(obj, Loc2::Hop{loc: (_, onhr), ..} if onhr.0 > num_objects) })
+                        .collect::<Vec<_>>();
+                        #[allow(clippy::unit_return_expecting_ord)]
+
+                    terminal_hops.sort_by_key(|hop| {
+                        if let Loc2::Hop{shr: tshr, ..} = hop {
+                            tshr
+                        } else {
+                            unreachable!();
+                        }
+                    });
+
+                    for (ox, obj) in terminal_hops.iter().enumerate() {
+                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = obj {
+                            let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
+                            if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
+                                let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
+                                cvec.push(leq(s.get(*onl)?, sub(s.get(*on)?, add(sep, as_constantf(owidth_l.1 + owidth.0)?)?)?)?);
+                            }
+                            if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
+                                let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
+                                cvec.push(leq(s.get(*on)?, sub(s.get(*onr)?, add(sep, as_constantf(owidth_r.0 + owidth.1)?)?)?)?);
+                            }
+                        }
+                    }
+                } else {
+                    let mut initial_hops = all_objects
+                        .iter()
+                        .filter(|obj| { matches!(obj, Loc2::Hop{loc: (_, onhr), ..} if onhr.0 <= num_objects) })
+                        .collect::<Vec<_>>();
+
+                    #[allow(clippy::unit_return_expecting_ord)]
+                    initial_hops.sort_by_key(|hop| {
+                        if let Loc2::Hop{vl: hvl, wl: hwl, ..} = hop {
+                            #[allow(clippy::unwrap_used)]
+                            let (hvr, (_hmhr, hnhr)) = hops_by_edge[&((*hvl).clone(), (*hwl).clone())].iter().next().unwrap();
+                            solved_locs[&(*hvr+1)][hnhr]
+                        } else {
+                            unreachable!();
+                        }
+                    });
+
+                    for (ox, obj) in initial_hops.iter().enumerate() {
+                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = obj {
+                            let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
+                            if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
+                                let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
+                                cvec.push(leq(s.get(*onl)?, sub(s.get(*on)?, add(sep, as_constantf(owidth_l.1 + owidth.0)?)?)?)?);
+                            }
+                            if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
+                                let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
+                                cvec.push(leq(s.get(*on)?, sub(s.get(*onr)?, add(sep, as_constantf(owidth_r.0 + owidth.1)?)?)?)?);
+                            }
+                        }
+                    }
+                }
             }
         
             let same_height_objects = &level_to_object[lvl];
@@ -1277,7 +1337,6 @@ pub fn position_sols<'s, V, E>(
                         },
                         Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
                             let (action_width_r, _percept_width_r) = width_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_width);
-                            cvec.push(leq(s.get(n)?, sub(s.get(*rn)?, add(dsep, as_constantf(percept_width + action_width_r)?)?)?)?);
                         },
                     }
                 }
