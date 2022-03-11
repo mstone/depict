@@ -67,7 +67,8 @@ fn estimate_widths<'s>(
     placement: &Placement<&'s str>,
     layout_problem: &mut LayoutProblem<&'s str>
 ) -> Result<(), Error> {
-    let char_width = 8.67;
+    // let char_width = 8.67;
+    let char_width = 9.0;
     let arrow_width = 40.0;
     
     let vert_node_labels = &vcg.vert_node_labels;

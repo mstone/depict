@@ -1,0 +1,13 @@
+[package]
+name = "web"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.2", features = ["js"] }
+diagrams = { path = "..", default-features = false }
+dioxus = { version = "0.2", features = ["web"] }
+log = "0.4.6"
+wasm-bindgen = "0.2"
+wasm-logger = "0.2.0"

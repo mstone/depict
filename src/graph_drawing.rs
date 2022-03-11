@@ -1016,7 +1016,7 @@ pub fn position_sols<'s, V, E>(
         let square = |a: &PyAny| {sq.call1((a,))};
         let as_constant = |a: i32| { constant.call1((a.into_py(py),)) };
         let as_constantf = |a: f64| { constant.call1((a.into_py(py),)) };
-        let _hundred: &PyAny = as_constant(100)?;
+        let hundred: &PyAny = as_constant(100)?;
         let thousand: &PyAny = as_constant(1000)?;
         let _ten: &PyAny = as_constant(10)?;
         let _one: &PyAny = as_constant(1)?;
@@ -1027,8 +1027,8 @@ pub fn position_sols<'s, V, E>(
         let r = TiPyAny::<LocSol>(r, PhantomData);
         let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
         let s = TiPyAny::<HopSol>(s, PhantomData);
-        let sep = as_constantf(40.0)?;
-        let dsep = as_constantf(80.0)?;
+        let sep = as_constantf(20.0)?;
+        let dsep = as_constantf(40.0)?;
         let _tenf = as_constantf(10.0)?;
         let mut cvec: Vec<&PyAny> = vec![];
         let mut obj = zero;
@@ -1240,7 +1240,7 @@ pub fn position_sols<'s, V, E>(
 
             if !terminal {
                 let nd = sol_by_hop[&((*lvl+1), *nhr, (*vl).clone(), (*wl).clone())];
-                obj = add(obj, mul(thousand, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
+                obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
             }
 
             event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
@@ -1263,16 +1263,24 @@ pub fn position_sols<'s, V, E>(
                         }
                     });
 
-                    for (ox, obj) in terminal_hops.iter().enumerate() {
-                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = obj {
+                    for (ox, hop) in terminal_hops.iter().enumerate() {
+                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
                             let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
                                 cvec.push(leq(s.get(*onl)?, sub(s.get(*on)?, add(sep, as_constantf(owidth_l.1 + owidth.0)?)?)?)?);
+                                obj = add(obj, square(sub(s.get(*on)?, s.get(*onl)?)?)?)?;
+                            }
+                            else {
+                                obj = add(obj, square(sub(l.get(*nd)?, s.get(*on)?)?)?)?;
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
                                 cvec.push(leq(s.get(*on)?, sub(s.get(*onr)?, add(sep, as_constantf(owidth_r.0 + owidth.1)?)?)?)?);
+                                obj = add(obj, square(sub(s.get(*onr)?, s.get(*on)?)?)?)?;
+                            }
+                            else {
+                                obj = add(obj, square(sub(r.get(*nd)?, s.get(*on)?)?)?)?;
                             }
                         }
                     }
@@ -1293,16 +1301,23 @@ pub fn position_sols<'s, V, E>(
                         }
                     });
 
-                    for (ox, obj) in initial_hops.iter().enumerate() {
-                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = obj {
+                    for (ox, hop) in initial_hops.iter().enumerate() {
+                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
                             let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
                                 cvec.push(leq(s.get(*onl)?, sub(s.get(*on)?, add(sep, as_constantf(owidth_l.1 + owidth.0)?)?)?)?);
+                                obj = add(obj, square(sub(s.get(*on)?, s.get(*onl)?)?)?)?;
+                            } else {
+                                obj = add(obj, square(sub(l.get(*nd)?, s.get(*on)?)?)?)?;
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
                                 cvec.push(leq(s.get(*on)?, sub(s.get(*onr)?, add(sep, as_constantf(owidth_r.0 + owidth.1)?)?)?)?);
+                                obj = add(obj, square(sub(s.get(*onr)?, s.get(*on)?)?)?)?;
+                            }
+                            else {
+                                obj = add(obj, square(sub(r.get(*nd)?, s.get(*on)?)?)?)?;
                             }
                         }
                     }

@@ -32,12 +32,13 @@
             };
 
             buildInputs = [
-              rust-bin.stable.latest.rust
+              (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
               texlive.combined.scheme-full
               (python39.withPackages (ps: with ps; [cvxpy]))
             ] ++ (if isShell then [
               entr
               wasm-pack
+              trunk
             ] else [
               (import-cargo.builders.importCargo {
                 lockFile = ./Cargo.lock;

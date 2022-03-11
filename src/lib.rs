@@ -141,4 +141,5 @@ pub mod parser {
     }
 }
 
+#[cfg(all(feature="minion", feature="cvxpy"))]
 pub mod graph_drawing;

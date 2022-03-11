@@ -5,23 +5,26 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["minion", "cvxpy", "gui"]
+minion = []
+cvxpy = ["numpy", "pyo3"]
+gui = ["dioxus", "dioxus/desktop", "dioxus-desktop", "dioxus-desktop/devtool", "tao"]
+
 [dependencies]
 auto_enums = "0.7"
 color-spantrace = "0.2"
 derive_more = "0.99"
-dioxus = { path = "../dioxus", features = [ "desktop", "ssr", "web" ] }
+
 futures = "0.3"
 indoc = "1.0"
 Inflector = "0.11"
 is_variant = "1.0"
 ndarray = "0.15"
 nom = "7"
-numpy = "0.15"
 petgraph = "0.6"
-pyo3 = "0.15.1"
 rand = "0.8"
 sorted-vec = "0.7"
-tao = "0.6"
 thiserror = "1.0"
 tokio = "1"
 tracing = "0.1"
@@ -29,10 +32,14 @@ tracing-error = { version = "0.2", features = [ "traced-error" ] }
 tracing-subscriber = "0.3"
 typed-index-collections = "3.0"
 
-[dependencies.dioxus-desktop]
-git = "https://github.com/dioxuslabs/dioxus"
-features = [ "devtool" ]
+# cvxpy
+numpy = { version = "0.15", optional = true }
+pyo3 = { version = "0.15.1", optional = true }
 
+# gui
+dioxus = { path = "../dioxus", optional = true }
+dioxus-desktop = { git = "https://github.com/dioxuslabs/dioxus", optional = true }
+tao = { version = "0.6", optional = true }
 
 [target.'cfg(target_os="macos")'.dependencies]
 block = "0.1.6"
