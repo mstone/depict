@@ -1,17 +1,30 @@
 use dioxus::prelude::*;
-use dioxus::hooks::suspense::use_suspense;
 
 use reqwasm::http::{Request, Response};
 
 async fn click() -> Response {
-    Request::get("/hello")
+    Request::get("/api/hello")
         .send()
         .await
         .unwrap()
 }
 
 fn app(cx: Scope) -> Element {
-    let hello = use_suspense(cx, || click(), |cx, res| match res { Ok(res) => rsx!(cx, "OK"), _ => rsx!(cx, "ERR"), });
+
+    let hello = use_future(&cx, (), |_| async move { 
+        let res = click().await.text().await;
+        match res { 
+            Ok(res) => Some(res), 
+            _ => None, 
+        } 
+    });
+
+    let hello = match hello.value() {
+        Some(Some(res)) => cx.render(rsx!(div { "{res}" })),
+        Some(None) => cx.render(rsx!("loading...")),
+        _ => cx.render(rsx!("loading2...")),
+    };
+
     cx.render(rsx! (
         div {
             style: "text-align: center;",
