@@ -9,5 +9,6 @@ getrandom = { version = "0.2", features = ["js"] }
 diagrams = { path = "..", default-features = false }
 dioxus = { version = "0.2", features = ["web"] }
 log = "0.4.6"
+reqwasm = "0.4"
 wasm-bindgen = "0.2"
 wasm-logger = "0.2.0"

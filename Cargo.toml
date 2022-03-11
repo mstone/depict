@@ -6,10 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["minion", "cvxpy", "gui"]
+default = ["minion", "cvxpy", "gui", "server"]
 minion = []
 cvxpy = ["numpy", "pyo3"]
 gui = ["dioxus", "dioxus/desktop", "dioxus-desktop", "dioxus-desktop/devtool", "tao"]
+server = ["actix-web"]
 
 [dependencies]
 auto_enums = "0.7"
@@ -41,6 +42,9 @@ dioxus = { path = "../dioxus", optional = true }
 dioxus-desktop = { git = "https://github.com/dioxuslabs/dioxus", optional = true }
 tao = { version = "0.6", optional = true }
 
+# server
+actix-web = { version = "4", optional = true }
+
 [target.'cfg(target_os="macos")'.dependencies]
 block = "0.1.6"
 cocoa = "0.24.0"
@@ -64,6 +68,10 @@ path = "src/parse.rs"
 [[bin]]
 name = "objc"
 path = "src/objc.rs"
+
+[[bin]]
+name = "server"
+path = "src/server.rs"
 
 [[bin]]
 name = "tikz"
