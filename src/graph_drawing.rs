@@ -977,8 +977,8 @@ pub fn position_sols<'s, V, E>(
     E: Clone + Debug
 {
     let Vcg{vert: dag, vert_vxmap: dag_map, vert_node_labels: _, vert_edge_labels: dag_edge_labels, ..} = vcg;
-    let Placement{hops_by_edge, loc_to_node, node_to_loc, locs_by_level, ..} = placement;
-    let LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop} = layout_problem;
+    let Placement{hops_by_edge, node_to_loc, ..} = placement;
+    let LayoutProblem{all_locs, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop, ..} = layout_problem;
 
     let mut edge_label_heights = BTreeMap::<VerticalRank, usize>::new();
     for (node, loc) in node_to_loc.iter() {
@@ -1009,18 +1009,22 @@ pub fn position_sols<'s, V, E>(
     let res: PyResult<LayoutSolution> = Python::with_gil(|py| {
         let cp = PyModule::import(py, "cvxpy")?;
         let var = cp.getattr("Variable")?;
-        let sq = cp.getattr("abs")?;
+        let sq = cp.getattr("square")?;
+        let abs = cp.getattr("abs")?;
         let constant = cp.getattr("Constant")?;
         let problem = cp.getattr("Problem")?;
         let minimize = cp.getattr("Minimize")?;
         let square = |a: &PyAny| {sq.call1((a,))};
+        let absv = |a: &PyAny| {abs.call1((a,))};
         let as_constant = |a: i32| { constant.call1((a.into_py(py),)) };
         let as_constantf = |a: f64| { constant.call1((a.into_py(py),)) };
         let hundred: &PyAny = as_constant(100)?;
         let thousand: &PyAny = as_constant(1000)?;
-        let _ten: &PyAny = as_constant(10)?;
+        let ten: &PyAny = as_constant(10)?;
         let _one: &PyAny = as_constant(1)?;
+        let _two: &PyAny = as_constant(2)?;
         let zero: &PyAny = as_constant(0)?;
+        let symmetry_cost: &PyAny = as_constantf(1.0)?;
         let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
         let l = TiPyAny::<LocSol>(l, PhantomData);
         let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
@@ -1036,7 +1040,7 @@ pub fn position_sols<'s, V, E>(
         let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
         // cvec.push(eq(l.get(root_n)?, zero)?);
         // cvec.push(eq(r.get(root_n)?, one)?);
-        obj = add(obj, mul(thousand, r.get(root_n)?)?)?;
+        obj = add(obj, r.get(root_n)?)?;
 
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
         enum Loc2<V> {
@@ -1269,7 +1273,7 @@ pub fn position_sols<'s, V, E>(
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
                                 cvec.push(leq(s.get(*onl)?, sub(s.get(*on)?, add(sep, as_constantf(owidth_l.1 + owidth.0)?)?)?)?);
-                                obj = add(obj, square(sub(s.get(*on)?, s.get(*onl)?)?)?)?;
+                                obj = add(obj, mul(symmetry_cost, square(sub(s.get(*on)?, s.get(*onl)?)?)?)?)?;
                             }
                             else {
                                 obj = add(obj, square(sub(l.get(*nd)?, s.get(*on)?)?)?)?;
@@ -1277,7 +1281,7 @@ pub fn position_sols<'s, V, E>(
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
                                 cvec.push(leq(s.get(*on)?, sub(s.get(*onr)?, add(sep, as_constantf(owidth_r.0 + owidth.1)?)?)?)?);
-                                obj = add(obj, square(sub(s.get(*onr)?, s.get(*on)?)?)?)?;
+                                obj = add(obj, mul(symmetry_cost, square(sub(s.get(*onr)?, s.get(*on)?)?)?)?)?;
                             }
                             else {
                                 obj = add(obj, square(sub(r.get(*nd)?, s.get(*on)?)?)?)?;
@@ -1307,14 +1311,14 @@ pub fn position_sols<'s, V, E>(
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
                                 cvec.push(leq(s.get(*onl)?, sub(s.get(*on)?, add(sep, as_constantf(owidth_l.1 + owidth.0)?)?)?)?);
-                                obj = add(obj, square(sub(s.get(*on)?, s.get(*onl)?)?)?)?;
+                                obj = add(obj, mul(symmetry_cost, square(sub(s.get(*on)?, s.get(*onl)?)?)?)?)?;
                             } else {
                                 obj = add(obj, square(sub(l.get(*nd)?, s.get(*on)?)?)?)?;
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
                                 cvec.push(leq(s.get(*on)?, sub(s.get(*onr)?, add(sep, as_constantf(owidth_r.0 + owidth.1)?)?)?)?);
-                                obj = add(obj, square(sub(s.get(*onr)?, s.get(*on)?)?)?)?;
+                                obj = add(obj, mul(symmetry_cost, square(sub(s.get(*onr)?, s.get(*on)?)?)?)?)?;
                             }
                             else {
                                 obj = add(obj, square(sub(r.get(*nd)?, s.get(*on)?)?)?)?;
@@ -1352,6 +1356,7 @@ pub fn position_sols<'s, V, E>(
                         },
                         Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
                             let (action_width_r, _percept_width_r) = width_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_width);
+                            cvec.push(leq(s.get(n)?, sub(s.get(*rn)?, add(dsep, as_constantf(action_width_r + percept_width)?)?)?)?);
                         },
                     }
                 }
