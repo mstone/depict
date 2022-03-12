@@ -529,7 +529,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                     }
                 }
                 div {
-                    class: "text-sm text-gray-400 width-full grid grid-cols-2 gap-4",
+                    class: "text-sm text-gray-400 width-full",
                     div {
                         span {
                             class: "text-black",
@@ -537,7 +537,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         }
                         span {
                             class: "italic",
-                            "node+ : ^:^ ((^,^ action?) (/ (^,^ percept?))?)"
+                            "node node ... : action action... / percept percept ... : action... / percept..."
                         }
                     }
                     div {
@@ -547,21 +547,21 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         }
                         span {
                             class: "italic",
-                            "driver brakes car: a / b : c / d, e / f"
+                            "person microwave food: open, start, stop / beep : heat. person food: stir"
                         },
                     }
                 }
-                div {
-                    class: "text-sm text-gray-400 width-full",
-                    span {
-                        class: "text-black",
-                        "Crossing Number: "
-                    }
-                    span {
-                        class: "italic",
-                        crossing_number
-                    }
-                }
+                // div {
+                //     class: "text-sm text-gray-400 width-full",
+                //     span {
+                //         class: "text-black",
+                //         "Crossing Number: "
+                //     }
+                //     span {
+                //         class: "italic",
+                //         crossing_number
+                //     }
+                // }
             }
         }
         div {
