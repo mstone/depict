@@ -452,10 +452,8 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
 }
 
 const PLACEHOLDER: &str = indoc!("
-a b c
-a b d
-a c
-a d
+person microwave food: open, start, stop / beep : heat
+person food: stir
 ");
 // driver wheel car: turn / wheel angle
 // driver accel car: accelerate / pedal position
