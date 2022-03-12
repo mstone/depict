@@ -1,5 +1,8 @@
+use diagrams::graph_drawing::error::Error;
+use diagrams::graph_drawing::geometry::{*};
+use diagrams::graph_drawing::graph::roots;
+use diagrams::graph_drawing::layout::{*};
 use diagrams::parser::{parse, Fact};
-use diagrams::graph_drawing::*;
 
 use std::fs::read_to_string;
 use std::env::args;

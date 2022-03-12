@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use std::io;
 use std::panic::catch_unwind;
 
+use diagrams::graph_drawing::error::{Error, OrErrExt, Kind};
+use diagrams::graph_drawing::geometry::{*};
+use diagrams::graph_drawing::graph::roots;
+use diagrams::graph_drawing::index::{VerticalRank, OriginalHorizontalRank};
+use diagrams::graph_drawing::layout::{*};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
 
@@ -10,7 +15,6 @@ use dioxus_desktop::tao::dpi::{LogicalSize};
 // use dioxus_desktop::use_window;
 
 use diagrams::parser::{parse};
-use diagrams::graph_drawing::*;
 
 use color_spantrace::colorize;
 
@@ -494,7 +498,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     model_sender.unbounded_send(model.get().clone()).unwrap();
 
     let viewbox_width = drawing.get().viewbox_width;
-    let crossing_number = cx.render(rsx!(match drawing.get().crossing_number {
+    let _crossing_number = cx.render(rsx!(match drawing.get().crossing_number {
         Some(cn) => rsx!(span { "{cn}" }),
         None => rsx!(div{}),
     }));
