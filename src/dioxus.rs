@@ -29,7 +29,7 @@ use petgraph::Graph;
 use petgraph::dot::Dot;
 
 use tracing::{instrument, event, Level};
-use tracing_error::{InstrumentResult, ExtractSpanTrace};
+use tracing_error::{InstrumentResult, ExtractSpanTrace, TracedError};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -136,7 +136,6 @@ fn estimate_widths<'s>(
 
     Ok(())
 }
-
 
 #[instrument(skip(data))]
 fn draw(data: String) -> Result<Drawing, Error> {

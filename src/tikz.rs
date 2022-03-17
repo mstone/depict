@@ -21,7 +21,7 @@ pub fn tikz_escape(s: &str) -> String {
         .replace("\\n", "\\\\")
 }
 
-pub fn render(v: Vec<Fact>) -> Result<(), Error> {
+pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
 
     let vcg = calculate_vcg(&v)?;
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;

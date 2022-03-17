@@ -166,7 +166,7 @@ pub mod layout {
     use crate::graph_drawing::graph::roots;
     use crate::parser::Fact;
 
-    #[derive(Debug)]
+    #[derive(Clone, Debug)]
     pub struct Vcg<V, E> {
         /// vert is a vertical constraint graph. 
         /// Edges (v, w) in vert indicate that v needs to be placed above w. 
@@ -193,11 +193,34 @@ pub mod layout {
         *ix
     }
 
+    pub trait Trim {
+        fn trim(self) -> Self;
+    }
+
+    impl Trim for &str {
+        fn trim(self) -> Self {
+            str::trim(self)
+        }
+    }
+
+    pub trait IsEmpty {
+        fn is_empty(&self) -> bool;
+    }
+
+    impl IsEmpty for &str {
+        fn is_empty(&self) -> bool {
+            str::is_empty(self)
+        }
+    }
+
     #[instrument()]
-    pub fn calculate_vcg<'s>(v: &'s [Fact]) -> Result<Vcg<&'s str, &'s str>, Error> {
+    pub fn calculate_vcg<'s, V>(v: &[Fact<V>]) -> Result<Vcg<V, V>, Error> where 
+        V: 's + Clone + Debug + Eq + Hash + Ord + AsRef<str> + From<&'s str> + Trim + IsEmpty,
+        String: From<V>
+    {
         event!(Level::TRACE, "CALCULATE_VCG");
-        let vert = Graph::<&str, &str>::new();
-        let vert_vxmap = HashMap::<&str, NodeIndex>::new();
+        let vert = Graph::<V, V>::new();
+        let vert_vxmap = HashMap::<V, NodeIndex>::new();
         let vert_node_labels = HashMap::new();
         let vert_edge_labels = HashMap::new();
         let mut vcg = Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels};
@@ -206,37 +229,37 @@ pub mod layout {
 
         for Fact{path, labels_by_level} in v {
             for n in 0..path.len()-1 {
-                let src = path[n];
-                let dst = path[n+1];
-                let src_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, src);
-                let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst);
+                let src = &path[n];
+                let dst = &path[n+1];
+                let src_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, src.clone());
+                let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst.clone());
 
                 // TODO: record associated action/percept texts.
                 let empty = (vec![], vec![]);
                 let (actions, percepts) = labels_by_level.get(n).unwrap_or(&empty);
-                let rels = vcg.vert_edge_labels.entry(src).or_default().entry(dst).or_default();
+                let rels = vcg.vert_edge_labels.entry(src.clone()).or_default().entry(dst.clone()).or_default();
                 for action in actions {
-                    let action = action.map(str::trim);
+                    let action = action.clone().map(|a| a.trim());
                     if let Some(action) = action {
                         if !action.is_empty() {
-                            vcg.vert.add_edge(src_ix, dst_ix, "actuates");
-                            rels.entry("actuates").or_default().push(action);
+                            vcg.vert.add_edge(src_ix, dst_ix, "actuates".into());
+                            rels.entry("actuates".into()).or_default().push(action);
                         }
                     }
                 }
                 for percept in percepts {
-                    let percept = percept.map(str::trim);
+                    let percept = percept.clone().map(|p| p.trim());
                     if let Some(percept) = percept {
                         if !percept.is_empty() {
-                            vcg.vert.add_edge(src_ix, dst_ix, "senses");
-                            rels.entry("senses").or_default().push(percept);
+                            vcg.vert.add_edge(src_ix, dst_ix, "senses".into());
+                            rels.entry("senses".into()).or_default().push(percept);
                         }
                     }
                 }
             }
             for node in path {
-                or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node);
-                vcg.vert_node_labels.insert(*node, node.to_string());
+                or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
+                vcg.vert_node_labels.insert(node.clone(), node.clone().into());
             }
         }
 
@@ -245,18 +268,18 @@ pub mod layout {
                 if rels.is_empty() {
                     let src_ix = vcg.vert_vxmap[src];
                     let dst_ix = vcg.vert_vxmap[dst];
-                    vcg.vert.add_edge(src_ix, dst_ix, "fake");
-                    rels.entry("fake").or_default().push("?");
+                    vcg.vert.add_edge(src_ix, dst_ix, "fake".into());
+                    rels.entry("fake".into()).or_default().push("?".into());
                 }
             }
         }
 
         let roots = roots(&vcg.vert)?;
-        let root_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, "root");
-        vcg.vert_node_labels.insert("root", "".to_string());
+        let root_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, "root".into());
+        vcg.vert_node_labels.insert("root".into(), "".to_string());
         for node in roots.iter() {
             let node_ix = vcg.vert_vxmap[node];
-            vcg.vert.add_edge(root_ix, node_ix, "fake");
+            vcg.vert.add_edge(root_ix, node_ix, "fake".into());
         }
 
         event!(Level::TRACE, ?vcg, "VCG");
@@ -344,7 +367,7 @@ pub mod layout {
         Hop(VerticalRank, E, E),
     }
 
-    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+    #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
     pub struct Hop<V: Clone + Debug + Display + Ord + Hash> {
         pub mhr: OriginalHorizontalRank,
         pub nhr: OriginalHorizontalRank,
@@ -352,6 +375,8 @@ pub mod layout {
         pub wl: V,
         pub lvl: VerticalRank,
     }
+    
+    #[derive(Clone, Debug)]
     pub struct Placement<V: Clone + Debug + Display + Ord + Hash> {
         pub locs_by_level: BTreeMap<VerticalRank, TiVec<OriginalHorizontalRank, OriginalHorizontalRank>>, 
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
@@ -1091,12 +1116,12 @@ pub mod geometry {
             let problem = cp.getattr("Problem")?;
             let minimize = cp.getattr("Minimize")?;
             let square = |a: &PyAny| {sq.call1((a,))};
-            let absv = |a: &PyAny| {abs.call1((a,))};
+            let _absv = |a: &PyAny| {abs.call1((a,))};
             let as_constant = |a: i32| { constant.call1((a.into_py(py),)) };
             let as_constantf = |a: f64| { constant.call1((a.into_py(py),)) };
             let hundred: &PyAny = as_constant(100)?;
-            let thousand: &PyAny = as_constant(1000)?;
-            let ten: &PyAny = as_constant(10)?;
+            let _thousand: &PyAny = as_constant(1000)?;
+            let _ten: &PyAny = as_constant(10)?;
             let _one: &PyAny = as_constant(1)?;
             let _two: &PyAny = as_constant(2)?;
             let zero: &PyAny = as_constant(0)?;
@@ -1453,7 +1478,7 @@ pub mod geometry {
             let is_dcp_str = is_dcp.str()?;
             event!(Level::DEBUG, ?is_dcp_str, "IS_DCP");
     
-            prb.call_method1("solve", ())?;
+            prb.call_method1("solve", ("ECOS",))?;
             let status = prb.getattr("status")?;
             let status_str = status.str()?;
             event!(Level::DEBUG, ?status_str, "PROBLEM STATUS");
@@ -1492,11 +1517,11 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]    
     pub fn no_swaps() -> Result<(), Error> {
-        let data = "A c q: y / z. d e af: w / x".to_string();
-        let v = parse(&data[..])
+        let data = "A c q: y / z. d e af: w / x";
+        let v = parse(data)
             .map_err(|e| match e {
-                nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
-                nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
+                nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(data, e)) },
+                nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(data, e)) },
                 nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
             })
             .in_current_span()?

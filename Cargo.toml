@@ -10,7 +10,8 @@ default = ["minion", "cvxpy", "gui", "server"]
 minion = []
 cvxpy = ["numpy", "pyo3"]
 gui = ["dioxus", "dioxus/desktop", "dioxus-desktop", "dioxus-desktop/devtool", "tao"]
-server = ["actix-web"]
+server = ["actix-web", "petgraph/serde-1", "serde", "serde_json"]
+client = ["petgraph/serde-1", "serde", "serde_json"]
 
 [dependencies]
 auto_enums = "0.7"
@@ -44,6 +45,8 @@ tao = { version = "0.6", optional = true }
 
 # server
 actix-web = { version = "4", optional = true }
+serde = { version = "1", optional = true }
+serde_json = { version = "1", optional = true }
 
 [target.'cfg(target_os="macos")'.dependencies]
 block = "0.1.6"
