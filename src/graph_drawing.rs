@@ -1110,7 +1110,7 @@ pub mod geometry {
         let res: PyResult<LayoutSolution> = Python::with_gil(|py| {
             let cp = PyModule::import(py, "cvxpy")?;
             let var = cp.getattr("Variable")?;
-            let sq = cp.getattr("square")?;
+            let sq = cp.getattr("norm")?;
             let abs = cp.getattr("abs")?;
             let constant = cp.getattr("Constant")?;
             let problem = cp.getattr("Problem")?;
@@ -1478,7 +1478,8 @@ pub mod geometry {
             let is_dcp_str = is_dcp.str()?;
             event!(Level::DEBUG, ?is_dcp_str, "IS_DCP");
     
-            prb.call_method1("solve", ("ECOS",))?;
+            // prb.call_method1("solve", ("ECOS",))?;
+            prb.call_method1("solve", ())?;
             let status = prb.getattr("status")?;
             let status_str = status.str()?;
             event!(Level::DEBUG, ?status_str, "PROBLEM STATUS");

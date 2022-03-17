@@ -26,6 +26,190 @@ const PLACEHOLDER: &str = indoc!("
     person food: stir
 ");
 
+const PLACEHOLDER_DRAWING: &str = r#"
+{
+    "drawing": {
+        "crossing_number": 0,
+        "viewbox_width": 412.3232380465066,
+        "layout_debug": {
+            "nodes": [
+                "microwave 0",
+                "food 0",
+                "microwave food 2,0",
+                "microwave food 3,0",
+                "person 0",
+                "person food 1,0",
+                "person food 2,1",
+                "person food 3,0",
+                "person microwave 1,0",
+                "person microwave 2,0"
+            ],
+            "node_holes": [],
+            "edge_property": "directed",
+            "edges": [
+                [
+                    2,
+                    3,
+                    "2,0->3,0"
+                ],
+                [
+                    0,
+                    2,
+                    "3,0"
+                ],
+                [
+                    3,
+                    1,
+                    "3,0"
+                ],
+                [
+                    5,
+                    6,
+                    "1,0->2,1"
+                ],
+                [
+                    4,
+                    5,
+                    "2,1"
+                ],
+                [
+                    6,
+                    7,
+                    "2,1->3,0"
+                ],
+                [
+                    7,
+                    1,
+                    "3,0"
+                ],
+                [
+                    8,
+                    9,
+                    "1,0->2,0"
+                ],
+                [
+                    4,
+                    8,
+                    "2,0"
+                ],
+                [
+                    9,
+                    0,
+                    "2,0"
+                ]
+            ]
+        },
+        "nodes": [
+            {
+                "Div": {
+                    "key": "microwave",
+                    "label": "Microwave",
+                    "hpos": 0,
+                    "vpos": 170,
+                    "width": 186
+                }
+            },
+            {
+                "Div": {
+                    "key": "person",
+                    "label": "Person",
+                    "hpos": 39,
+                    "vpos": 50,
+                    "width": 367
+                }
+            },
+            {
+                "Div": {
+                    "key": "food",
+                    "label": "Food",
+                    "hpos": 26,
+                    "vpos": 250,
+                    "width": 387
+                }
+            },
+            {
+                "Svg": {
+                    "key": "person_food_actuates_0",
+                    "path": "M 364 76 L 364 170 L 362 243",
+                    "rel": "actuates",
+                    "label": {
+                        "text": "stir",
+                        "hpos": 364,
+                        "width": 124.9860715305249,
+                        "vpos": 50
+                    }
+                }
+            },
+            {
+                "Svg": {
+                    "key": "person_microwave_actuates_0",
+                    "path": "M 136 76 L 136 163",
+                    "rel": "actuates",
+                    "label": {
+                        "text": "open\nstart\nstop",
+                        "hpos": 136,
+                        "width": 186.00027036035365,
+                        "vpos": 50
+                    }
+                }
+            },
+            {
+                "Svg": {
+                    "key": "person_microwave_actuates_1",
+                    "path": "M 136 76 L 136 163",
+                    "rel": "actuates",
+                    "label": {
+                        "text": "open\nstart\nstop",
+                        "hpos": 136,
+                        "width": 186.00027036035365,
+                        "vpos": 50
+                    }
+                }
+            },
+            {
+                "Svg": {
+                    "key": "person_microwave_actuates_2",
+                    "path": "M 136 76 L 136 163",
+                    "rel": "actuates",
+                    "label": {
+                        "text": "open\nstart\nstop",
+                        "hpos": 136,
+                        "width": 186.00027036035365,
+                        "vpos": 50
+                    }
+                }
+            },
+            {
+                "Svg": {
+                    "key": "person_microwave_senses_3",
+                    "path": "M 156 83 L 156 170",
+                    "rel": "senses",
+                    "label": {
+                        "text": "beep",
+                        "hpos": 156,
+                        "width": 186.00027036035365,
+                        "vpos": 50
+                    }
+                }
+            },
+            {
+                "Svg": {
+                    "key": "microwave_food_actuates_0",
+                    "path": "M 86 196 L 86 243",
+                    "rel": "actuates",
+                    "label": {
+                        "text": "heat",
+                        "hpos": 86,
+                        "width": 386.69389586984727,
+                        "vpos": 170
+                    }
+                }
+            }
+        ]
+    }
+}
+"#;
+
 pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
     let viewbox_width = drawing.viewbox_width;
     let mut nodes = drawing.nodes;
@@ -140,26 +324,19 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
 pub struct AppProps {
 }
 
-static DRAWING: Atom<Drawing> = |_| Drawing{
-    crossing_number: Default::default(),
-    viewbox_width: 1024.0,
-    layout_debug: Default::default(),
-    nodes: Default::default(),
-};
-
 pub fn app(cx: Scope<AppProps>) -> Element {
 
     let model = use_state(&cx, || String::from(PLACEHOLDER));
-    let drawing = use_read(&cx, DRAWING);
+
+    let drawing = use_state(&cx, || serde_json::from_str::<DrawResp>(PLACEHOLDER_DRAWING).unwrap().drawing);
 
     let drawing_client = use_coroutine(&cx, |mut rx: UnboundedReceiver<String>| {
-        let set_drawing = use_set(&cx, DRAWING);
-        to_owned![set_drawing];
+        to_owned![drawing];
         async move {
             while let Some(model) = rx.next().await {
                 let res: Result<DrawResp, _> = click(model).await.json().await;
                 if let Ok(drawing_resp) = res {
-                    set_drawing(drawing_resp.drawing);
+                    drawing.set(drawing_resp.drawing);
                 }
             }
         }
@@ -170,7 +347,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     //     Some(None) => (None, cx.render(rsx!("loading..."))),
     //     _ => (None, cx.render(rsx!("error"))),
     // };
-    let nodes = render(cx, drawing.clone());
+    let nodes = render(cx, drawing.get().clone());
 
     let viewbox_width = drawing.viewbox_width;
     // let viewbox_width = 1024.0;
