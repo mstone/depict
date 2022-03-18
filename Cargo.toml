@@ -6,76 +6,34 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["minion", "cvxpy", "gui", "server"]
-minion = []
+default = ["minion", "cvxpy"]
+minion = ["ndarray"]
 cvxpy = ["numpy", "pyo3"]
-gui = ["dioxus", "dioxus/desktop", "dioxus-desktop", "dioxus-desktop/devtool", "tao"]
-server = ["actix-web", "petgraph/serde-1", "serde", "serde/derive", "serde_json"]
+dioxus = []
+server = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 
 [dependencies]
-auto_enums = "0.7"
-color-spantrace = "0.2"
 derive_more = "0.99"
-
-futures = "0.3"
-indoc = "1.0"
-Inflector = "0.11"
-is_variant = "1.0"
-ndarray = "0.15"
 nom = "7"
 petgraph = "0.6"
-rand = "0.8"
 sorted-vec = "0.7"
 thiserror = "1.0"
-tokio = "1"
 tracing = "0.1"
 tracing-error = { version = "0.2", features = [ "traced-error" ] }
-tracing-subscriber = "0.3"
 typed-index-collections = "3.0"
 
 # cvxpy
 numpy = { version = "0.15", optional = true }
 pyo3 = { version = "0.15.1", optional = true }
 
-# gui
-dioxus = { version = "0.2", optional = true }
-dioxus-desktop = { version = "0.2", optional = true }
-tao = { version = "0.6", optional = true }
+# minion
+ndarray = { version = "0.15", optional = true }
 
 # server
-actix-web = { version = "4", optional = true }
 serde = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
-
-[target.'cfg(target_os="macos")'.dependencies]
-block = "0.1.6"
-cocoa = "0.24.0"
-objc = "0.2.7"
-core-graphics = "0.22.0"
-foreign-types = "0.3.2"
-bitflags = "1.2.1"
 
 [lib]
 name = "diagrams"
 path = "src/lib.rs"
-
-[[bin]]
-name = "dioxus"
-path = "src/dioxus.rs"
-
-[[bin]]
-name = "parse"
-path = "src/parse.rs"
-
-[[bin]]
-name = "objc"
-path = "src/objc.rs"
-
-[[bin]]
-name = "server"
-path = "src/server.rs"
-
-[[bin]]
-name = "tikz"
-path = "src/tikz.rs"

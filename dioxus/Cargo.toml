@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 color-spantrace = "0.2"
-diagrams = { path = "..", default-features = false, features = [ "cvxpy", "gui", "minion" ] }
+diagrams = { path = "..", default-features = false, features = [ "cvxpy", "dioxus", "minion" ] }
 dioxus = { version = "0.2", features = ["desktop"] }
 dioxus-desktop = { version = "0.2" }
 futures = "0.3"
