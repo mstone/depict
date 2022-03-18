@@ -39,8 +39,8 @@ numpy = { version = "0.15", optional = true }
 pyo3 = { version = "0.15.1", optional = true }
 
 # gui
-dioxus = { path = "../dioxus", optional = true }
-dioxus-desktop = { git = "https://github.com/dioxuslabs/dioxus", optional = true }
+dioxus = { version = "0.2", optional = true }
+dioxus-desktop = { version = "0.2", optional = true }
 tao = { version = "0.6", optional = true }
 
 # server

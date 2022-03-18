@@ -726,7 +726,7 @@ dependencies = [
  "core-graphics",
  "derive_more",
  "dioxus",
- "dioxus-desktop 0.1.6",
+ "dioxus-desktop",
  "foreign-types",
  "futures",
  "indoc 1.0.4",
@@ -763,36 +763,21 @@ dependencies = [
 [[package]]
 name = "dioxus"
 version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b05c86903cd0a136070d786eb5bb20c116c6980533185fc6d4de4f006abb2d89"
 dependencies = [
- "dioxus-core 0.2.0",
+ "dioxus-core",
  "dioxus-core-macro",
- "dioxus-desktop 0.2.2",
+ "dioxus-desktop",
  "dioxus-hooks",
- "dioxus-html 0.2.0",
-]
-
-[[package]]
-name = "dioxus-core"
-version = "0.1.9"
-source = "git+https://github.com/dioxuslabs/dioxus#b11eff9e777309f4b4e56fe3029364eda864612d"
-dependencies = [
- "backtrace",
- "bumpalo",
- "futures-channel",
- "futures-util",
- "fxhash",
- "indexmap",
- "log",
- "longest-increasing-subsequence",
- "once_cell",
- "serde",
- "slab",
- "smallvec",
+ "dioxus-html",
 ]
 
 [[package]]
 name = "dioxus-core"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0ed0e7a85bbccefaa2339e5ef6bbd8dc95dd64d452653f6dc7d247b60a28eb8"
 dependencies = [
  "backtrace",
  "bumpalo",
@@ -811,6 +796,8 @@ dependencies = [
 [[package]]
 name = "dioxus-core-macro"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25a2ac859ab4485bf0d5af6793d8f8f22d8de97ec637d83c8ad158ade83ab46e"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -820,33 +807,14 @@ dependencies = [
 
 [[package]]
 name = "dioxus-desktop"
-version = "0.1.6"
-source = "git+https://github.com/dioxuslabs/dioxus#b11eff9e777309f4b4e56fe3029364eda864612d"
-dependencies = [
- "core-foundation",
- "dioxus-core 0.1.9",
- "dioxus-html 0.1.6",
- "dioxus-interpreter-js 0.0.0",
- "dunce",
- "futures-channel",
- "log",
- "mime_guess",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "webbrowser 0.5.5",
- "wry",
-]
-
-[[package]]
-name = "dioxus-desktop"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44e164c141ab52e332dad2554f6f26d6a3fe1430e3a4da1f28e2c8a07c472fa0"
 dependencies = [
  "core-foundation",
- "dioxus-core 0.2.0",
- "dioxus-html 0.2.0",
- "dioxus-interpreter-js 0.2.0",
+ "dioxus-core",
+ "dioxus-html",
+ "dioxus-interpreter-js",
  "dunce",
  "futures-channel",
  "log",
@@ -855,46 +823,37 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "webbrowser 0.6.0",
+ "webbrowser",
  "wry",
 ]
 
 [[package]]
 name = "dioxus-hooks"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82cd75f8ae80d4435bf214e14bb6a573212831a85f6446f2bd98abf45f66a1ba"
 dependencies = [
- "dioxus-core 0.2.0",
+ "dioxus-core",
  "futures-channel",
  "log",
 ]
 
 [[package]]
 name = "dioxus-html"
-version = "0.1.6"
-source = "git+https://github.com/dioxuslabs/dioxus#b11eff9e777309f4b4e56fe3029364eda864612d"
-dependencies = [
- "dioxus-core 0.1.9",
- "serde",
- "serde_repr",
-]
-
-[[package]]
-name = "dioxus-html"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3dd84e70659e31d822d552b62112fdf4bad8cd177ebe1e7b3c5160f066d093be"
 dependencies = [
- "dioxus-core 0.2.0",
+ "dioxus-core",
  "serde",
  "serde_repr",
 ]
 
 [[package]]
 name = "dioxus-interpreter-js"
-version = "0.0.0"
-source = "git+https://github.com/dioxuslabs/dioxus#b11eff9e777309f4b4e56fe3029364eda864612d"
-
-[[package]]
-name = "dioxus-interpreter-js"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ba693ac9940d9fcf48cfa03ffe412debf43fbfc010b106c4ac520a21332d890"
 
 [[package]]
 name = "dispatch"
@@ -3009,17 +2968,6 @@ dependencies = [
 
 [[package]]
 name = "webbrowser"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecad156490d6b620308ed411cfee90d280b3cbd13e189ea0d3fada8acc89158a"
-dependencies = [
- "web-sys",
- "widestring 0.4.3",
- "winapi",
-]
-
-[[package]]
-name = "webbrowser"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9c28b6b6a78440b02647358625e3febc90724126480b9da6a967b5f674b3554"
@@ -3028,7 +2976,7 @@ dependencies = [
  "ndk-glue",
  "url",
  "web-sys",
- "widestring 0.5.1",
+ "widestring",
  "winapi",
 ]
 
@@ -3114,12 +3062,6 @@ dependencies = [
  "windows",
  "windows-bindgen",
 ]
-
-[[package]]
-name = "widestring"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c168940144dd21fd8046987c16a46a33d5fc84eec29ef9dcddc2ac9e31526b7c"
 
 [[package]]
 name = "widestring"
