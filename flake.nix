@@ -9,8 +9,10 @@
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
   inputs.rust-overlay.inputs.flake-utils.follows = "flake-utils";
   inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.minionSrc.url = "github:minion/minion";
+  inputs.minionSrc.flake = false;
 
-  outputs = {self, nixpkgs, crane, rust-overlay, flake-utils, nix-filter}:
+  outputs = {self, nixpkgs, crane, minionSrc, rust-overlay, flake-utils, nix-filter}:
     flake-utils.lib.simpleFlake {
       inherit self nixpkgs;
       name = "diagrams";
@@ -21,8 +23,61 @@
           diagrams = lib.diagrams { isShell = false; };
           devShell = lib.diagrams { isShell = true; };
           defaultPackage = diagrams;
-          lib.diagrams = { isShell }: with final; with pkgs; crane.lib.${final.system}.buildPackage {
-            pname = "diagrams";
+
+          minion = with final; with pkgs; stdenv.mkDerivation {
+            pname = "minion";
+            version = "2.0.0-rc1";
+            src = minionSrc;
+            buildInputs = [ python2 ];
+            buildPhase = ''
+              mkdir build
+              cd build
+              $src/configure.py
+              make minion
+            '';
+            installPhase = ''
+              mkdir -p $out/bin
+              cp -a ./minion $out/bin
+            '';
+          };
+
+          server = with final; with pkgs; let
+            serverBin = (lib.diagrams { isShell = false; subdir = "server"; });
+          in stdenv.mkDerivation { 
+            pname = "server";
+            version = "1.0";
+            buildInputs = [ makeWrapper ];
+            phases = [ "installPhase" ];
+            installPhase = ''
+              mkdir -p $out/bin
+              cp ${serverBin}/bin/server $out/bin/server
+              wrapProgram $out/bin/server \
+                --prefix PATH : "${minion}/bin/" \
+                --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]}
+            '';
+          };
+
+          dioxus = with final; with pkgs; let
+            dioxusBin = (lib.diagrams { isShell = false; subdir = "dioxus:0.1.0"; });
+          in stdenv.mkDerivation { 
+            pname = "dioxus";
+            version = "1.0";
+            buildInputs = [ makeWrapper ];
+            phases = [ "installPhase" ];
+            installPhase = ''
+              mkdir -p $out/bin
+              cp ${serverBin}/bin/dioxus $out/bin/dioxus
+              wrapProgram $out/bin/server \
+                --prefix PATH : "${minion}/bin/" \
+                --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]}
+            '';
+          };
+
+          lib.diagrams = { isShell, subdir ? "." }: 
+            let 
+              pnameSuffix = if subdir == "." then "" else "-${subdir}";
+            in with final; with pkgs; crane.lib.${final.system}.buildPackage {
+            pname = "diagrams${pnameSuffix}";
             version = "1.0";
 
             src = self;
@@ -37,6 +92,8 @@
             # };
 
             cargoLock = self + "/Cargo.lock";
+            cargoCheckCommand = "";
+            cargoBuildCommand = "cargo build -p ${subdir} --release";
 
             buildInputs = [
               (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })

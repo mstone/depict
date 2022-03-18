@@ -54,6 +54,22 @@
         "type": "github"
       }
     },
+    "minionSrc": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1619428864,
+        "narHash": "sha256-4PfgX0EIw4bAJmMSmyEQ3Ai9jqmBE/S/QEDlpQi6dIQ=",
+        "owner": "minion",
+        "repo": "minion",
+        "rev": "283b74de15320b18fa723ff23810ccafa7631fcd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "minion",
+        "repo": "minion",
+        "type": "github"
+      }
+    },
     "nix-filter": {
       "locked": {
         "lastModified": 1642416301,
@@ -103,6 +119,7 @@
       "inputs": {
         "crane": "crane",
         "flake-utils": "flake-utils",
+        "minionSrc": "minionSrc",
         "nix-filter": "nix-filter",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay"
