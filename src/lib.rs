@@ -1,6 +1,6 @@
 pub mod parser {
     // use crate::data::*;
-    use nom::{IResult, InputLength, InputIter, InputTake, InputTakeAtPosition, FindToken, Slice};
+    use nom::{IResult, InputLength, InputIter, InputTake, InputTakeAtPosition, FindToken, Needed, Slice};
     use nom::error::{VerboseError, context};
     use nom::bytes::complete::{take_while, take_while1, is_not, is_a};
     // use nom::character::{is_space};
@@ -10,6 +10,137 @@ pub mod parser {
     use nom::sequence::{preceded, terminated, tuple, separated_pair};
     use std::hash::Hash;
     use std::ops::RangeFrom;
+
+    use std::ops::Deref;
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Rc<T>(pub std::rc::Rc<T>);
+
+    impl<T> Rc<T> {
+        pub fn new(t: T) -> Self {
+            Rc(std::rc::Rc::new(t))
+        }
+    }
+
+    impl<D, T> Deref for Rc<T> where D: ?Sized, T: Deref<Target=D> {
+        type Target = D;
+
+        fn deref(&self) -> &Self::Target {
+            self.0.deref()
+        }
+    }
+
+    impl<T: InputLength> InputLength for Rc<T> {
+        fn input_len(&self) -> usize { 
+            self.0.input_len()
+        }
+    }
+
+    impl<T: InputIter> InputIter for Rc<T> {
+        type Item = T::Item;
+
+        type Iter = T::Iter;
+
+        type IterElem = T::IterElem;
+
+        fn iter_indices(&self) -> Self::Iter { 
+            self.0.iter_indices() 
+        }
+
+        fn iter_elements(&self) -> Self::IterElem {
+            self.0.iter_elements()
+        }
+
+        fn position<P>(&self, predicate: P) -> Option<usize>
+        where
+            P: Fn(Self::Item) -> bool 
+        {
+            self.0.position(predicate)
+        }
+
+        fn slice_index(&self, count: usize) -> Result<usize, nom::Needed> {
+            self.0.slice_index(count)
+        }
+    }
+
+    impl<T: InputTake> InputTake for Rc<T> {
+        fn take(&self, count: usize) -> Self {
+            Rc::new(self.0.take(count))
+        }
+
+        fn take_split(&self, count: usize) -> (Self, Self) {
+            let (a, b) = self.0.take_split(count);
+            (Rc::new(a), Rc::new(b))
+        }
+    }
+
+    impl<T: Slice<RangeFrom<usize>>> Slice<RangeFrom<usize>> for Rc<T> {
+        fn slice(&self, range: RangeFrom<usize>) -> Self {
+            Rc::new(self.0.slice(range))
+        }
+    }
+
+    impl<T: InputLength + InputIter + InputTake + InputTakeAtPosition> InputTakeAtPosition for Rc<T> {
+        type Item = <T as InputIter>::Item;
+
+        fn split_at_position<P, E: nom::error::ParseError<Self>>(&self, predicate: P) -> nom::IResult<Self, Self, E>
+        where
+            P: Fn(Self::Item) -> bool 
+        {
+            match self.position(predicate) {
+                Some(n) => Ok(self.take_split(n)),
+                None => Err(nom::Err::Incomplete(Needed::new(1))),
+            }
+        }
+
+        fn split_at_position1<P, E: nom::error::ParseError<Self>>(
+            &self,
+            predicate: P,
+            e: nom::error::ErrorKind,
+        ) -> nom::IResult<Self, Self, E>
+        where
+            P: Fn(Self::Item) -> bool 
+        {
+            match self.position(predicate) {
+                Some(0) => Err(nom::Err::Error(E::from_error_kind(Rc(self.0.clone()), e))),
+                Some(n) => Ok(self.take_split(n)),
+                None => Err(nom::Err::Incomplete(Needed::new(1))),
+            }
+        }
+
+        fn split_at_position_complete<P, E: nom::error::ParseError<Self>>(
+            &self,
+            predicate: P,
+        ) -> nom::IResult<Self, Self, E>
+        where
+            P: Fn(Self::Item) -> bool 
+        {
+            match self.split_at_position(predicate) {
+                Err(nom::Err::Incomplete(_)) => Ok(self.take_split(self.input_len())),
+                res => res,
+            }
+        }
+
+        fn split_at_position1_complete<P, E: nom::error::ParseError<Self>>(
+            &self,
+            predicate: P,
+            e: nom::error::ErrorKind,
+        ) -> nom::IResult<Self, Self, E>
+        where
+            P: Fn(Self::Item) -> bool 
+        {
+            match self.split_at_position1(predicate, e) {
+                Err(nom::Err::Incomplete(_)) => {
+                    if self.input_len() == 0 {
+                        Err(nom::Err::Error(E::from_error_kind(Rc(self.0.clone()), e)))
+                    } else {
+                        Ok(self.take_split(self.input_len()))
+                    }
+                }
+                res => res,
+            }
+        }
+    }
 
     pub type Labels<I> = Vec<Option<I>>;
 
@@ -97,7 +228,8 @@ pub mod parser {
 
     #[cfg(test)]
     mod tests {
-        use nom::error::convert_error;
+        use nom::error::{convert_error};
+        use super::Rc;
 
         #[test]
         fn fact_works() {
@@ -156,6 +288,18 @@ pub mod parser {
             }
             assert_eq!(y, Ok(("", vec![
                 super::Fact{path: vec!["hello"], labels_by_level: vec![(vec![Some("bar"), Some("foo ")], vec![Some("baz"), Some("quux")])]}
+            ])));
+        }
+
+        #[test]
+        fn fact_rc() {
+            let s = Rc::new("hello: bar / baz ");
+            let y = super::parse(s.clone());
+            if let Err(nom::Err::Error(ref y2)) = y {
+                println!("{}", convert_error(s, y2.clone()))
+            }
+            assert_eq!(y, Ok((Rc::new(""), vec![
+                super::Fact{path: vec![Rc::new("hello")], labels_by_level: vec![(vec![Some(Rc::new("bar "))], vec![Some(Rc::new("baz "))])]}
             ])));
         }
     }
