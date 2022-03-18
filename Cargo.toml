@@ -10,8 +10,8 @@ default = ["minion", "cvxpy", "gui", "server"]
 minion = []
 cvxpy = ["numpy", "pyo3"]
 gui = ["dioxus", "dioxus/desktop", "dioxus-desktop", "dioxus-desktop/devtool", "tao"]
-server = ["actix-web", "petgraph/serde-1", "serde", "serde_json"]
-client = ["petgraph/serde-1", "serde", "serde_json"]
+server = ["actix-web", "petgraph/serde-1", "serde", "serde/derive", "serde_json"]
+client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 
 [dependencies]
 auto_enums = "0.7"

@@ -1,6 +1,5 @@
-use diagrams::parser::{parse, Ident};
-use diagrams::graph_drawing::*;
-use diagrams::render::filter_fact;
+use diagrams::parser::{parse};
+use diagrams::graph_drawing::{layout::*};
 use druid::widget::Scroll;
 use druid::kurbo::{PathEl};
 use druid::piet::RenderContext;
@@ -30,30 +29,46 @@ impl Widget<AppState> for AppWidget<AppState> {
 
     fn lifecycle(&mut self, ctx: &mut druid::LifeCycleCtx, event: &druid::LifeCycle, data: &AppState, env: &druid::Env) {
         if matches!(event, LifeCycle::WidgetAdded) {
-            let v = parse(&data.0[..]).unwrap().1;
-            let mut ds = filter_fact(v.iter(), &Ident("draw"));
-            let draw = ds.next().unwrap();
+            let v = parse(&data[..])
+                .map_err(|e| match e {
+                    nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
+                    nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
+                    nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
+                })
+                .in_current_span()?
+                .1;
 
-            let (vert, v_nodes, h_name) = calculate_vcg(&v, draw);
+            let vcg = calculate_vcg(&v)?;
+            let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
-            eprintln!("VERT: {:?}", Dot::new(&vert));
+            let cvcg = condense(vert)?;
+            let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
 
-            let (condensed, _) = condense(&vert);
+            let roots = roots(condensed)?;
 
-            let roots = roots(&condensed);
+            let paths_by_rank = rank(condensed, &roots)?;
 
-            let paths_by_rank = rank(&condensed, &roots);
+            let placement = calculate_locs_and_hops(condensed, &paths_by_rank)?;
+            let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
 
-            let (locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc) = calculate_locs_and_hops(&condensed, &paths_by_rank);
+            let (crossing_number, solved_locs) = minimize_edge_crossing(&placement)?;
 
-            let solved_locs = minimize_edge_crossing(&locs_by_level, &hops_by_level);
-            
-            let (all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop) = calculate_sols(&solved_locs, &loc_to_node, &hops_by_level, &hops_by_edge);
+            let mut layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
 
-            let (ls, rs, ss) = position_sols(&vert, &v_nodes, &hops_by_edge, &node_to_loc, &solved_locs, &all_locs, &all_hops0, &all_hops, &sol_by_loc, &sol_by_hop);
-            
-            // let width_scale = 0.9;
+            estimate_widths(&vcg, &cvcg, &placement, &mut layout_problem)?;
+
+            let LayoutSolution{ls, rs, ss, ts} = position_sols(&vcg, &placement, &solved_locs, &layout_problem)?;
+
+            let LayoutProblem{sol_by_loc, sol_by_hop, ..} = &layout_problem;
+
             let height_scale = 80.0;
+            let vpad = 50.0;
+            let line_height = 20.0;
+
+            let mut texts = vec![];
+
+            let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
+            let root_width = rs[root_n] - ls[root_n];
             
             self.texts = vec![];
 
