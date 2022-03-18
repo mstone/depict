@@ -1,5 +1,44 @@
 {
   "nodes": {
+    "crane": {
+      "inputs": {
+        "flake-compat": "flake-compat",
+        "nix-std": "nix-std",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "utils": "utils"
+      },
+      "locked": {
+        "lastModified": 1646176024,
+        "narHash": "sha256-tmLycxj6Acq91XFPJYzlTI3JK4HWX05K8SpMO7kwCdI=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "39305b3828b976cac90bcb2cc5bdf5cfbcafce33",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
+    "flake-compat": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1641205782,
+        "narHash": "sha256-4jY7RCWUoZ9cKD8co0/4tFARpWB+57+r1bLLvXNJliY=",
+        "owner": "edolstra",
+        "repo": "flake-compat",
+        "rev": "b7547d3eed6f32d06102ead8991ec52ab0a4f1a7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "edolstra",
+        "repo": "flake-compat",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "locked": {
         "lastModified": 1644229661,
@@ -15,21 +54,6 @@
         "type": "github"
       }
     },
-    "import-cargo": {
-      "locked": {
-        "lastModified": 1594305518,
-        "narHash": "sha256-frtArgN42rSaEcEOYWg8sVPMUK+Zgch3c+wejcpX3DY=",
-        "ref": "master",
-        "rev": "25d40be4a73d40a2572e0cc233b83253554f06c5",
-        "revCount": 9,
-        "type": "git",
-        "url": "https://github.com/edolstra/import-cargo"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://github.com/edolstra/import-cargo"
-      }
-    },
     "nix-filter": {
       "locked": {
         "lastModified": 1642416301,
@@ -42,6 +66,21 @@
       "original": {
         "owner": "numtide",
         "repo": "nix-filter",
+        "type": "github"
+      }
+    },
+    "nix-std": {
+      "locked": {
+        "lastModified": 1624642189,
+        "narHash": "sha256-tIt3p1k0PsYeIxK2xO9Z8k2Ggq2nH4auqj3RbVAiRrg=",
+        "owner": "chessai",
+        "repo": "nix-std",
+        "rev": "9ef1cf73948bfad05d370165c7f3011b82c4d679",
+        "type": "github"
+      },
+      "original": {
+        "owner": "chessai",
+        "repo": "nix-std",
         "type": "github"
       }
     },
@@ -62,8 +101,8 @@
     },
     "root": {
       "inputs": {
+        "crane": "crane",
         "flake-utils": "flake-utils",
-        "import-cargo": "import-cargo",
         "nix-filter": "nix-filter",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay"
@@ -89,6 +128,21 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "utils": {
+      "locked": {
+        "lastModified": 1644229661,
+        "narHash": "sha256-1YdnJAsNy69bpcjuoKdOYQX0YxZBiCYZo4Twxerqv7k=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "3cecb5b042f7f209c56ffd8371b2711a290ec797",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
         "type": "github"
       }
     }
