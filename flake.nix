@@ -25,15 +25,16 @@
             pname = "diagrams";
             version = "1.0";
 
-            src = nix-filter.lib.filter {
-              root = self;
-              include = [
-                "Cargo.lock"
-                "Cargo.toml"
-                "src"
-                "web"
-              ];
-            };
+            src = self;
+            # src = nix-filter.lib.filter {
+            #   root = self;
+            #   include = [
+            #     "Cargo.lock"
+            #     "Cargo.toml"
+            #     "src"
+            #     "web"
+            #   ];
+            # };
 
             cargoLock = self + "/Cargo.lock";
 
