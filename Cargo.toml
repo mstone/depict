@@ -9,7 +9,7 @@ edition = "2021"
 default = ["minion", "cvxpy"]
 minion = ["ndarray"]
 cvxpy = ["numpy", "pyo3"]
-dioxus = []
+diadym-sketch-desktop = []
 server = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 

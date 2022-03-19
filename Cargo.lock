@@ -722,6 +722,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "diadym-sketch-desktop"
+version = "0.1.0"
+dependencies = [
+ "Inflector",
+ "color-spantrace",
+ "diagrams",
+ "dioxus",
+ "dioxus-desktop",
+ "futures",
+ "indoc 1.0.4",
+ "nom",
+ "petgraph",
+ "serde",
+ "serde_json",
+ "tao",
+ "tokio",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "diagrams"
 version = "0.1.0"
 dependencies = [
@@ -748,28 +770,6 @@ checksum = "f2fb860ca6fafa5552fb6d0e816a69c8e49f0908bf524e30a90d97c85892d506"
 dependencies = [
  "block-buffer",
  "crypto-common",
-]
-
-[[package]]
-name = "dioxus"
-version = "0.1.0"
-dependencies = [
- "Inflector",
- "color-spantrace",
- "diagrams",
- "dioxus 0.2.3",
- "dioxus-desktop",
- "futures",
- "indoc 1.0.4",
- "nom",
- "petgraph",
- "serde",
- "serde_json",
- "tao",
- "tokio",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3303,7 +3303,7 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "diagrams",
- "dioxus 0.2.3",
+ "dioxus",
  "futures",
  "getrandom",
  "indoc 1.0.4",

@@ -32,7 +32,7 @@
             buildPhase = ''
               mkdir build
               cd build
-              $src/configure.py
+              python2 $src/configure.py
               make minion
             '';
             installPhase = ''
@@ -57,17 +57,41 @@
             '';
           };
 
-          dioxus = with final; with pkgs; let
-            dioxusBin = (lib.diagrams { isShell = false; subdir = "dioxus:0.1.0"; });
+          web = with final; with pkgs; stdenv.mkDerivation {
+            pname = "web";
+            version = "1.0";
+            src = self;
+            buildInputs = [ 
+              (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
+              trunk 
+            ];
+            buildPhase = ''
+              mkdir home
+              mkdir cargo
+              mkdir trunk
+              export HOME="$(pwd)/home";
+              export CARGO_HOME="$(pwd)/cargo";
+              export TRUNK_STAGING_DIR="$(pwd)/trunk";
+              (cd web; trunk build)
+            '';
+            installPhase = ''
+              mkdir -p $out
+              (cd web/dist; cp -a * $out)
+            '';
+          };
+
+          sketch-desktop = with final; with pkgs; let
+            pkgName = "diadym-sketch-desktop";
+            pkg = (lib.diagrams { isShell = false; subdir = pkgName; });
           in stdenv.mkDerivation { 
-            pname = "dioxus";
+            pname = pkgName;
             version = "1.0";
             buildInputs = [ makeWrapper ];
             phases = [ "installPhase" ];
             installPhase = ''
               mkdir -p $out/bin
-              cp ${serverBin}/bin/dioxus $out/bin/dioxus
-              wrapProgram $out/bin/server \
+              cp ${pkg}/bin/${pkgName} $out/bin/${pkgName}
+              wrapProgram $out/bin/${pkgName} \
                 --prefix PATH : "${minion}/bin/" \
                 --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]}
             '';
