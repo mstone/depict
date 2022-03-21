@@ -1,8 +1,7 @@
 use std::collections::HashMap;
+use std::net::SocketAddr;
 
-use actix_web::{post, ResponseError};
-use actix_web::web::Json;
-use actix_web::{get, web, App, HttpServer, Responder};
+use axum::{http::StatusCode, Json, response::IntoResponse, Router, routing::post};
 
 use diagrams::graph_drawing::error::Error;
 use diagrams::graph_drawing::error::Kind;
@@ -24,6 +23,7 @@ use diagrams::graph_drawing::layout::condense;
 use diagrams::graph_drawing::layout::minimize_edge_crossing;
 use diagrams::graph_drawing::layout::or_insert;
 use diagrams::graph_drawing::layout::rank;
+
 use inflector::Inflector;
 use petgraph::Graph;
 use petgraph::dot::Dot;
@@ -133,15 +133,16 @@ impl<E> From<TracedError<E>> for DrawError {
     }
 }
 
-impl ResponseError for DrawError {
-    fn status_code(&self) -> actix_web::http::StatusCode {
-        actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+impl IntoResponse for DrawError {
+    fn into_response(self) -> axum::response::Response {
+        let status = StatusCode::INTERNAL_SERVER_ERROR;
+        let body = "";
+        (status, body).into_response()
     }
 }
 
-#[post("/draw/v1")]
 #[instrument]
-async fn draw<'s>(draw_rx: web::Json<Draw>) -> Result<Json<DrawResp>, DrawError> {
+async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError> {
     let data = draw_rx.text.clone();
 
     tokio::task::spawn_blocking(move || {
@@ -352,25 +353,22 @@ async fn draw<'s>(draw_rx: web::Json<Draw>) -> Result<Json<DrawResp>, DrawError>
     }).await?
 }
 
-fn main() -> std::io::Result<()> {
-
+fn main() -> Result<(), hyper::Error> {
     tracing_subscriber::Registry::default()
         .with(tracing_error::ErrorLayer::default())
         .with(tracing_subscriber::fmt::layer())
         .init();
-
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(async move {
-            HttpServer::new(|| {
-                App::new()
-                    .service(draw)
-            })
-            .bind(("127.0.0.1", 8000))?
-            .run()
-            .await
+            let app = Router::new()
+                .route("/api/v1/draw", post(draw));
+            let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
+            axum::Server::bind(&addr)
+                .serve(app.into_make_service())
+                .await
         })
 }

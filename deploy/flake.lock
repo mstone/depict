@@ -2,12 +2,13 @@
   "nodes": {
     "crane": {
       "inputs": {
-        "flake-compat": "flake-compat",
+        "flake-compat": "flake-compat_2",
         "nix-std": "nix-std",
         "nixpkgs": [
+          "diagrams",
           "nixpkgs"
         ],
-        "utils": "utils"
+        "utils": "utils_2"
       },
       "locked": {
         "lastModified": 1646176024,
@@ -25,11 +26,11 @@
     },
     "deploy-rs": {
       "inputs": {
-        "flake-compat": "flake-compat_2",
+        "flake-compat": "flake-compat",
         "nixpkgs": [
           "nixpkgs"
         ],
-        "utils": "utils_2"
+        "utils": "utils"
       },
       "locked": {
         "lastModified": 1643787431,
@@ -43,6 +44,49 @@
         "owner": "serokell",
         "repo": "deploy-rs",
         "type": "github"
+      }
+    },
+    "deploy-rs_2": {
+      "inputs": {
+        "flake-compat": "flake-compat_3",
+        "nixpkgs": [
+          "diagrams",
+          "nixpkgs"
+        ],
+        "utils": "utils_3"
+      },
+      "locked": {
+        "lastModified": 1643787431,
+        "narHash": "sha256-8IwuVgXulRE3ZWq6z8mytarawC32pKPKR20EyDtSH+w=",
+        "owner": "serokell",
+        "repo": "deploy-rs",
+        "rev": "4154ba1aaaf7333a916384c348d867d03b6f1409",
+        "type": "github"
+      },
+      "original": {
+        "owner": "serokell",
+        "repo": "deploy-rs",
+        "type": "github"
+      }
+    },
+    "diagrams": {
+      "inputs": {
+        "crane": "crane",
+        "deploy-rs": "deploy-rs_2",
+        "flake-utils": "flake-utils",
+        "minionSrc": "minionSrc",
+        "nix-filter": "nix-filter",
+        "nixpkgs": "nixpkgs",
+        "rust-overlay": "rust-overlay"
+      },
+      "locked": {
+        "narHash": "sha256-EYeAEi+N31HSwSyyIwUKWAQSHhLInY1ivLO2WcGTkiA=",
+        "path": "..",
+        "type": "path"
+      },
+      "original": {
+        "path": "..",
+        "type": "path"
       }
     },
     "flake-compat": {
@@ -62,6 +106,22 @@
       }
     },
     "flake-compat_2": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1641205782,
+        "narHash": "sha256-4jY7RCWUoZ9cKD8co0/4tFARpWB+57+r1bLLvXNJliY=",
+        "owner": "edolstra",
+        "repo": "flake-compat",
+        "rev": "b7547d3eed6f32d06102ead8991ec52ab0a4f1a7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "edolstra",
+        "repo": "flake-compat",
+        "type": "github"
+      }
+    },
+    "flake-compat_3": {
       "flake": false,
       "locked": {
         "lastModified": 1641205782,
@@ -155,21 +215,22 @@
     },
     "root": {
       "inputs": {
-        "crane": "crane",
         "deploy-rs": "deploy-rs",
-        "flake-utils": "flake-utils",
-        "minionSrc": "minionSrc",
-        "nix-filter": "nix-filter",
-        "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay"
+        "diagrams": "diagrams",
+        "nixpkgs": [
+          "diagrams",
+          "nixpkgs"
+        ]
       }
     },
     "rust-overlay": {
       "inputs": {
         "flake-utils": [
+          "diagrams",
           "flake-utils"
         ],
         "nixpkgs": [
+          "diagrams",
           "nixpkgs"
         ]
       },
@@ -189,6 +250,21 @@
     },
     "utils": {
       "locked": {
+        "lastModified": 1642700792,
+        "narHash": "sha256-XqHrk7hFb+zBvRg6Ghl+AZDq03ov6OshJLiSWOoX5es=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "846b2ae0fc4cc943637d3d1def4454213e203cba",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "utils_2": {
+      "locked": {
         "lastModified": 1644229661,
         "narHash": "sha256-1YdnJAsNy69bpcjuoKdOYQX0YxZBiCYZo4Twxerqv7k=",
         "owner": "numtide",
@@ -202,7 +278,7 @@
         "type": "github"
       }
     },
-    "utils_2": {
+    "utils_3": {
       "locked": {
         "lastModified": 1642700792,
         "narHash": "sha256-XqHrk7hFb+zBvRg6Ghl+AZDq03ov6OshJLiSWOoX5es=",

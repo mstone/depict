@@ -68,7 +68,7 @@ pub mod parser {
                 "fact",
                 tuple((
                     many1(preceded(ws, normal)),
-                    opt(char(':')),
+                    opt(preceded(ws, char(':'))),
                     map(opt(separated_list0(
                         preceded(ws, char(':')),
                             separated_pair(

@@ -3,8 +3,11 @@
 
   inputs.crane.url = "github:ipetkov/crane";
   inputs.crane.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.deploy-rs.url = "github:serokell/deploy-rs";
+  inputs.deploy-rs.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.deploy-rs.inputs.flake-utils.follows = "flake-utils";
   inputs.flake-utils.url = "github:numtide/flake-utils";
-  inputs.nixpkgs.url = "github:mstone/nixpkgs";
+  inputs.nixpkgs.url = "nixpkgs/nixpkgs-unstable";
   inputs.nix-filter.url = "github:numtide/nix-filter";
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
   inputs.rust-overlay.inputs.flake-utils.follows = "flake-utils";
@@ -12,7 +15,7 @@
   inputs.minionSrc.url = "github:minion/minion";
   inputs.minionSrc.flake = false;
 
-  outputs = {self, nixpkgs, crane, minionSrc, rust-overlay, flake-utils, nix-filter}:
+  outputs = {self, nixpkgs, crane, deploy-rs, minionSrc, rust-overlay, flake-utils, nix-filter}:
     flake-utils.lib.simpleFlake {
       inherit self nixpkgs;
       name = "diagrams";
@@ -23,6 +26,23 @@
           diagrams = lib.diagrams { isShell = false; };
           devShell = lib.diagrams { isShell = true; };
           defaultPackage = diagrams;
+
+          diagramsSrc = nix-filter.lib.filter {
+            root = self;
+            include = [
+              "Cargo.lock"
+              "Cargo.toml"
+              "src"
+              "dioxus/src"
+              "server/src"
+              "tikz/src"
+              "objc/src"
+              "web/src"
+              (nix-filter.lib.matchExt "rs")
+              (nix-filter.lib.matchExt "toml")
+              (nix-filter.lib.matchExt "lock")
+            ];
+          };
 
           minion = with final; with pkgs; stdenv.mkDerivation {
             pname = "minion";
@@ -57,28 +77,44 @@
             '';
           };
 
-          web = with final; with pkgs; stdenv.mkDerivation {
+          web = with final; with pkgs; let
+            webBin = (lib.diagrams { isShell = false; subdir = "web"; isWasm = true; });
+          in stdenv.mkDerivation { 
             pname = "web";
             version = "1.0";
-            src = self;
-            buildInputs = [ 
-              (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
-              trunk 
+            phases = [ "buildPhase" "installPhase" ];
+            buildInputs = [
+              wasm-bindgen-cli 
             ];
             buildPhase = ''
-              mkdir home
-              mkdir cargo
-              mkdir trunk
-              export HOME="$(pwd)/home";
-              export CARGO_HOME="$(pwd)/cargo";
-              export TRUNK_STAGING_DIR="$(pwd)/trunk";
-              (cd web; trunk build)
+              cp ${webBin}/bin/web.wasm .
+              mkdir pkg
+              wasm-bindgen --target web --out-dir pkg web.wasm
             '';
             installPhase = ''
-              mkdir -p $out
-              (cd web/dist; cp -a * $out)
+              mkdir $out;
+              cp -a pkg/* $out
+              cp ${self}/web/index.html $out
             '';
           };
+
+          #web = with final; with pkgs; stdenv.mkDerivation {
+          #  pname = "web";
+          #  version = "1.0";
+          #  src = self;
+          #  buildInputs = [ 
+          #    (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
+          #    wasm-pack 
+          #  ];
+          #  buildPhase = ''
+          #    
+          #    (cd web; RUSTFLAGS="-C linker=lld" cargo build --release --target wasm32-unknown-unknown)
+          #  '';
+          #  installPhase = ''
+          #    mkdir -p $out
+          #    (cd web/dist; cp -a * $out)
+          #  '';
+          #};
 
           sketch-desktop = with final; with pkgs; let
             pkgName = "diadym-sketch-desktop";
@@ -97,46 +133,47 @@
             '';
           };
 
-          lib.diagrams = { isShell, subdir ? "." }: 
+          lib.diagrams = { isShell, isWasm ? false, subdir ? "." }: 
             let 
               pnameSuffix = if subdir == "." then "" else "-${subdir}";
+              buildInputs = with final; with pkgs; [
+                (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
+                #texlive.combined.scheme-full
+                (python39.withPackages (ps: with ps; [cvxpy]))
+              ] ++ final.lib.optionals isShell [
+                entr
+                trunk
+                deploy-rs.packages.${final.system}.deploy-rs
+              ] ++ final.lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
+                AppKit
+                Security
+                CoreServices
+                CoreFoundation
+                Foundation
+                AppKit
+                WebKit
+                Cocoa
+              ]);
             in with final; with pkgs; crane.lib.${final.system}.buildPackage {
             pname = "diagrams${pnameSuffix}";
             version = "1.0";
 
-            src = self;
-            # src = nix-filter.lib.filter {
-            #   root = self;
-            #   include = [
-            #     "Cargo.lock"
-            #     "Cargo.toml"
-            #     "src"
-            #     "web"
-            #   ];
-            # };
+            # src = self;
+            src = diagramsSrc;
 
-            cargoLock = self + "/Cargo.lock";
+            cargoArtifacts = crane.lib.${final.system}.buildDepsOnly { 
+              src = diagramsSrc; 
+              inherit buildInputs;
+              cargoLock = diagramsSrc + "/Cargo.lock";
+              cargoToml = diagramsSrc + "/Cargo.toml";
+              #cargoExtraArgs = if isWasm then "-p web --target wasm32-unknown-unknown" else null;
+            };
+            cargoLock = diagramsSrc + "/Cargo.lock";
+            cargoToml = diagramsSrc + "/Cargo.toml";
             cargoCheckCommand = "";
-            cargoBuildCommand = "cargo build -p ${subdir} --release";
+            cargoBuildCommand = "cargo build --release -p ${subdir}" + final.lib.optionalString isWasm " --target wasm32-unknown-unknown";
 
-            buildInputs = [
-              (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
-              #texlive.combined.scheme-full
-              (python39.withPackages (ps: with ps; [cvxpy]))
-            ] ++ final.lib.optionals isShell [
-              entr
-              wasm-pack
-              trunk
-            ] ++ final.lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
-              AppKit
-              Security
-              CoreServices
-              CoreFoundation
-              Foundation
-              AppKit
-              WebKit
-              Cocoa
-            ]);
+            inherit buildInputs;
 
             doCheck = false;
           };
