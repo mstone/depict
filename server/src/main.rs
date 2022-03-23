@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
+use axum::routing::get_service;
 use axum::{http::StatusCode, Json, response::IntoResponse, Router, routing::post};
 
 use diagrams::graph_drawing::error::Error;
@@ -30,6 +31,7 @@ use petgraph::dot::Dot;
 use serde::{Deserialize, Serialize};
 
 use tokio::task::JoinError;
+use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{instrument, event, Level};
 use tracing_error::{InstrumentResult, ExtractSpanTrace, TracedError};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -365,7 +367,16 @@ fn main() -> Result<(), hyper::Error> {
         .unwrap()
         .block_on(async move {
             let app = Router::new()
-                .route("/api/v1/draw", post(draw));
+                .route("/api/draw/v1", post(draw))
+                .fallback(
+                    get_service(ServeDir::new(std::env::var("WEBROOT").unwrap())).handle_error(|error: std::io::Error| async move {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Unhandled internal error: {}", error),
+                        )
+                    }),
+                )
+                .layer(TraceLayer::new_for_http());
             let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
             axum::Server::bind(&addr)
                 .serve(app.into_make_service())

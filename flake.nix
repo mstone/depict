@@ -73,12 +73,25 @@
               cp ${serverBin}/bin/server $out/bin/server
               wrapProgram $out/bin/server \
                 --prefix PATH : "${minion}/bin/" \
-                --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]}
+                --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]} \
+                --set WEBROOT ${web}
             '';
           };
 
           web = with final; with pkgs; let
             webBin = (lib.diagrams { isShell = false; subdir = "web"; isWasm = true; });
+            indexHtml = writeText "index.html" ''
+              <!DOCTYPE html><html><head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <link rel="preload" href="/web_bg.wasm" as="fetch" type="application/wasm" crossorigin="">
+              <link rel="modulepreload" href="/web.js"></head>
+              <body>
+                <div id="main"> </div>
+                <script type="module">import init from '/web.js';init('/web_bg.wasm');</script>
+              </body>
+              </html>
+            '';
           in stdenv.mkDerivation { 
             pname = "web";
             version = "1.0";
@@ -94,7 +107,7 @@
             installPhase = ''
               mkdir $out;
               cp -a pkg/* $out
-              cp ${self}/web/index.html $out
+              cp ${indexHtml} $out/index.html
             '';
           };
 
@@ -144,6 +157,7 @@
                 entr
                 trunk
                 deploy-rs.packages.${final.system}.deploy-rs
+                (terraform_1.withPlugins (p: with p; [gandi vultr]))
               ] ++ final.lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                 AppKit
                 Security
