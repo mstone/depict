@@ -11,8 +11,9 @@ use diagrams::graph_drawing::layout::{*};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
 
-use dioxus_desktop::tao::dpi::{LogicalSize};
+// use dioxus_desktop::tao::dpi::{LogicalSize};
 // use dioxus_desktop::use_window;
+use tao::dpi::LogicalSize;
 
 use diagrams::parser::{parse};
 
