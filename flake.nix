@@ -157,7 +157,7 @@
                 entr
                 trunk
                 deploy-rs.packages.${final.system}.deploy-rs
-                (terraform_1.withPlugins (p: with p; [gandi vultr]))
+                (terraform_1.withPlugins (p: with p; [aws gandi vultr]))
               ] ++ final.lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                 AppKit
                 Security

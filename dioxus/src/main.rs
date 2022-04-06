@@ -91,9 +91,9 @@ fn estimate_widths<'s>(
                 .get(vl)
                 .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                 .clone();
-            if !label.is_screaming_snake_case() {
-                label = label.to_title_case();
-            }
+            // if !label.is_screaming_snake_case() {
+            //     label = label.to_title_case();
+            // }
             width_by_loc.insert((*ovr, *ohr), char_width * label.len() as f64);
         }
     }
@@ -237,9 +237,9 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 .get(*vl)
                 .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                 .clone();
-            if !label.is_screaming_snake_case() {
-                label = label.to_title_case();
-            }
+            // if !label.is_screaming_snake_case() {
+            //     label = label.to_title_case();
+            // }
             texts.push(Node::Div{key, label, hpos, vpos, width});
         }
     }
@@ -427,8 +427,8 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                                     "translate(1.5ex)"
                                 };
                                 let border = match rel.as_str() { 
-                                    "actuates" => "border border-red-300",
-                                    "senses" => "border border-blue-300",
+                                    // "actuates" => "border border-red-300",
+                                    // "senses" => "border border-blue-300",
                                     _ => "",
                                 };
                                 rsx!(div {
