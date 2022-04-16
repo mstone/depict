@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 color-spantrace = "0.2"
 diagrams = { path = "..", default-features = false, features = [ "cvxpy", "diadym-sketch-desktop", "minion" ] }
-dioxus = { version = "0.2", features = ["desktop"] }
+dioxus = { git = "https://github.com/dioxuslabs/dioxus", features = ["desktop"] }
 futures = "0.3"
 indoc = "1.0"
 Inflector = "0.11"
@@ -18,4 +18,4 @@ tao = "0.6"
 tokio = { version = "1", features = [ "rt-multi-thread" ] }
 tracing = "0.1"
 tracing-error = { version = "0.2", features = [ "traced-error" ] }
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }

@@ -129,7 +129,7 @@
           #  '';
           #};
 
-          sketch-desktop = with final; with pkgs; let
+          desktop = with final; with pkgs; let
             pkgName = "diadym-sketch-desktop";
             pkg = (lib.diagrams { isShell = false; subdir = pkgName; });
           in stdenv.mkDerivation { 
@@ -149,10 +149,11 @@
           lib.diagrams = { isShell, isWasm ? false, subdir ? "." }: 
             let 
               pnameSuffix = if subdir == "." then "" else "-${subdir}";
+              python = with final; with pkgs; python39.withPackages (ps: with ps; [cvxpy]);
               buildInputs = with final; with pkgs; [
                 (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
                 #texlive.combined.scheme-full
-                (python39.withPackages (ps: with ps; [cvxpy]))
+                python
               ] ++ final.lib.optionals isShell [
                 entr
                 trunk
@@ -191,6 +192,10 @@
             inherit buildInputs;
 
             doCheck = false;
+
+            shellHook = if isShell then ''
+              export PYTHONPATH=''${PYTHONPATH:+''${PYTHONPATH}:}${python}/${python.sitePackages}
+            '' else null;
           };
         };
       };

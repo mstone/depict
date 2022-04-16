@@ -521,6 +521,11 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         class: "border",
                         rows: "6",
                         cols: "80",
+                        autocomplete: "off",
+                        // autocorrect: "off",
+                        // autocapitalize: "off",
+                        autofocus: "true",
+                        spellcheck: "false",
                         // placeholder: "",
                         oninput: move |e| { 
                             event!(Level::TRACE, "INPUT");
@@ -581,6 +586,7 @@ pub fn main() -> io::Result<()> {
     tracing_subscriber::Registry::default()
         .with(tracing_error::ErrorLayer::default())
         .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     let (model_sender, mut model_receiver) = futures_channel::mpsc::unbounded::<String>();
