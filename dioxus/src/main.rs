@@ -16,6 +16,8 @@ use dioxus::prelude::*;
 use tao::dpi::LogicalSize;
 
 use diagrams::parser::{parse};
+use diagrams::parser::{Parser, Token};
+use logos::Logos;
 
 use color_spantrace::colorize;
 
@@ -140,16 +142,32 @@ fn estimate_widths<'s>(
 
 #[instrument(skip(data))]
 fn draw(data: String) -> Result<Drawing, Error> {
-    let v = parse(&data[..])
-        .map_err(|e| match e {
-            nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
-            nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
-            nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
-        })
-        .in_current_span()?
-        .1;
 
-    let vcg = calculate_vcg(&v)?;
+    let mut p = Parser::new();
+    let mut lex = Token::lexer(&data);
+    while let Some(tk) = lex.next() {
+        p.parse(tk)
+            .map_err(|_| {
+                Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+            })
+            .in_current_span()?
+    }
+
+    let v = p.end_of_input()
+        .map_err(|_| {
+            Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+        })?;
+
+    // let v = parse(&data[..])
+    //     .map_err(|e| match e {
+    //         nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
+    //         nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
+    //         nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
+    //     })
+    //     .in_current_span()?
+    //     .1;
+
+    let vcg = calculate_vcg2(&v)?;
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
     // diagrams::graph_drawing::draw(v, &mut vcg)?;
@@ -601,7 +619,8 @@ pub fn main() -> io::Result<()> {
                 let mut prev_model: Option<String> = None;
                 while let Some(model) = model_receiver.next().await {
                     if Some(&model) != prev_model.as_ref() {
-                        let nodes = if model.trim().is_empty() {
+                        let model_str: &str = &model;
+                        let nodes = if model_str.trim().is_empty() {
                             Ok(Ok(Drawing::default()))
                         } else {
                             catch_unwind(|| {

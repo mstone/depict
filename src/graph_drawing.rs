@@ -1,6 +1,8 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod error {
+    use std::ops::Range;
+
     use petgraph::algo::NegativeCycle;
     use tracing_error::{TracedError, ExtractSpanTrace, SpanTrace, InstrumentError};
 
@@ -18,6 +20,8 @@ pub mod error {
         MissingFactError {ident: String},
         #[error("unimplemented drawing style error")]
         UnimplementedDrawingStyleError { style: String },
+        #[error("pomelo error")]
+        PomeloError { span: Range<usize>, text: String },
     }
     
     #[non_exhaustive]
@@ -164,7 +168,7 @@ pub mod layout {
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::graph::roots;
-    use crate::parser::Fact;
+    use crate::parser::{Fact, Item};
 
     #[derive(Clone, Debug)]
     pub struct Vcg<V, E> {
@@ -203,6 +207,12 @@ pub mod layout {
         }
     }
 
+    impl Trim for String {
+        fn trim(self) -> Self {
+            str::trim(&self).into()
+        }
+    }
+
     pub trait IsEmpty {
         fn is_empty(&self) -> bool;
     }
@@ -211,6 +221,49 @@ pub mod layout {
         fn is_empty(&self) -> bool {
             str::is_empty(self)
         }
+    }
+
+    impl IsEmpty for String {
+        fn is_empty(&self) -> bool {
+            String::is_empty(self)
+        }
+    }
+
+    pub fn calculate_vcg2<'s>(v: &'s [Item<'s>]) -> Result<Vcg<&'s str, &'s str>, Error> where 
+    {
+        let mut vs = Vec::new();
+        for item in v.iter() {
+            match item {
+                Item::Binding { binding, expr } => {
+                    if let Item::Literal { literal } = expr.as_ref() {   
+                        let label = literal.label.unwrap_or_default();
+                        vs.push(Fact{
+                            path: vec![label],
+                            labels_by_level: vec![],
+                        })
+                    }
+                },
+                Item::Relating { lhs, rhs } => {
+                    let lbl = rhs.iter().map(|(a, b)| {
+                        (
+                            a.iter().map(|l| Some(*l)).collect::<Vec<_>>(), 
+                            b.iter().map(|l| Some(*l)).collect::<Vec<_>>()
+                        )
+                    }).collect::<Vec<_>>();
+                    vs.push(Fact{
+                        path: lhs.clone(),
+                        labels_by_level: lbl,
+                    })
+                },
+                Item::Literal { literal } => {
+                    vs.push(Fact{
+                        path: vec![literal.label.unwrap_or_default()],
+                        labels_by_level: vec![],
+                    })
+                },
+            }
+        }
+        calculate_vcg(&vs)
     }
 
     #[instrument()]
