@@ -168,7 +168,7 @@ pub mod layout {
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::graph::roots;
-    use crate::parser::{Fact, Item};
+    use crate::parser::{Fact, Item, Body};
 
     #[derive(Clone, Debug)]
     pub struct Vcg<V, E> {
@@ -229,39 +229,50 @@ pub mod layout {
         }
     }
 
+
+    fn levels_colon_helper<'s>(lvls: &mut Vec<(Vec<Option<&'s str>>, Vec<Option<&'s str>>)>, i: &'s Item) {
+        let up = i.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+        let down = match i.1.as_deref() {
+            Some(Body::Slash(rhs)) => {
+                rhs.0.iter().map(|s| Some(*s)).collect::<Vec<_>>()
+            },
+            _ => vec![],
+        };
+        lvls.push((up, down));
+    }
+
+    fn levels_helper<'s>(lvls: &mut Vec<(Vec<Option<&'s str>>, Vec<Option<&'s str>>)>, body: &'s Option<Box<Body>>) {
+        if let Some(Body::Colon(i)) = body.as_deref() { 
+            levels_colon_helper(lvls, i); 
+        }
+    }
+
+    fn helper<'s>(vs: &mut Vec<Fact<&'s str>>, Item(head, body): &'s Item) {
+        match head.len() {
+            0 => {
+                
+            },
+            1 => {
+                // if let Some(Body::Colon(rhs)) = body.as_deref() {
+                //     helper(vs, rhs)
+                // }
+            },
+            _ => {
+                let mut lvls = vec![];
+                levels_helper(&mut lvls, body);
+                vs.push(Fact{
+                    path: head.clone(),
+                    labels_by_level: lvls,
+                })
+            },
+        }
+    }
+
     pub fn calculate_vcg2<'s>(v: &'s [Item<'s>]) -> Result<Vcg<&'s str, &'s str>, Error> where 
     {
         let mut vs = Vec::new();
-        for item in v.iter() {
-            match item {
-                Item::Binding { binding, expr } => {
-                    if let Item::Literal { literal } = expr.as_ref() {   
-                        let label = literal.label.unwrap_or_default();
-                        vs.push(Fact{
-                            path: vec![label],
-                            labels_by_level: vec![],
-                        })
-                    }
-                },
-                Item::Relating { lhs, rhs } => {
-                    let lbl = rhs.iter().map(|(a, b)| {
-                        (
-                            a.iter().map(|l| Some(*l)).collect::<Vec<_>>(), 
-                            b.iter().map(|l| Some(*l)).collect::<Vec<_>>()
-                        )
-                    }).collect::<Vec<_>>();
-                    vs.push(Fact{
-                        path: lhs.clone(),
-                        labels_by_level: lbl,
-                    })
-                },
-                Item::Literal { literal } => {
-                    vs.push(Fact{
-                        path: vec![literal.label.unwrap_or_default()],
-                        labels_by_level: vec![],
-                    })
-                },
-            }
+        for i in v {
+            helper(&mut vs, i);
         }
         calculate_vcg(&vs)
     }

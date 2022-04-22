@@ -17,31 +17,16 @@ pub mod parser {
 
 
     #[derive(Debug)]
-    pub struct Literal<'s> {
-        pub label: Option<&'s str>,
-        pub body: Option<Body<'s>>,
-    }
+    pub struct Item<'s>(pub Vec<&'s str>, pub Option<Box<Body<'s>>>);
 
     #[derive(Debug)]
-    pub enum Item<'s> {
-        Literal{ 
-            literal: Literal<'s>,
-        },
-        Binding {
-            binding: &'s str,
-            expr: Box<Item<'s>>,
-        },
-        Relating {
-            lhs: Vec<&'s str>,
-            rhs: Vec<(Vec<&'s str>, Vec<&'s str>)>
-        }
+    pub enum Body<'s> {
+        Colon(Item<'s>),
+        Sq(Item<'s>),
+        Br(Item<'s>),
+        Slash(Item<'s>, Item<'s>),
     }
-
-    #[derive(Debug)]    
-    pub enum Body<'s> { 
-        And(Vec<Item<'s>>),
-        Or(Vec<Item<'s>>),
-    }
+    
 
     // %type #[regex(r#"\p{Pattern_Syntax}+"#)] Punctuation;
     // %type #[token(r#"\p{XID_Start}\p{XID_Continue}*"#)] Ident;
@@ -49,7 +34,7 @@ pub mod parser {
     pomelo! {
         %module fact;
         %include {
-            use super::{Model, Item, Body, Literal};
+            use super::{Model, Item, Body};
             use logos::{Logos, Lexer};
 
             // fn parse_str(lex: &Lexer<Token>) -> &str {
@@ -63,75 +48,44 @@ pub mod parser {
         %type #[token("}")] Rbr;
         %type #[token("[")] Lsq;
         %type #[token("]")] Rsq;
-        %type #[token(";")] Semi;
+        // %type #[token(";")] Semi;
         %type #[token(",")] Comma;
         %type #[token(":")] Colon;
-        %type #[token("~")] Tilde;
+        // %type #[token("~")] Tilde;
         %type #[token("/")] Slash;
-        %type #[token("|")] Pipe;
-        %type #[regex(r#"\p{XID_Start}\p{XID_Continue}*"#)] Text &'s str;
-        %type binding Item<'s>;
-        %type literal Literal<'s>;
-        %type relating Item<'s>;
-        %type binding_body Body<'s>;
+        // %type #[token("|")] Pipe;
+        %type #[regex(r#"[\p{XID_Start}$][\p{XID_Continue}.-]*"#)] Text &'s str;
         %type start Model<'s>;
         %type model Vec<Item<'s>>;
-        %type bindings Vec<Item<'s>>;
-        %type bindings_comma Vec<Item<'s>>;
-        %type bindings_pipe Vec<Item<'s>>;
-        %type model_semi Vec<Item<'s>>;
-        %type model_comma Vec<Item<'s>>;
-        %type model_sp Vec<Item<'s>>;
-        %type model_nl Vec<Item<'s>>;
-        %type labels_down Vec<&'s str>;
-        %type labels_up Vec<&'s str>;
-        %type label_level (Vec<&'s str>, Vec<&'s str>);
-        %type label &'s str;
-        %type labels Vec<(Vec<&'s str>, Vec<&'s str>)>;
+        %type item Item<'s>;
+        %type body Body<'s>;
         %right Colon;
-        %right Text;
         %right Lsq;
         %right Lbr;
+        %right Slash;
+        %right Comma;
+        // %left Semi;
+        %right Text;
         // %verbose;
 
         start ::= model;
 
-        model ::= model(mut m) Nl binding(i) { m.push(i); m };
-        model ::= model(mut m) Nl relating(i) { m.push(i); m };
-        // model ::= model(mut m) Nl literal(i) { m.push(Item::Literal{literal: i}); m };
-        model ::= binding(i) { vec![i] };
-        model ::= relating(i) { vec![i] };
-        // model ::= literal(i) { vec![Item::Literal{literal: i}] };
+        model ::= model(mut m) Nl item?(i) { if let Some(i) = i { m.push(i); }; m };
+        model ::= item(i) { vec![i] };
 
-        binding ::= Text(binding) Colon literal(l) {Item::Binding{binding, expr: Box::new(Item::Literal{literal: l})}};
-        binding ::= Text(binding) Colon relating(r) {Item::Binding{binding, expr: Box::new(r)}};
-        binding ::= literal(i) { Item::Binding{binding: "", expr: Box::new(Item::Literal{literal: i})}};
-
-        literal ::= Text(label) Lsq bindings?(body) Rsq { Literal{ label: Some(label), body: Some(Body::And(body.unwrap_or_default())) }};
-        literal ::= Text(label) Lbr bindings?(body) Rbr { Literal{ label: Some(label), body: Some(Body::Or(body.unwrap_or_default())) }};
-        literal ::= Lsq bindings?(body) Rsq { Literal{ label: None, body: Some(Body::And(body.unwrap_or_default())) }};
-        literal ::= Lbr bindings?(body) Rbr { Literal{ label: None, body: Some(Body::Or(body.unwrap_or_default())) }};
-        literal ::= Text(label) { Literal{ label: Some(label), body: None} };
-
-        bindings ::= bindings(mut bs) binding(b) { bs.push(b); bs };
-        bindings ::= binding(b) { vec![b] };
-
-        relating ::= Text(t1) Text(t2) Colon labels(labels) { Item::Relating{lhs: vec![t1, t2], rhs: labels}};
-        relating ::= Text(t1) Text(t2) { Item::Relating{lhs: vec![t1, t2], rhs: vec![]} };
-
-        labels ::= labels(mut l) Colon label_level(lvl) { l.push(lvl); l };
-        labels ::= label_level(lvl) { vec![lvl] };
-
-        label_level ::= labels_down(d) Slash labels_up(u) { (d, u) };
-        label_level ::= Slash labels_up(u) { (vec![], u) };
-        label_level ::= labels_down(d) { (d, vec![]) };
-        // label_level ::= { (vec![], vec![]) };
-
-        labels_down ::= labels_down(mut ls) Comma label(l) { ls.push(l); ls };
-        labels_up ::= labels_up(mut ls) Comma label(l) { ls.push(l); ls };
-        labels_down ::= label(l) { vec![l] };
-        labels_up ::= label(l) { vec![l] };
-        label ::= Text;
+        // item ::= item(mut i) item(b) Slash item(j) { i.1 = Some(Box::new(Body::Slash(b, j))); i };
+        item ::= item(mut i) body(b) [Colon] { i.1 = Some(Box::new(b)); i };
+        // item ::= item(mut i) Slash item(j) { i.1 = Some(Box::new(Body::Slash(j))); i };
+        item ::= item(mut i) Comma Text(t) { i.0.push(t); i };
+        item ::= item(mut i) Text(t) { i.0.push(t); i };
+        item ::= Text(t) { Item(vec![t], None) };
+        // item ::= body(b) Slash body(j) { Item(vec![], Some(Box::new(Body::Slash(b, j)))) };
+        item ::= body(b) [Colon] { Item(vec![], Some(Box::new(b))) };
+        
+        body ::= Colon item(i) { Body::Colon(i) };
+        body ::= Lsq item(i) Rsq { Body::Sq(i) };
+        body ::= Lbr item(i) Rbr { Body::Br(i) };
+        body ::= item(i) Slash item(j) { Body::Slash(i, j) };
     }
 
     pub use fact::Parser;

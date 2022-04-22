@@ -15,8 +15,7 @@ use dioxus::prelude::*;
 // use dioxus_desktop::use_window;
 use tao::dpi::LogicalSize;
 
-use diagrams::parser::{parse};
-use diagrams::parser::{Parser, Token};
+use diagrams::parser::{parse, Parser, Token, Item};
 use logos::Logos;
 
 use color_spantrace::colorize;
@@ -158,7 +157,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             .in_current_span()?
     }
 
-    let v = p.end_of_input()
+    let v: Vec<Item> = p.end_of_input()
         .map_err(|_| {
             Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
         })?;

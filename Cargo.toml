@@ -44,6 +44,7 @@ path = "src/lib.rs"
 members = [
     "dioxus",
     "objc",
+    "parse",
     "server",
     "tikz",
     "web",
