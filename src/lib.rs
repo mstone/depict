@@ -90,19 +90,22 @@ pub mod parser {
         %type labels Vec<(Vec<&'s str>, Vec<&'s str>)>;
         %right Colon;
         %right Text;
+        %right Lsq;
+        %right Lbr;
         // %verbose;
 
-        start ::= model?(m) { m.unwrap_or_default() };
+        start ::= model;
 
         model ::= model(mut m) Nl binding(i) { m.push(i); m };
         model ::= model(mut m) Nl relating(i) { m.push(i); m };
-        model ::= model(mut m) Nl literal(i) { m.push(Item::Literal{literal: i}); m };
+        // model ::= model(mut m) Nl literal(i) { m.push(Item::Literal{literal: i}); m };
         model ::= binding(i) { vec![i] };
         model ::= relating(i) { vec![i] };
-        model ::= literal(i) { vec![Item::Literal{literal: i}] };
+        // model ::= literal(i) { vec![Item::Literal{literal: i}] };
 
         binding ::= Text(binding) Colon literal(l) {Item::Binding{binding, expr: Box::new(Item::Literal{literal: l})}};
         binding ::= Text(binding) Colon relating(r) {Item::Binding{binding, expr: Box::new(r)}};
+        binding ::= literal(i) { Item::Binding{binding: "", expr: Box::new(Item::Literal{literal: i})}};
 
         literal ::= Text(label) Lsq bindings?(body) Rsq { Literal{ label: Some(label), body: Some(Body::And(body.unwrap_or_default())) }};
         literal ::= Text(label) Lbr bindings?(body) Rbr { Literal{ label: Some(label), body: Some(Body::Or(body.unwrap_or_default())) }};
@@ -110,8 +113,8 @@ pub mod parser {
         literal ::= Lbr bindings?(body) Rbr { Literal{ label: None, body: Some(Body::Or(body.unwrap_or_default())) }};
         literal ::= Text(label) { Literal{ label: Some(label), body: None} };
 
-        bindings ::= binding(b) { vec![b] };
         bindings ::= bindings(mut bs) binding(b) { bs.push(b); bs };
+        bindings ::= binding(b) { vec![b] };
 
         relating ::= Text(t1) Text(t2) Colon labels(labels) { Item::Relating{lhs: vec![t1, t2], rhs: labels}};
         relating ::= Text(t1) Text(t2) { Item::Relating{lhs: vec![t1, t2], rhs: vec![]} };
@@ -124,10 +127,10 @@ pub mod parser {
         label_level ::= labels_down(d) { (d, vec![]) };
         // label_level ::= { (vec![], vec![]) };
 
-        labels_down ::= label(l) { vec![l] };
-        labels_up ::= label(l) { vec![l] };
         labels_down ::= labels_down(mut ls) Comma label(l) { ls.push(l); ls };
         labels_up ::= labels_up(mut ls) Comma label(l) { ls.push(l); ls };
+        labels_down ::= label(l) { vec![l] };
+        labels_up ::= label(l) { vec![l] };
         label ::= Text;
     }
 

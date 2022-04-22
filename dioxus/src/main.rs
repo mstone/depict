@@ -144,6 +144,11 @@ fn estimate_widths<'s>(
 fn draw(data: String) -> Result<Drawing, Error> {
 
     let mut p = Parser::new();
+    { 
+        let lex = Token::lexer(&data);
+        let tks = lex.collect::<Vec<_>>();
+        event!(Level::TRACE, ?tks, "LEX");
+    }
     let mut lex = Token::lexer(&data);
     while let Some(tk) = lex.next() {
         p.parse(tk)
@@ -157,6 +162,8 @@ fn draw(data: String) -> Result<Drawing, Error> {
         .map_err(|_| {
             Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
         })?;
+
+    event!(Level::TRACE, ?v, "PARSE");
 
     // let v = parse(&data[..])
     //     .map_err(|e| match e {
