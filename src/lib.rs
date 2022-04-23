@@ -17,25 +17,98 @@ pub mod parser {
 
 
     #[derive(Debug)]
-    pub struct Item<'s>(pub Vec<&'s str>, pub Option<Box<Body<'s>>>);
+    pub enum Item<'s> {
+        Path(Vec<&'s str>, Vec<Item<'s>>),
+        Body(Vec<Body<'s>>)
+    }
 
     #[derive(Debug)]
     pub enum Body<'s> {
-        Colon(Item<'s>),
+        Item(Vec<Item<'s>>),
         Sq(Item<'s>),
         Br(Item<'s>),
         Slash(Item<'s>, Item<'s>),
     }
     
+    pub fn merge_colon<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
+        eprint!("MERGE COLON {i:?} {j:?}");
+        let r = match i { 
+            Item::Path(p, mut ps) => {
+                ps.push(j);
+                Item::Path(p, ps)
+            },
+            Item::Body(mut i2) => {
+                match j {
+                    Item::Body(mut js) => {
+                        i2.append(&mut js);
+                    },
+                    _ => {
+                        i2.push(Body::Item(vec![j]));
+                    }
+                };
+                Item::Body(i2)
+            }
+        };
+        eprintln!(" -> {r:?}");
+        r
+    }
 
+    pub fn merge_body<'s>(i: Item<'s>, b: Body<'s>) -> Item<'s> {
+        eprint!("MERGE BODY {i:?} {b:?}");
+        let r = match i {
+            Item::Path(p, mut ps) => {
+                if ps.is_empty() {
+                    ps.push(Item::Body(vec![b]));
+                } else {
+                    let last = ps.pop().unwrap();
+                    eprintln!(" -> ");
+                    let last = merge_body(last, b);
+                    ps.push(last);
+                }
+                Item::Path(p, ps)
+            },
+            Item::Body(mut ibs) => {
+                ibs.push(b);
+                Item::Body(ibs)
+            },
+        };
+        eprintln!(" -> {r:?}");
+        r
+    }
+
+    pub fn merge_slash<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
+        Item::Body(vec![
+            Body::Slash(i, j)
+        ])
+    }
+
+    pub fn merge_text<'s>(i: Item<'s>, t: &'s str) -> Item<'s> {
+        eprint!("MERGE TEXT {i:?} {t:?}");
+        let r = match i {
+            Item::Path(mut p, mut ps) => {
+                if ps.is_empty() {
+                    p.push(t);
+                    Item::Path(p, vec![])
+                } else if p.is_empty() {
+                    ps.push(Item::Path(vec![t], vec![]));
+                    Item::Path(p, ps)
+                } else {
+                    Item::Path(vec![], vec![Item::Path(p, ps), Item::Path(vec![t], vec![])])
+                }
+            },
+            Item::Body(_) => todo!(),
+        };
+        eprintln!(" -> {r:?}");
+        r
+    }
     // %type #[regex(r#"\p{Pattern_Syntax}+"#)] Punctuation;
     // %type #[token(r#"\p{XID_Start}\p{XID_Continue}*"#)] Ident;
     
     pomelo! {
         %module fact;
         %include {
-            use super::{Model, Item, Body};
-            use logos::{Logos, Lexer};
+            use super::{Model, Item, Body, merge_body, merge_colon, merge_slash, merge_text};
+            use logos::{Logos};
 
             // fn parse_str(lex: &Lexer<Token>) -> &str {
             //     lex.slice()
@@ -73,19 +146,16 @@ pub mod parser {
         model ::= model(mut m) Nl item?(i) { if let Some(i) = i { m.push(i); }; m };
         model ::= item(i) { vec![i] };
 
-        // item ::= item(mut i) item(b) Slash item(j) { i.1 = Some(Box::new(Body::Slash(b, j))); i };
-        item ::= item(mut i) body(b) [Colon] { i.1 = Some(Box::new(b)); i };
-        // item ::= item(mut i) Slash item(j) { i.1 = Some(Box::new(Body::Slash(j))); i };
-        item ::= item(mut i) Comma Text(t) { i.0.push(t); i };
-        item ::= item(mut i) Text(t) { i.0.push(t); i };
-        item ::= Text(t) { Item(vec![t], None) };
-        // item ::= body(b) Slash body(j) { Item(vec![], Some(Box::new(Body::Slash(b, j)))) };
-        item ::= body(b) [Colon] { Item(vec![], Some(Box::new(b))) };
-        
-        body ::= Colon item(i) { Body::Colon(i) };
+        item ::= item(i) body(b) [Colon] { merge_body(i, b) };
+        item ::= item(i) Colon item(j) { merge_colon(i, j) };
+        item ::= item(i) Slash item(j) { merge_slash(i, j) };
+        item ::= item(i) Comma Text(t) { merge_text(i, t) };
+        item ::= item(i) Text(t) { merge_text(i, t) };
+        item ::= Text(t) { Item::Path(vec![t], vec![]) };
+        item ::= body(b) [Colon] { Item::Body(vec![b]) };
+
         body ::= Lsq item(i) Rsq { Body::Sq(i) };
         body ::= Lbr item(i) Rbr { Body::Br(i) };
-        body ::= item(i) Slash item(j) { Body::Slash(i, j) };
     }
 
     pub use fact::Parser;

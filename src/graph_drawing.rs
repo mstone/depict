@@ -168,7 +168,7 @@ pub mod layout {
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::graph::roots;
-    use crate::parser::{Fact, Item, Body};
+    use crate::parser::{Fact, Item, Body, Labels};
 
     #[derive(Clone, Debug)]
     pub struct Vcg<V, E> {
@@ -230,20 +230,42 @@ pub mod layout {
     }
 
 
-    fn levels_colon_helper<'s>(lvls: &mut Vec<(Vec<Option<&'s str>>, Vec<Option<&'s str>>)>, i: &'s Item) {
-        let up = i.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-        let down = match i.1.as_deref() {
-            Some(Body::Slash(rhs)) => {
-                rhs.0.iter().map(|s| Some(*s)).collect::<Vec<_>>()
-            },
-            _ => vec![],
-        };
-        lvls.push((up, down));
+    fn levels_colon_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, b: &Body<'s>) {
+        if let Body::Slash(up, down) = &b {
+            let up = up.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+            let down = down.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+            lvls.push((up, down));
+        }
+        if let Body::Nest(a, b) = b {
+            levels_colon_helper(lvls, a);
+            levels_helper(lvls, b);
+        }
     }
 
-    fn levels_helper<'s>(lvls: &mut Vec<(Vec<Option<&'s str>>, Vec<Option<&'s str>>)>, body: &'s Option<Box<Body>>) {
-        if let Some(Body::Colon(i)) = body.as_deref() { 
-            levels_colon_helper(lvls, i); 
+    fn levels_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, body: &Body<'s>) {
+        match body {
+            Body::Colon(Item(i, Some(b))) => {
+                match b.as_ref() {
+                    Body::Colon(_) => {
+                        levels_helper(lvls, b);
+                    },
+                    Body::Sq(_) | Body::Br(_) => {
+                        let up = i.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+                        lvls.push((up, vec![]));
+                    },
+                    Body::Slash(_, _) | Body::Nest(_, _) => {
+                        levels_colon_helper(lvls, b); 
+                    },
+                }
+            },
+            Body::Colon(Item(i, None)) => {
+                let up = i.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+                lvls.push((up, vec![]));
+            },
+            Body::Slash(_, _) => {
+                levels_colon_helper(lvls, body);
+            },
+            _ => {}
         }
     }
 
@@ -259,7 +281,9 @@ pub mod layout {
             },
             _ => {
                 let mut lvls = vec![];
-                levels_helper(&mut lvls, body);
+                if let Some(body) = body.as_deref() { 
+                    levels_helper(&mut lvls, body); 
+                }
                 vs.push(Fact{
                     path: head.clone(),
                     labels_by_level: lvls,

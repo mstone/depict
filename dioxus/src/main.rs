@@ -163,6 +163,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
         })?;
 
     event!(Level::TRACE, ?v, "PARSE");
+    eprintln!("PARSE {v:#?}");
 
     // let v = parse(&data[..])
     //     .map_err(|e| match e {
