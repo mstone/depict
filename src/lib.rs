@@ -18,105 +18,40 @@ pub mod parser {
 
     #[derive(Debug)]
     pub enum Item<'s> {
-        Path(Vec<&'s str>, Vec<Item<'s>>),
-        Body(Vec<Body<'s>>)
+        Text(&'s str),
+        Tilde(),
+        Seq(Vec<Item<'s>>),
+        Colon(Vec<Item<'s>>),
+        Dash(Vec<Item<'s>>),
+        Slash(Vec<Item<'s>>),
+        Sq(Vec<Item<'s>>),
+        Br(Vec<Item<'s>>),
     }
 
-    #[derive(Debug)]
-    pub enum Body<'s> {
-        Item(Vec<Item<'s>>),
-        Sq(Item<'s>),
-        Br(Item<'s>),
-        Slash(Item<'s>, Item<'s>),
-    }
-    
-    pub fn merge_colon<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
-        eprint!("MERGE COLON {i:?} {j:?}");
-        let r = match i { 
-            Item::Path(p, mut ps) => {
-                ps.push(j);
-                Item::Path(p, ps)
-            },
-            Item::Body(mut i2) => {
-                match j {
-                    Item::Body(mut js) => {
-                        i2.append(&mut js);
-                    },
-                    _ => {
-                        i2.push(Body::Item(vec![j]));
-                    }
-                };
-                Item::Body(i2)
-            }
+    pub fn merge_item<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
+        eprint!("MERGE {i:?} {j:?}");
+        let r = match j {
+            Item::Text(_) => Item::Seq(vec![i, j]),
+            Item::Tilde() => Item::Seq(vec![i, j]),
+            Item::Seq(mut rhs) => { rhs.insert(0, i); Item::Seq(rhs) },
+            Item::Colon(_) => { Item::Seq(vec![i, j]) },
+            Item::Dash(mut rhs) => { rhs.insert(0, i); Item::Dash(rhs) },
+            Item::Slash(mut rhs) => { rhs.insert(0, i); Item::Slash(rhs) },
+            Item::Sq(_) => { Item::Seq(vec![i, j]) },
+            Item::Br(_) => { Item::Seq(vec![i, j]) },
         };
         eprintln!(" -> {r:?}");
         r
     }
-
-    pub fn merge_body<'s>(i: Item<'s>, b: Body<'s>) -> Item<'s> {
-        eprint!("MERGE BODY {i:?} {b:?}");
-        let r = match i {
-            Item::Path(p, mut ps) => {
-                if ps.is_empty() {
-                    ps.push(Item::Body(vec![b]));
-                } else {
-                    let last = ps.pop().unwrap();
-                    eprintln!(" -> ");
-                    let last = merge_body(last, b);
-                    ps.push(last);
-                }
-                Item::Path(p, ps)
-            },
-            Item::Body(mut ibs) => {
-                ibs.push(b);
-                Item::Body(ibs)
-            },
-        };
-        eprintln!(" -> {r:?}");
-        r
-    }
-
-    pub fn merge_slash<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
-        Item::Body(vec![
-            Body::Slash(i, j)
-        ])
-    }
-
-    pub fn merge_text<'s>(i: Item<'s>, t: &'s str) -> Item<'s> {
-        eprint!("MERGE TEXT {i:?} {t:?}");
-        let r = match i {
-            Item::Path(mut p, mut ps) => {
-                if ps.is_empty() {
-                    p.push(t);
-                    Item::Path(p, vec![])
-                } else if p.is_empty() {
-                    ps.push(Item::Path(vec![t], vec![]));
-                    Item::Path(p, ps)
-                } else {
-                    Item::Path(vec![], vec![Item::Path(p, ps), Item::Path(vec![t], vec![])])
-                }
-            },
-            Item::Body(_) => todo!(),
-        };
-        eprintln!(" -> {r:?}");
-        r
-    }
-    // %type #[regex(r#"\p{Pattern_Syntax}+"#)] Punctuation;
-    // %type #[token(r#"\p{XID_Start}\p{XID_Continue}*"#)] Ident;
     
     pomelo! {
         %module fact;
         %include {
-            use super::{Model, Item, Body, merge_body, merge_colon, merge_slash, merge_text};
+            use super::{Model, Item, merge_item};
             use logos::{Logos};
-
-            // fn parse_str(lex: &Lexer<Token>) -> &str {
-            //     lex.slice()
-            // }
         }
         %token #[derive(Debug, Logos)] pub enum Token<'s> {};
-        %type #[error] #[regex(r#"[\p{Pattern_White_Space}&&[^\n\r]]+"#, logos::skip)] Error;
-        %type #[regex(r#"[\n\r]+"#)] Nl;
+        %type #[error] #[regex(r#"[\p{Pattern_White_Space}&&[^\r\n]]+"#, logos::skip)] Error;
         %type #[token("{")] Lbr;
         %type #[token("}")] Rbr;
         %type #[token("[")] Lsq;
@@ -124,38 +59,61 @@ pub mod parser {
         // %type #[token(";")] Semi;
         %type #[token(",")] Comma;
         %type #[token(":")] Colon;
-        // %type #[token("~")] Tilde;
+        %type #[token("~")] Tilde;
         %type #[token("/")] Slash;
         // %type #[token("|")] Pipe;
-        %type #[regex(r#"[\p{XID_Start}$][\p{XID_Continue}.-]*"#)] Text &'s str;
+        %type #[token("-")] Dash;
+        %type #[token("!")] Bang;
+        %type #[regex("[\r\n]+")] Nl;
+        %type #[regex(r#"[\p{XID_Start}$<][\p{XID_Continue}.\-\\&&[^:/]]*"#)] Text &'s str;
         %type start Model<'s>;
         %type model Vec<Item<'s>>;
         %type item Item<'s>;
-        %type body Body<'s>;
+        %type expr1 Item<'s>;
+        %type expr2 Item<'s>;
+        %type expr2a Item<'s>;
+        %type expr3 Item<'s>;
+        %type expr4 Item<'s>;
+        %type expr5 Item<'s>;
+        %right Bang;
+        %left Nl;
         %right Colon;
-        %right Lsq;
-        %right Lbr;
+        %left Dash;
+        %right Lsq Lbr;
+        %right Rsq Rbr;
         %right Slash;
         %right Comma;
-        // %left Semi;
+        %left Semi;
         %right Text;
+        %left Tilde;
         // %verbose;
+        // %trace;
 
         start ::= model;
 
-        model ::= model(mut m) Nl item?(i) { if let Some(i) = i { m.push(i); }; m };
-        model ::= item(i) { vec![i] };
+        // model ::= model(mut i) Nl expr1(j) Nl { i.push(j); i };
+        // model ::= model(mut i) Nl expr1(j) { i.push(j); i };
+        // model ::= model(i) Nl { i };
+        // model ::= expr1(i) Nl { vec![i] } ;
+        // model ::= expr1(i) [Bang] { vec![i] };
+        // model ::= Nl { vec![] };
+        // model ::= [Bang] { vec![] };
+        model ::= model(mut i) Nl expr1?(j) { if let Some(j) = j { i.push(j) }; i };
+        model ::= expr1(j) { vec![j] };
 
-        item ::= item(i) body(b) [Colon] { merge_body(i, b) };
-        item ::= item(i) Colon item(j) { merge_colon(i, j) };
-        item ::= item(i) Slash item(j) { merge_slash(i, j) };
-        item ::= item(i) Comma Text(t) { merge_text(i, t) };
-        item ::= item(i) Text(t) { merge_text(i, t) };
-        item ::= Text(t) { Item::Path(vec![t], vec![]) };
-        item ::= body(b) [Colon] { Item::Body(vec![b]) };
+        expr1 ::= Colon expr1(j) { Item::Colon(vec![j]) };
+        expr1 ::= Dash expr1(j) { Item::Dash(vec![j]) };
+        expr1 ::= Slash expr1(j) { Item::Slash(vec![j]) };
+        expr1 ::= Lsq expr1(j) Rsq { Item::Sq(vec![j])};
+        expr1 ::= Lsq expr1(j) [Rsq] { Item::Sq(vec![j]) };
+        expr1 ::= Lbr expr1(j) Rbr { Item::Br(vec![j])};
+        expr1 ::= Lbr expr1(j) [Rbr] { Item::Br(vec![j]) };
+        expr1 ::= Comma expr1(j) { j };
+        expr1 ::= expr2(i) expr1(j) { merge_item(i, j) };
+        expr1 ::= expr2(i) { i };
 
-        body ::= Lsq item(i) Rsq { Body::Sq(i) };
-        body ::= Lbr item(i) Rbr { Body::Br(i) };
+        expr2 ::= Text(t) { Item::Text(t) };
+        expr2 ::= Tilde { Item::Tilde() };
     }
 
     pub use fact::Parser;
