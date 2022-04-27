@@ -133,7 +133,7 @@ pub mod parser {
         model ::= model(mut i) Nl expr1?(j) { if let Some(j) = j { i.push(j) }; i };
         model ::= expr1(j) { vec![j] };
 
-        expr1 ::= expr1(j) Colon [Tilde] { Item::Colon(vec![j]) };
+        expr1 ::= expr1(j) Colon [Tilde] { if let Item::Seq(lhs) = j { Item::Colon(lhs) } else { Item::Colon(vec![j]) } };
         expr1 ::= expr1(j) Dash { Item::Dash(vec![j]) };
         expr1 ::= expr1(j) Comma { j };
         expr1 ::= Lsq expr1(j) Rsq { Item::Sq(vec![j])};
