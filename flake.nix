@@ -34,9 +34,10 @@
               "Cargo.toml"
               "src"
               "dioxus/src"
+              "objc/src"
+              "parse/src"
               "server/src"
               "tikz/src"
-              "objc/src"
               "web/src"
               (nix-filter.lib.matchExt "rs")
               (nix-filter.lib.matchExt "toml")
@@ -151,7 +152,12 @@
               pnameSuffix = if subdir == "." then "" else "-${subdir}";
               python = with final; with pkgs; python39.withPackages (ps: with ps; [cvxpy]);
               buildInputs = with final; with pkgs; [
-                (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
+                #(rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
+                #(rust-bin.nightly.latest.minimal.override { extensions = [ "rustfmt" ]; targets = [ "wasm32-unknown-unknown" ]; })
+                (rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal.override {
+                  extensions = [ "rustfmt" ];
+                  targets = [ "wasm32-unknown-unknown" ];
+                }))
                 #texlive.combined.scheme-full
                 python
               ] ++ final.lib.optionals isShell [
@@ -160,6 +166,8 @@
                 deploy-rs.packages.${final.system}.deploy-rs
                 (terraform_1.withPlugins (p: with p; [aws gandi vultr]))
                 cargo-outdated
+                cargo-expand
+                rustfmt
               ] ++ final.lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                 AppKit
                 Security

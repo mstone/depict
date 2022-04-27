@@ -1,0 +1,15 @@
+[package]
+name = "parse"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+diagrams = { path = "..", default-features = false, features = [] }
+logos = "0.12"
+miette = { version = "4", features = [ "fancy" ] }
+thiserror = "1.0"
+tracing = "0.1"
+tracing-error = { version = "0.2", features = [ "traced-error" ] }
+tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }

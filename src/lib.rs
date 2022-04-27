@@ -16,41 +16,81 @@ pub mod parser {
     pub type Model<'s> = Vec<Item<'s>>;
 
 
-    #[derive(Debug)]
+    #[derive(Clone, Debug)]
     pub enum Item<'s> {
         Text(&'s str),
         Tilde(),
         Seq(Vec<Item<'s>>),
         Colon(Vec<Item<'s>>),
         Dash(Vec<Item<'s>>),
-        Slash(Vec<Item<'s>>),
+        Slash(Vec<Item<'s>>, Vec<Item<'s>>),
         Sq(Vec<Item<'s>>),
         Br(Vec<Item<'s>>),
     }
 
     pub fn merge_item<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
         eprint!("MERGE {i:?} {j:?}");
-        let r = match j {
-            Item::Text(_) => Item::Seq(vec![i, j]),
-            Item::Tilde() => Item::Seq(vec![i, j]),
-            Item::Seq(mut rhs) => { rhs.insert(0, i); Item::Seq(rhs) },
-            Item::Colon(_) => { Item::Seq(vec![i, j]) },
-            Item::Dash(mut rhs) => { rhs.insert(0, i); Item::Dash(rhs) },
-            Item::Slash(mut rhs) => { rhs.insert(0, i); Item::Slash(rhs) },
-            Item::Sq(_) => { Item::Seq(vec![i, j]) },
-            Item::Br(_) => { Item::Seq(vec![i, j]) },
+        // the problem to solve is that 
+        // a) slashes also need to eat their RHS.
+        // b) slashes need to bind tighter than colons 
+        //    despite the fact that colons come first.
+        let r = match (i.clone(), j.clone()) {
+            (Item::Seq(mut lhs), Item::Slash(mut sl, mut sr)) => {
+                while lhs.len() > 0 {
+                    let end = lhs.pop().unwrap();
+                    if matches!(end, Item::Text(_)) {
+                        sl.insert(0, end);
+                    } else {
+                        lhs.push(end);
+                        break
+                    }
+                }
+                lhs.push(Item::Slash(sl, sr));
+                Some(Item::Seq(lhs))
+            },
+            (Item::Seq(mut lhs), j2) => {
+                if lhs.len() > 0 {
+                    let end = lhs.pop().unwrap();
+                    if let Item::Slash(mut sl, mut sr) = end {
+                        sr.push(j2);
+                        lhs.push(Item::Slash(sl, sr));
+                        Some(Item::Seq(lhs)) 
+                    } else {
+                        lhs.push(end);
+                        lhs.push(j2);
+                        Some(Item::Seq(lhs))
+                    }
+                } else {
+                    lhs.push(j2);
+                    Some(Item::Seq(lhs))
+                }
+            },
+            _ => None,
         };
+        let r = r.or_else(|| Some(match (i.clone(), j.clone()) {
+            (_, Item::Text(_)       ) => Item::Seq(vec![i, j]),
+            (_, Item::Tilde()       ) => Item::Seq(vec![i, j]),
+            (_, Item::Seq(mut rhs)  ) => { rhs.insert(0, i); Item::Seq(rhs) },
+            (_, Item::Colon(_)      ) => { Item::Seq(vec![i, j]) },
+            (_, Item::Dash(mut rhs) ) => { rhs.insert(0, i); Item::Dash(rhs) },
+            // (_, Item::Slash(mut rhs)) => { rhs.insert(0, i); Item::Slash(rhs) },
+            (_, Item::Slash(_, _)         ) => { Item::Seq(vec![i, j]) },
+            (_, Item::Sq(_)         ) => { Item::Seq(vec![i, j]) },
+            (_, Item::Br(_)         ) => { Item::Seq(vec![i, j]) },   
+    }));
         eprintln!(" -> {r:?}");
-        r
+        r.unwrap()
     }
     
     pomelo! {
         %module fact;
+        // %parser #[derive(Clone)] pub struct Parser<'s> {};
+        // %stack_type 
         %include {
             use super::{Model, Item, merge_item};
             use logos::{Logos};
         }
-        %token #[derive(Debug, Logos)] pub enum Token<'s> {};
+        %token #[derive(Copy, Clone, Debug, Logos)] pub enum Token<'s> {};
         %type #[error] #[regex(r#"[\p{Pattern_White_Space}&&[^\r\n]]+"#, logos::skip)] Error;
         %type #[token("{")] Lbr;
         %type #[token("}")] Rbr;
@@ -77,11 +117,11 @@ pub mod parser {
         %type expr5 Item<'s>;
         %right Bang;
         %left Nl;
+        %right Slash;
         %right Colon;
         %left Dash;
         %right Lsq Lbr;
         %right Rsq Rbr;
-        %right Slash;
         %right Comma;
         %left Semi;
         %right Text;
@@ -90,30 +130,28 @@ pub mod parser {
         // %trace;
 
         start ::= model;
-
-        // model ::= model(mut i) Nl expr1(j) Nl { i.push(j); i };
-        // model ::= model(mut i) Nl expr1(j) { i.push(j); i };
-        // model ::= model(i) Nl { i };
-        // model ::= expr1(i) Nl { vec![i] } ;
-        // model ::= expr1(i) [Bang] { vec![i] };
-        // model ::= Nl { vec![] };
-        // model ::= [Bang] { vec![] };
         model ::= model(mut i) Nl expr1?(j) { if let Some(j) = j { i.push(j) }; i };
         model ::= expr1(j) { vec![j] };
 
-        expr1 ::= Colon expr1(j) { Item::Colon(vec![j]) };
-        expr1 ::= Dash expr1(j) { Item::Dash(vec![j]) };
-        expr1 ::= Slash expr1(j) { Item::Slash(vec![j]) };
+        expr1 ::= expr1(j) Colon [Tilde] { Item::Colon(vec![j]) };
+        expr1 ::= expr1(j) Dash { Item::Dash(vec![j]) };
+        expr1 ::= expr1(j) Comma { j };
         expr1 ::= Lsq expr1(j) Rsq { Item::Sq(vec![j])};
         expr1 ::= Lsq expr1(j) [Rsq] { Item::Sq(vec![j]) };
         expr1 ::= Lbr expr1(j) Rbr { Item::Br(vec![j])};
         expr1 ::= Lbr expr1(j) [Rbr] { Item::Br(vec![j]) };
-        expr1 ::= Comma expr1(j) { j };
-        expr1 ::= expr2(i) expr1(j) { merge_item(i, j) };
-        expr1 ::= expr2(i) { i };
+        // expr1 ::= expr1(i) expr3(j) { merge_item(i, j) };
+        // expr1 ::= expr2(i) { i };
+        expr1 ::= expr3(i) [Bang] { i };
+        // expr1 ::= expr1(i) expr1(j) [Tilde] { merge_item(i, j) };
 
-        expr2 ::= Text(t) { Item::Text(t) };
-        expr2 ::= Tilde { Item::Tilde() };
+        // expr2 ::= expr3(i) Slash expr2(j) { Item::Slash(vec![i, j]) };
+        // expr2 ::= expr3(i) [Bang] { i };
+
+        expr3 ::= Text(t) { Item::Text(t) };
+        expr3 ::= Tilde { Item::Tilde() };
+        expr3 ::= Slash { Item::Slash(vec![], vec![]) };
+        expr3 ::= expr1(i) expr1(j) [Tilde] { merge_item(i, j) };
     }
 
     pub use fact::Parser;

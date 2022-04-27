@@ -168,7 +168,7 @@ pub mod layout {
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::graph::roots;
-    use crate::parser::{Fact, Item, Body, Labels};
+    use crate::parser::{Fact, Item, Labels};
 
     #[derive(Clone, Debug)]
     pub struct Vcg<V, E> {
@@ -229,7 +229,7 @@ pub mod layout {
         }
     }
 
-
+    /* 
     fn levels_colon_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, b: &Body<'s>) {
         if let Body::Slash(up, down) = &b {
             let up = up.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
@@ -291,12 +291,13 @@ pub mod layout {
             },
         }
     }
+    */
 
     pub fn calculate_vcg2<'s>(v: &'s [Item<'s>]) -> Result<Vcg<&'s str, &'s str>, Error> where 
     {
         let mut vs = Vec::new();
         for i in v {
-            helper(&mut vs, i);
+            // helper(&mut vs, i);
         }
         calculate_vcg(&vs)
     }
