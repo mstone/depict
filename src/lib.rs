@@ -28,8 +28,11 @@ pub mod parser {
         Br(Vec<Item<'s>>),
     }
 
-    pub fn merge_item<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
+    pub fn merge_item<'s>(i: Item<'s>, j: Item<'s>, comma: bool) -> Item<'s> {
         eprint!("MERGE {i:?} {j:?}");
+        if comma { 
+            eprint!(" COMMA");
+        }
         // the problem to solve is that 
         // a) slashes also need to eat their RHS.
         // b) slashes need to bind tighter than colons 
@@ -68,11 +71,19 @@ pub mod parser {
             (Item::Colon(ll, mut lr), Item::Colon(mut rl, rr)) => {
                 while !lr.is_empty() {
                     let end = lr.pop().unwrap();
-                    if matches!(end, Item::Text(_) | Item::Tilde() | Item::Slash(_, _)) {
-                        rl.insert(0, end);
-                    } else {
-                        lr.push(end);
-                        break
+                    match end {
+                        Item::Text(_) | Item::Tilde() | Item::Slash(_, _) => {
+                            rl.insert(0, end);
+                        },
+                        Item::Colon(_, _) => {
+                            let end = merge_item(end, j.clone(), comma);
+                            lr.push(end);
+                            return Item::Colon(ll, lr);
+                        }
+                        _ => {
+                            lr.push(end);
+                            break
+                        }
                     }
                 }
                 lr.push(Item::Colon(rl, rr));
@@ -86,7 +97,7 @@ pub mod parser {
                             rl.insert(0, end);
                         },
                         Item::Colon(_, _) => {
-                            let end = merge_item(end, j.clone());
+                            let end = merge_item(end, j.clone(), comma);
                             lr.push(end);
                             return Item::Colon(ll, lr);
                         },
@@ -97,6 +108,27 @@ pub mod parser {
                     }
                 }
                 lr.push(Item::Slash(rl, rr));
+                Some(Item::Colon(ll, lr))
+            },
+            (Item::Colon(ll, mut lr), Item::Seq(mut rl)) => {
+                while !lr.is_empty() {
+                    let end = lr.pop().unwrap();
+                    match end {
+                        Item::Text(_) =>  {
+                            rl.insert(0, end);
+                        },
+                        Item::Colon(_, _) => {
+                            let end = merge_item(end, j.clone(), comma);
+                            lr.push(end);
+                            return Item::Colon(ll, lr);
+                        },
+                        _ => {
+                            lr.push(end);
+                            break
+                        },
+                    }
+                }
+                lr.append(&mut rl);
                 Some(Item::Colon(ll, lr))
             },
             (Item::Seq(mut lr), j2) => {
@@ -125,27 +157,31 @@ pub mod parser {
                 }
             },
             (Item::Colon(ll, mut lr), j2) => {
-                if !lr.is_empty() {
-                    let end = lr.pop().unwrap();
-                    match end {
-                        Item::Slash(rl, mut rr) => {
-                            rr.push(j2);
-                            lr.push(Item::Slash(rl, rr));
-                            Some(Item::Colon(ll, lr)) 
-                        },
-                        Item::Colon(_, _) => {
-                            lr.push(merge_item(end, j2));
-                            return Item::Colon(ll, lr);
-                        }
-                        _ => {
-                            lr.push(end);
-                            lr.push(j2);
-                            Some(Item::Colon(ll, lr))
-                        }
-                    }
+                if comma {
+                    Some(Item::Seq(vec![Item::Colon(ll, lr), j2]))
                 } else {
-                    lr.push(j2);
-                    Some(Item::Colon(ll, lr))
+                    if !lr.is_empty() {
+                        let end = lr.pop().unwrap();
+                        match end {
+                            Item::Slash(rl, mut rr) => {
+                                rr.push(j2);
+                                lr.push(Item::Slash(rl, rr));
+                                Some(Item::Colon(ll, lr)) 
+                            },
+                            Item::Colon(_, _) => {
+                                lr.push(merge_item(end, j2, comma));
+                                return Item::Colon(ll, lr);
+                            }
+                            _ => {
+                                lr.push(end);
+                                lr.push(j2);
+                                Some(Item::Colon(ll, lr))
+                            }
+                        }
+                    } else {
+                        lr.push(j2);
+                        Some(Item::Colon(ll, lr))
+                    }
                 }
             }
             _ => None,
@@ -213,15 +249,15 @@ pub mod parser {
         // %trace;
 
         start ::= model;
-        model ::= model?(mut i) Nl expr1?(j) { 
+        model ::= model?(i) Nl expr1?(j) { 
             let mut i = i.unwrap_or_default();
             if let Some(j) = j { i.push(j) }; 
             i 
         };
-        model ::= expr1(j) { vec![j] };
+        model ::= expr1(j) { if let Item::Seq(j) = j { j } else { vec![j] } };
 
         expr1 ::= expr1(j) Dash { Item::Dash(vec![j]) };
-        expr1 ::= expr1(i) Comma expr1(j) { Item::Seq(vec![i, j]) };
+        expr1 ::= expr1(i) Comma expr1(j) { merge_item(i, j, true) };
         expr1 ::= Lsq model(j) Rsq { Item::Sq(j) };
         expr1 ::= Lbr model(j) Rbr { Item::Br(j) };
         expr1 ::= expr3(i) [Bang] { i };
@@ -230,7 +266,7 @@ pub mod parser {
         expr3 ::= Tilde { Item::Tilde() };
         expr3 ::= Slash { Item::Slash(vec![], vec![]) };
         expr3 ::= Colon { Item::Colon(vec![], vec![]) };
-        expr3 ::= expr1(i) expr1(j) [Tilde] { merge_item(i, j) };
+        expr3 ::= expr1(i) expr1(j) [Tilde] { merge_item(i, j, false) };
     }
 
     pub use fact::Parser;
