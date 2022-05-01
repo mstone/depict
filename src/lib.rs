@@ -21,7 +21,7 @@ pub mod parser {
         Text(&'s str),
         Tilde(),
         Seq(Vec<Item<'s>>),
-        Colon(Vec<Item<'s>>),
+        Colon(Vec<Item<'s>>, Vec<Item<'s>>),
         Dash(Vec<Item<'s>>),
         Slash(Vec<Item<'s>>, Vec<Item<'s>>),
         Sq(Vec<Item<'s>>),
@@ -35,43 +35,126 @@ pub mod parser {
         // b) slashes need to bind tighter than colons 
         //    despite the fact that colons come first.
         let r = match (i.clone(), j.clone()) {
-            (Item::Seq(mut lhs), Item::Slash(mut sl, mut sr)) => {
-                while lhs.len() > 0 {
-                    let end = lhs.pop().unwrap();
-                    if matches!(end, Item::Text(_)) {
-                        sl.insert(0, end);
+            (Item::Seq(mut lr), Item::Colon(mut rl, rr)) => {
+                while !lr.is_empty() {
+                    let end = lr.pop().unwrap();
+                    if matches!(end, Item::Text(_) | Item::Tilde()) {
+                        rl.insert(0, end);
                     } else {
-                        lhs.push(end);
+                        lr.push(end);
                         break
                     }
                 }
-                lhs.push(Item::Slash(sl, sr));
-                Some(Item::Seq(lhs))
-            },
-            (Item::Seq(mut lhs), j2) => {
-                if lhs.len() > 0 {
-                    let end = lhs.pop().unwrap();
-                    if let Item::Slash(mut sl, mut sr) = end {
-                        sr.push(j2);
-                        lhs.push(Item::Slash(sl, sr));
-                        Some(Item::Seq(lhs)) 
-                    } else {
-                        lhs.push(end);
-                        lhs.push(j2);
-                        Some(Item::Seq(lhs))
-                    }
+                if lr.is_empty() { 
+                    Some(Item::Colon(rl, rr))
                 } else {
-                    lhs.push(j2);
-                    Some(Item::Seq(lhs))
+                    lr.push(Item::Colon(rl, rr));
+                    Some(Item::Seq(lr))
                 }
             },
+            (Item::Seq(mut lr), Item::Slash(mut rl, rr)) => {
+                while !lr.is_empty() {
+                    let end = lr.pop().unwrap();
+                    if matches!(end, Item::Text(_)) {
+                        rl.insert(0, end);
+                    } else {
+                        lr.push(end);
+                        break
+                    }
+                }
+                lr.push(Item::Slash(rl, rr));
+                Some(Item::Seq(lr))
+            },
+            (Item::Colon(ll, mut lr), Item::Colon(mut rl, rr)) => {
+                while !lr.is_empty() {
+                    let end = lr.pop().unwrap();
+                    if matches!(end, Item::Text(_) | Item::Tilde() | Item::Slash(_, _)) {
+                        rl.insert(0, end);
+                    } else {
+                        lr.push(end);
+                        break
+                    }
+                }
+                lr.push(Item::Colon(rl, rr));
+                Some(Item::Colon(ll, lr))
+            },
+            (Item::Colon(ll, mut lr), Item::Slash(mut rl, rr)) => {
+                while !lr.is_empty() {
+                    let end = lr.pop().unwrap();
+                    match end {
+                        Item::Text(_) =>  {
+                            rl.insert(0, end);
+                        },
+                        Item::Colon(_, _) => {
+                            let end = merge_item(end, j.clone());
+                            lr.push(end);
+                            return Item::Colon(ll, lr);
+                        },
+                        _ => {
+                            lr.push(end);
+                            break
+                        },
+                    }
+                }
+                lr.push(Item::Slash(rl, rr));
+                Some(Item::Colon(ll, lr))
+            },
+            (Item::Seq(mut lr), j2) => {
+                if !lr.is_empty() {
+                    let end = lr.pop().unwrap();
+                    match end {
+                        Item::Slash(rl, mut rr) => {
+                            rr.push(j2);
+                            lr.push(Item::Slash(rl, rr));
+                            Some(Item::Seq(lr)) 
+                        },
+                        Item::Colon(rl, mut rr) => {
+                            rr.push(j2);
+                            lr.push(Item::Colon(rl, rr));
+                            Some(Item::Seq(lr))
+                        }
+                        _ => {
+                            lr.push(end);
+                            lr.push(j2);
+                            Some(Item::Seq(lr))
+                        }
+                    }
+                } else {
+                    lr.push(j2);
+                    Some(Item::Seq(lr))
+                }
+            },
+            (Item::Colon(ll, mut lr), j2) => {
+                if !lr.is_empty() {
+                    let end = lr.pop().unwrap();
+                    match end {
+                        Item::Slash(rl, mut rr) => {
+                            rr.push(j2);
+                            lr.push(Item::Slash(rl, rr));
+                            Some(Item::Colon(ll, lr)) 
+                        },
+                        Item::Colon(_, _) => {
+                            lr.push(merge_item(end, j2));
+                            return Item::Colon(ll, lr);
+                        }
+                        _ => {
+                            lr.push(end);
+                            lr.push(j2);
+                            Some(Item::Colon(ll, lr))
+                        }
+                    }
+                } else {
+                    lr.push(j2);
+                    Some(Item::Colon(ll, lr))
+                }
+            }
             _ => None,
         };
         let r = r.or_else(|| Some(match (i.clone(), j.clone()) {
             (_, Item::Text(_)       ) => Item::Seq(vec![i, j]),
             (_, Item::Tilde()       ) => Item::Seq(vec![i, j]),
             (_, Item::Seq(mut rhs)  ) => { rhs.insert(0, i); Item::Seq(rhs) },
-            (_, Item::Colon(_)      ) => { Item::Seq(vec![i, j]) },
+            (_, Item::Colon(_, _)      ) => { Item::Colon(vec![i], vec![]) },
             (_, Item::Dash(mut rhs) ) => { rhs.insert(0, i); Item::Dash(rhs) },
             // (_, Item::Slash(mut rhs)) => { rhs.insert(0, i); Item::Slash(rhs) },
             (_, Item::Slash(_, _)         ) => { Item::Seq(vec![i, j]) },
@@ -105,7 +188,7 @@ pub mod parser {
         %type #[token("-")] Dash;
         %type #[token("!")] Bang;
         %type #[regex("[\r\n]+")] Nl;
-        %type #[regex(r#"[\p{XID_Start}$<][\p{XID_Continue}.\-\\&&[^:/]]*"#)] Text &'s str;
+        %type #[regex(r#"[\p{XID_Start}$<][\p{XID_Continue}.\->&&[^:/]]*(\\/[\p{XID_Continue}.\->&&[^:/]]*)*"#)] Text &'s str;
         %type start Model<'s>;
         %type model Vec<Item<'s>>;
         %type item Item<'s>;
@@ -130,27 +213,23 @@ pub mod parser {
         // %trace;
 
         start ::= model;
-        model ::= model(mut i) Nl expr1?(j) { if let Some(j) = j { i.push(j) }; i };
+        model ::= model?(mut i) Nl expr1?(j) { 
+            let mut i = i.unwrap_or_default();
+            if let Some(j) = j { i.push(j) }; 
+            i 
+        };
         model ::= expr1(j) { vec![j] };
 
-        expr1 ::= expr1(j) Colon [Tilde] { if let Item::Seq(lhs) = j { Item::Colon(lhs) } else { Item::Colon(vec![j]) } };
         expr1 ::= expr1(j) Dash { Item::Dash(vec![j]) };
-        expr1 ::= expr1(j) Comma { j };
-        expr1 ::= Lsq expr1(j) Rsq { Item::Sq(vec![j])};
-        expr1 ::= Lsq expr1(j) [Rsq] { Item::Sq(vec![j]) };
-        expr1 ::= Lbr expr1(j) Rbr { Item::Br(vec![j])};
-        expr1 ::= Lbr expr1(j) [Rbr] { Item::Br(vec![j]) };
-        // expr1 ::= expr1(i) expr3(j) { merge_item(i, j) };
-        // expr1 ::= expr2(i) { i };
+        expr1 ::= expr1(i) Comma expr1(j) { Item::Seq(vec![i, j]) };
+        expr1 ::= Lsq model(j) Rsq { Item::Sq(j) };
+        expr1 ::= Lbr model(j) Rbr { Item::Br(j) };
         expr1 ::= expr3(i) [Bang] { i };
-        // expr1 ::= expr1(i) expr1(j) [Tilde] { merge_item(i, j) };
-
-        // expr2 ::= expr3(i) Slash expr2(j) { Item::Slash(vec![i, j]) };
-        // expr2 ::= expr3(i) [Bang] { i };
 
         expr3 ::= Text(t) { Item::Text(t) };
         expr3 ::= Tilde { Item::Tilde() };
         expr3 ::= Slash { Item::Slash(vec![], vec![]) };
+        expr3 ::= Colon { Item::Colon(vec![], vec![]) };
         expr3 ::= expr1(i) expr1(j) [Tilde] { merge_item(i, j) };
     }
 
