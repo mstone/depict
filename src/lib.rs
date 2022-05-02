@@ -159,29 +159,27 @@ pub mod parser {
             (Item::Colon(ll, mut lr), j2) => {
                 if comma {
                     Some(Item::Seq(vec![Item::Colon(ll, lr), j2]))
-                } else {
-                    if !lr.is_empty() {
-                        let end = lr.pop().unwrap();
-                        match end {
-                            Item::Slash(rl, mut rr) => {
-                                rr.push(j2);
-                                lr.push(Item::Slash(rl, rr));
-                                Some(Item::Colon(ll, lr)) 
-                            },
-                            Item::Colon(_, _) => {
-                                lr.push(merge_item(end, j2, comma));
-                                return Item::Colon(ll, lr);
-                            }
-                            _ => {
-                                lr.push(end);
-                                lr.push(j2);
-                                Some(Item::Colon(ll, lr))
-                            }
+                } else if !lr.is_empty() {
+                    let end = lr.pop().unwrap();
+                    match end {
+                        Item::Slash(rl, mut rr) => {
+                            rr.push(j2);
+                            lr.push(Item::Slash(rl, rr));
+                            Some(Item::Colon(ll, lr)) 
+                        },
+                        Item::Colon(_, _) => {
+                            lr.push(merge_item(end, j2, comma));
+                            return Item::Colon(ll, lr);
                         }
-                    } else {
-                        lr.push(j2);
-                        Some(Item::Colon(ll, lr))
+                        _ => {
+                            lr.push(end);
+                            lr.push(j2);
+                            Some(Item::Colon(ll, lr))
+                        }
                     }
+                } else {
+                    lr.push(j2);
+                    Some(Item::Colon(ll, lr))
                 }
             }
             _ => None,

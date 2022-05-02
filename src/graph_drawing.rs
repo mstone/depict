@@ -156,6 +156,7 @@ pub mod layout {
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
     
+    use ndarray::s;
     use petgraph::EdgeDirection::Outgoing;
     use petgraph::algo::floyd_warshall;
     use petgraph::dot::Dot;
@@ -229,76 +230,117 @@ pub mod layout {
         }
     }
 
-    /* 
-    fn levels_colon_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, b: &Body<'s>) {
-        if let Body::Slash(up, down) = &b {
-            let up = up.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-            let down = down.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-            lvls.push((up, down));
-        }
-        if let Body::Nest(a, b) = b {
-            levels_colon_helper(lvls, a);
-            levels_helper(lvls, b);
+    // fn levels_colon_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, b: &Body<'s>) {
+    //     if let Body::Slash(up, down) = &b {
+    //         let up = up.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+    //         let down = down.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+    //         lvls.push((up, down));
+    //     }
+    //     if let Body::Nest(a, b) = b {
+    //         levels_colon_helper(lvls, a);
+    //         levels_helper(lvls, b);
+    //     }
+    // }
+
+    // fn levels_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, body: &Body<'s>) {
+    //     match body {
+    //         Body::Colon(Item(i, Some(b))) => {
+    //             match b.as_ref() {
+    //                 Body::Colon(_) => {
+    //                     levels_helper(lvls, b);
+    //                 },
+    //                 Body::Sq(_) | Body::Br(_) => {
+    //                     let up = i.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+    //                     lvls.push((up, vec![]));
+    //                 },
+    //                 Body::Slash(_, _) | Body::Nest(_, _) => {
+    //                     levels_colon_helper(lvls, b); 
+    //                 },
+    //             }
+    //         },
+    //         Body::Colon(Item(i, None)) => {
+    //             let up = i.iter().map(|s| Some(*s)).collect::<Vec<_>>();
+    //             lvls.push((up, vec![]));
+    //         },
+    //         Body::Slash(_, _) => {
+    //             levels_colon_helper(lvls, body);
+    //         },
+    //         _ => {}
+    //     }
+    // }
+
+    #[instrument()]
+    fn helper_path<'s>(l: &'s [Item<'s>]) -> Vec<&'s str>{
+        l.iter().filter_map(|i| {
+            match i {
+                Item::Text(s) => Some(*s),
+                _ => None
+            }
+        }).collect::<Vec<_>>()
+    }
+
+    #[instrument()]
+    fn helper_labels<'s>(labels: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, mut r: &'s [Item<'s>]) {
+        match r.first() {
+            Some(_f @ Item::Colon(rl, rr)) => {
+                let mut lvl = (vec![], vec![]);
+                helper_lvl(&mut lvl, rl);
+                event!(Level::TRACE, ?lvl, "HELPER_LABELS");
+                labels.push(lvl);
+                helper_labels(labels, rr);
+            }
+            Some(Item::Text(s)) => {
+                let lvl = (vec![Some(*s)], vec![]);
+                labels.push(lvl);
+            }
+            _ => (),
         }
     }
 
-    fn levels_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, body: &Body<'s>) {
-        match body {
-            Body::Colon(Item(i, Some(b))) => {
-                match b.as_ref() {
-                    Body::Colon(_) => {
-                        levels_helper(lvls, b);
-                    },
-                    Body::Sq(_) | Body::Br(_) => {
-                        let up = i.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-                        lvls.push((up, vec![]));
-                    },
-                    Body::Slash(_, _) | Body::Nest(_, _) => {
-                        levels_colon_helper(lvls, b); 
-                    },
-                }
-            },
-            Body::Colon(Item(i, None)) => {
-                let up = i.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-                lvls.push((up, vec![]));
-            },
-            Body::Slash(_, _) => {
-                levels_colon_helper(lvls, body);
-            },
-            _ => {}
+    #[instrument()]
+    fn helper_lvl<'s>(lvl: &mut (Vec<Option<&'s str>>, Vec<Option<&'s str>>), rl: &'s [Item<'s>]) {
+        if let [Item::Slash(l, r)] = rl {
+            helper_slash(&mut lvl.0, l);
+            helper_slash(&mut lvl.1, r);
         }
+        event!(Level::TRACE, ?lvl, "HELPER_LVL");
     }
 
-    fn helper<'s>(vs: &mut Vec<Fact<&'s str>>, Item(head, body): &'s Item) {
-        match head.len() {
-            0 => {
-                
-            },
-            1 => {
-                // if let Some(Body::Colon(rhs)) = body.as_deref() {
-                //     helper(vs, rhs)
-                // }
-            },
-            _ => {
-                let mut lvls = vec![];
-                if let Some(body) = body.as_deref() { 
-                    levels_helper(&mut lvls, body); 
-                }
-                vs.push(Fact{
-                    path: head.clone(),
-                    labels_by_level: lvls,
-                })
-            },
+    #[instrument()]
+    fn helper_slash<'s>(side: &mut Vec<Option<&'s str>>, items: &'s [Item<'s>]) {
+        for i in items {
+            if let Item::Text(s) = i {
+                side.push(Some(s))
+            }
         }
+        event!(Level::TRACE, ?side, "HELPER_SLASH");
     }
-    */
+
+    #[instrument()]
+    fn helper<'s>(vs: &mut Vec<Fact<&'s str>>, item: &'s Item<'s>) {
+        let mut labels = vec![];
+        if let Item::Colon(l, r) = item {
+            if l.len() == 1 {
+                helper(vs, &l[0]);
+            } else {
+                helper_labels(&mut labels, r);
+                let lvl = Fact{
+                    path: helper_path(l),
+                    labels_by_level: labels,
+                };
+                vs.push(lvl);
+            }
+        };
+        event!(Level::TRACE, ?vs, "HELPER_MAIN");
+    }
 
     pub fn calculate_vcg2<'s>(v: &'s [Item<'s>]) -> Result<Vcg<&'s str, &'s str>, Error> where 
     {
         let mut vs = Vec::new();
         for i in v {
-            // helper(&mut vs, i);
+            helper(&mut vs, i);
         }
+        event!(Level::TRACE, ?vs, "CALCULATE_VCG2");
         calculate_vcg(&vs)
     }
 
