@@ -156,7 +156,6 @@ pub mod layout {
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
     
-    use ndarray::s;
     use petgraph::EdgeDirection::Outgoing;
     use petgraph::algo::floyd_warshall;
     use petgraph::dot::Dot;
@@ -280,7 +279,7 @@ pub mod layout {
     }
 
     #[instrument()]
-    fn helper_labels<'s>(labels: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, mut r: &'s [Item<'s>]) {
+    fn helper_labels<'s>(labels: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, r: &'s [Item<'s>]) {
         match r.first() {
             Some(_f @ Item::Colon(rl, rr)) => {
                 let mut lvl = (vec![], vec![]);

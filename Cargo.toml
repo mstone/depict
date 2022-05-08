@@ -18,8 +18,8 @@ derive_more = "0.99"
 logos = "0.12"
 nom = "7"
 petgraph = "0.6"
-pomelo = { version = "0.1", path = "../pomelo" }
-#pomelo = { version = "0.1" }
+#pomelo = { version = "0.1", path = "../pomelo" }
+pomelo = { version = "0.1" }
 sorted-vec = "0.7"
 thiserror = "1.0"
 tracing = "0.1"
