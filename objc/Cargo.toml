@@ -1,7 +1,8 @@
 [package]
-name = "objc"
+name = "depict-objc"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 block = "0.1.6"

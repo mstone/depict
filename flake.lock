@@ -138,6 +138,35 @@
         "type": "github"
       }
     },
+    "nixbom": {
+      "inputs": {
+        "crane": [
+          "crane"
+        ],
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "lastModified": 1652123106,
+        "narHash": "sha256-56FP4Tdhx9sgZKOpXpGBHNcywOQRfDzAs0jgRTBUQlw=",
+        "owner": "mstone",
+        "repo": "nixbom",
+        "rev": "a25a1a202bfd34475d3ccacac9bf6d79598dbeec",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mstone",
+        "repo": "nixbom",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1647350163,
@@ -160,6 +189,7 @@
         "flake-utils": "flake-utils",
         "minionSrc": "minionSrc",
         "nix-filter": "nix-filter",
+        "nixbom": "nixbom",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay"
       }

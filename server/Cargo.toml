@@ -1,11 +1,12 @@
 [package]
-name = "server"
+name = "depict-server"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 axum = "0.4"
-diagrams = { path = "..", default-features = false, features = [ "server", "minion", "cvxpy" ] }
+depict = { path = "..", default-features = false, features = [ "server", "minion", "cvxpy" ] }
 futures = "0.3"
 hyper = "0.14"
 Inflector = "0.11"

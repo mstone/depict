@@ -1,6 +1,6 @@
 use std::env::args;
 
-use diagrams::parser::*;
+use depict::parser::*;
 
 use logos::Logos;
 
@@ -12,7 +12,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Diagnostic, thiserror::Error)]
 #[error("parse error")]
-#[diagnostic(code(diadym::parse_error))]
+#[diagnostic(code(depict::parse_error))]
 pub struct Error {
     #[source_code]
     pub src: NamedSource,

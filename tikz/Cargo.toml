@@ -1,10 +1,11 @@
 [package]
-name = "tikz"
+name = "depict-tikz"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
-diagrams = { path = "..", default-features = false, features = [ "cvxpy", "minion" ] }
+depict = { path = "..", default-features = false, features = [ "cvxpy", "minion" ] }
 indoc = "1.0"
 nom = "7"
 petgraph = { version = "0.6" }

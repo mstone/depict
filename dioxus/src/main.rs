@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::io;
 use std::panic::catch_unwind;
 
-use diagrams::graph_drawing::error::{Error, OrErrExt, Kind};
-use diagrams::graph_drawing::geometry::{*};
-use diagrams::graph_drawing::graph::roots;
-use diagrams::graph_drawing::index::{VerticalRank, OriginalHorizontalRank};
-use diagrams::graph_drawing::layout::{*};
+use depict::graph_drawing::error::{Error, OrErrExt, Kind};
+use depict::graph_drawing::geometry::{*};
+use depict::graph_drawing::graph::roots;
+use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank};
+use depict::graph_drawing::layout::{*};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
 
@@ -15,7 +15,7 @@ use dioxus::prelude::*;
 // use dioxus_desktop::use_window;
 use tao::dpi::LogicalSize;
 
-use diagrams::parser::{parse, Parser, Token, Item};
+use depict::parser::{parse, Parser, Token, Item};
 use logos::Logos;
 
 use color_spantrace::colorize;
@@ -177,12 +177,12 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let vcg = calculate_vcg2(&v)?;
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
-    // diagrams::graph_drawing::draw(v, &mut vcg)?;
+    // depict::graph_drawing::draw(v, &mut vcg)?;
 
 
     // let draw_query = Fact::Atom(Ident("draw"));
-    // let draw_cmd = diagrams::render::resolve(v.iter(), &draw_query).next().unwrap();
-    // diagrams::graph_drawing::draw(&v, draw_cmd, &mut vcg)?;
+    // let draw_cmd = depict::render::resolve(v.iter(), &draw_query).next().unwrap();
+    // depict::graph_drawing::draw(&v, draw_cmd, &mut vcg)?;
 
     // eprintln!("VERT: {:?}", Dot::new(&vert));
 

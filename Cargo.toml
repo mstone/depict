@@ -1,7 +1,8 @@
 [package]
-name = "diagrams"
+name = "depict"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -9,7 +10,7 @@ edition = "2021"
 default = ["minion", "cvxpy"]
 minion = ["ndarray"]
 cvxpy = ["numpy", "pyo3"]
-diadym-sketch-desktop = []
+desktop = []
 server = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 
@@ -38,7 +39,7 @@ serde = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
 
 [lib]
-name = "diagrams"
+name = "depict"
 path = "src/lib.rs"
 
 [workspace]

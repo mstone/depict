@@ -1,12 +1,13 @@
 [package]
-name = "web"
+name = "depict-web"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
-diagrams = { path = "..", default-features = false, features = [ "client" ] }
+depict = { path = "..", default-features = false, features = [ "client" ] }
 dioxus = { version = "0.2", features = ["fermi", "web"] }
 futures = "0.3"
 indoc = "1.0"

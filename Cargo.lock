@@ -351,7 +351,7 @@ dependencies = [
  "core-graphics",
  "foreign-types",
  "libc",
- "objc 0.2.7",
+ "objc",
 ]
 
 [[package]]
@@ -366,7 +366,7 @@ dependencies = [
  "core-graphics-types",
  "foreign-types",
  "libc",
- "objc 0.2.7",
+ "objc",
 ]
 
 [[package]]
@@ -554,42 +554,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_more"
-version = "0.99.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
-dependencies = [
- "convert_case",
- "proc-macro2",
- "quote",
- "rustc_version 0.4.0",
- "syn",
-]
-
-[[package]]
-name = "diadym-sketch-desktop"
-version = "0.1.0"
-dependencies = [
- "Inflector",
- "color-spantrace",
- "diagrams",
- "dioxus 0.2.3 (git+https://github.com/dioxuslabs/dioxus)",
- "futures",
- "indoc 1.0.4",
- "logos",
- "nom",
- "petgraph",
- "serde",
- "serde_json",
- "tao",
- "tokio",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "diagrams"
+name = "depict"
 version = "0.1.0"
 dependencies = [
  "derive_more",
@@ -607,6 +572,118 @@ dependencies = [
  "tracing",
  "tracing-error",
  "typed-index-collections",
+]
+
+[[package]]
+name = "depict-desktop"
+version = "0.1.0"
+dependencies = [
+ "Inflector",
+ "color-spantrace",
+ "depict",
+ "dioxus 0.2.3 (git+https://github.com/dioxuslabs/dioxus)",
+ "futures",
+ "indoc 1.0.4",
+ "logos",
+ "nom",
+ "petgraph",
+ "serde",
+ "serde_json",
+ "tao",
+ "tokio",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "depict-objc"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "block",
+ "cocoa",
+ "core-graphics",
+ "foreign-types",
+ "objc",
+]
+
+[[package]]
+name = "depict-parse"
+version = "0.1.0"
+dependencies = [
+ "depict",
+ "logos",
+ "miette",
+ "thiserror",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "depict-server"
+version = "0.1.0"
+dependencies = [
+ "Inflector",
+ "axum",
+ "depict",
+ "futures",
+ "hyper",
+ "nom",
+ "petgraph",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "depict-tikz"
+version = "0.1.0"
+dependencies = [
+ "depict",
+ "indoc 1.0.4",
+ "nom",
+ "petgraph",
+ "rand",
+]
+
+[[package]]
+name = "depict-web"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "depict",
+ "dioxus 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures",
+ "getrandom",
+ "indoc 1.0.4",
+ "log",
+ "petgraph",
+ "reqwasm",
+ "serde",
+ "serde_json",
+ "tracing",
+ "wasm-bindgen",
+ "wasm-logger",
+]
+
+[[package]]
+name = "derive_more"
+version = "0.99.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "rustc_version 0.4.0",
+ "syn",
 ]
 
 [[package]]
@@ -2027,18 +2104,6 @@ dependencies = [
 
 [[package]]
 name = "objc"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "block",
- "cocoa",
- "core-graphics",
- "foreign-types",
- "objc 0.2.7",
-]
-
-[[package]]
-name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "915b1b472bc21c53464d6c8461c9d3af805ba1ef837e1cac254428f4a77177b1"
@@ -2062,7 +2127,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c92d4ddb4bd7b50d730c215ff871754d0da6b2178849f8a2a2ab69712d0c073b"
 dependencies = [
- "objc 0.2.7",
+ "objc",
 ]
 
 [[package]]
@@ -2134,19 +2199,6 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "winapi",
-]
-
-[[package]]
-name = "parse"
-version = "0.1.0"
-dependencies = [
- "diagrams",
- "logos",
- "miette",
- "thiserror",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2614,27 +2666,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "Inflector",
- "axum",
- "diagrams",
- "futures",
- "hyper",
- "nom",
- "petgraph",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2859,7 +2890,7 @@ dependencies = [
  "ndk 0.4.0",
  "ndk-glue 0.4.1",
  "ndk-sys 0.2.2",
- "objc 0.2.7",
+ "objc",
  "parking_lot",
  "raw-window-handle",
  "scopeguard",
@@ -2880,7 +2911,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "core-foundation-sys",
  "libc",
- "objc 0.2.7",
+ "objc",
 ]
 
 [[package]]
@@ -2931,17 +2962,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5516c27b78311c50bf42c071425c560ac799b11c30b31f87e3081965fe5e0180"
 dependencies = [
  "once_cell",
-]
-
-[[package]]
-name = "tikz"
-version = "0.1.0"
-dependencies = [
- "diagrams",
- "indoc 1.0.4",
- "nom",
- "petgraph",
- "rand",
 ]
 
 [[package]]
@@ -3364,26 +3384,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "web"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "diagrams",
- "dioxus 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "futures",
- "getrandom",
- "indoc 1.0.4",
- "log",
- "petgraph",
- "reqwasm",
- "serde",
- "serde_json",
- "tracing",
- "wasm-bindgen",
- "wasm-logger",
-]
-
-[[package]]
 name = "web-sys"
 version = "0.3.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3629,7 +3629,7 @@ dependencies = [
  "http",
  "libc",
  "log",
- "objc 0.2.7",
+ "objc",
  "objc_id",
  "once_cell",
  "serde",

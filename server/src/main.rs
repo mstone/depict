@@ -4,26 +4,26 @@ use std::net::SocketAddr;
 use axum::routing::get_service;
 use axum::{http::StatusCode, Json, response::IntoResponse, Router, routing::post};
 
-use diagrams::graph_drawing::error::Error;
-use diagrams::graph_drawing::error::Kind;
-use diagrams::graph_drawing::error::OrErrExt;
-use diagrams::graph_drawing::geometry::LayoutProblem;
-use diagrams::graph_drawing::geometry::LayoutSolution;
-use diagrams::graph_drawing::geometry::calculate_sols;
-use diagrams::graph_drawing::geometry::position_sols;
-use diagrams::graph_drawing::graph::roots;
-use diagrams::graph_drawing::index::OriginalHorizontalRank;
-use diagrams::graph_drawing::index::VerticalRank;
-use diagrams::graph_drawing::layout::Cvcg;
-use diagrams::graph_drawing::layout::Loc;
-use diagrams::graph_drawing::layout::Placement;
-use diagrams::graph_drawing::layout::Vcg;
-use diagrams::graph_drawing::layout::calculate_locs_and_hops;
-use diagrams::graph_drawing::layout::calculate_vcg;
-use diagrams::graph_drawing::layout::condense;
-use diagrams::graph_drawing::layout::minimize_edge_crossing;
-use diagrams::graph_drawing::layout::or_insert;
-use diagrams::graph_drawing::layout::rank;
+use depict::graph_drawing::error::Error;
+use depict::graph_drawing::error::Kind;
+use depict::graph_drawing::error::OrErrExt;
+use depict::graph_drawing::geometry::LayoutProblem;
+use depict::graph_drawing::geometry::LayoutSolution;
+use depict::graph_drawing::geometry::calculate_sols;
+use depict::graph_drawing::geometry::position_sols;
+use depict::graph_drawing::graph::roots;
+use depict::graph_drawing::index::OriginalHorizontalRank;
+use depict::graph_drawing::index::VerticalRank;
+use depict::graph_drawing::layout::Cvcg;
+use depict::graph_drawing::layout::Loc;
+use depict::graph_drawing::layout::Placement;
+use depict::graph_drawing::layout::Vcg;
+use depict::graph_drawing::layout::calculate_locs_and_hops;
+use depict::graph_drawing::layout::calculate_vcg;
+use depict::graph_drawing::layout::condense;
+use depict::graph_drawing::layout::minimize_edge_crossing;
+use depict::graph_drawing::layout::or_insert;
+use depict::graph_drawing::layout::rank;
 
 use inflector::Inflector;
 use petgraph::Graph;
@@ -36,9 +36,9 @@ use tracing::{instrument, event, Level};
 use tracing_error::{InstrumentResult, ExtractSpanTrace, TracedError};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use diagrams::parser::*;
-use diagrams::graph_drawing::*;
-use diagrams::rest::*;
+use depict::parser::*;
+use depict::graph_drawing::*;
+use depict::rest::*;
 
 fn estimate_widths<'s>(
     vcg: &Vcg<&'s str, &'s str>, 
@@ -160,12 +160,12 @@ async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError
         let vcg = calculate_vcg(&v)?;
         let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
-        // diagrams::graph_drawing::draw(v, &mut vcg)?;
+        // depict::graph_drawing::draw(v, &mut vcg)?;
 
 
         // let draw_query = Fact::Atom(Ident("draw"));
-        // let draw_cmd = diagrams::render::resolve(v.iter(), &draw_query).next().unwrap();
-        // diagrams::graph_drawing::draw(&v, draw_cmd, &mut vcg)?;
+        // let draw_cmd = depict::render::resolve(v.iter(), &draw_query).next().unwrap();
+        // depict::graph_drawing::draw(&v, draw_cmd, &mut vcg)?;
 
         // eprintln!("VERT: {:?}", Dot::new(&vert));
 

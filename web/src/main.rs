@@ -1,6 +1,6 @@
 use std::default::Default;
 
-use diagrams::rest::*;
+use depict::rest::*;
 
 use dioxus::{prelude::*, core::to_owned};
 

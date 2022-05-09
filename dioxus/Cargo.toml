@@ -1,11 +1,12 @@
 [package]
-name = "diadym-sketch-desktop"
+name = "depict-desktop"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 color-spantrace = "0.2"
-diagrams = { path = "..", default-features = false, features = [ "cvxpy", "diadym-sketch-desktop", "minion" ] }
+depict = { path = "..", default-features = false, features = [ "cvxpy", "desktop", "minion" ] }
 dioxus = { git = "https://github.com/dioxuslabs/dioxus", features = ["desktop"] }
 futures = "0.3"
 indoc = "1.0"

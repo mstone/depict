@@ -1,33 +1,46 @@
 {
-  description = "github.com/mstone/diagrams";
+  description = "github.com/mstone/depict";
 
   inputs.crane.url = "github:ipetkov/crane";
   inputs.crane.inputs.nixpkgs.follows = "nixpkgs";
+
   inputs.deploy-rs.url = "github:serokell/deploy-rs";
   inputs.deploy-rs.inputs.nixpkgs.follows = "nixpkgs";
   inputs.deploy-rs.inputs.flake-utils.follows = "flake-utils";
+
   inputs.flake-utils.url = "github:numtide/flake-utils";
+
   inputs.nixpkgs.url = "nixpkgs/nixpkgs-unstable";
+
   inputs.nix-filter.url = "github:numtide/nix-filter";
+
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
   inputs.rust-overlay.inputs.flake-utils.follows = "flake-utils";
   inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+
   inputs.minionSrc.url = "github:minion/minion";
   inputs.minionSrc.flake = false;
 
-  outputs = {self, nixpkgs, crane, deploy-rs, minionSrc, rust-overlay, flake-utils, nix-filter}:
+  inputs.nixbom.url = "github:mstone/nixbom";
+  inputs.nixbom.inputs.crane.follows = "crane";
+  inputs.nixbom.inputs.flake-utils.follows = "flake-utils";
+  inputs.nixbom.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.nixbom.inputs.nix-filter.follows = "nix-filter";
+  inputs.nixbom.inputs.rust-overlay.follows = "rust-overlay";
+
+  outputs = {self, nixpkgs, crane, deploy-rs, minionSrc, nixbom, rust-overlay, flake-utils, nix-filter}:
     flake-utils.lib.simpleFlake {
       inherit self nixpkgs;
-      name = "diagrams";
+      name = "depict";
       systems = flake-utils.lib.allSystems;
       preOverlays = [ rust-overlay.overlay ];
       overlay = final: prev: {
-        diagrams = rec {
-          diagrams = lib.diagrams { isShell = false; };
-          devShell = lib.diagrams { isShell = true; };
-          defaultPackage = diagrams;
+        depict = rec {
+          depict = lib.depict { isShell = false; };
+          devShell = lib.depict { isShell = true; };
+          defaultPackage = depict;
 
-          diagramsSrc = nix-filter.lib.filter {
+          depictSrc = nix-filter.lib.filter {
             root = self;
             include = [
               "Cargo.lock"
@@ -63,7 +76,7 @@
           };
 
           server = with final; with pkgs; let
-            serverBin = (lib.diagrams { isShell = false; subdir = "server"; });
+            serverBin = (lib.depict { isShell = false; subdir = "server"; });
           in stdenv.mkDerivation { 
             pname = "server";
             version = "1.0";
@@ -80,7 +93,7 @@
           };
 
           web = with final; with pkgs; let
-            webBin = (lib.diagrams { isShell = false; subdir = "web"; isWasm = true; });
+            webBin = (lib.depict { isShell = false; subdir = "web"; isWasm = true; });
             indexHtml = writeText "index.html" ''
               <!DOCTYPE html><html><head>
               <meta charset="utf-8">
@@ -112,27 +125,9 @@
             '';
           };
 
-          #web = with final; with pkgs; stdenv.mkDerivation {
-          #  pname = "web";
-          #  version = "1.0";
-          #  src = self;
-          #  buildInputs = [ 
-          #    (rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
-          #    wasm-pack 
-          #  ];
-          #  buildPhase = ''
-          #    
-          #    (cd web; RUSTFLAGS="-C linker=lld" cargo build --release --target wasm32-unknown-unknown)
-          #  '';
-          #  installPhase = ''
-          #    mkdir -p $out
-          #    (cd web/dist; cp -a * $out)
-          #  '';
-          #};
-
           desktop = with final; with pkgs; let
-            pkgName = "diadym-sketch-desktop";
-            pkg = (lib.diagrams { isShell = false; subdir = pkgName; });
+            pkgName = "depict-desktop";
+            pkg = (lib.depict { isShell = false; subdir = pkgName; });
           in stdenv.mkDerivation { 
             pname = pkgName;
             version = "1.0";
@@ -147,7 +142,7 @@
             '';
           };
 
-          lib.diagrams = { isShell, isWasm ? false, subdir ? "." }: 
+          lib.depict = { isShell, isWasm ? false, subdir ? "." }: 
             let 
               pnameSuffix = if subdir == "." then "" else "-${subdir}";
               python = with final; with pkgs; python39.withPackages (ps: with ps; [cvxpy]);
@@ -165,6 +160,8 @@
                 trunk
                 deploy-rs.packages.${final.system}.deploy-rs
                 (terraform_1.withPlugins (p: with p; [aws gandi vultr]))
+                nixbom.legacyPackages.${final.system}.nixbom
+                cargo-license
                 cargo-outdated
                 cargo-expand
                 rustfmt
@@ -179,21 +176,21 @@
                 Cocoa
               ]);
             in with final; with pkgs; crane.lib.${final.system}.buildPackage {
-            pname = "diagrams${pnameSuffix}";
+            pname = "depict${pnameSuffix}";
             version = "1.0";
 
             # src = self;
-            src = diagramsSrc;
+            src = depictSrc;
 
             cargoArtifacts = crane.lib.${final.system}.buildDepsOnly { 
-              src = diagramsSrc; 
+              src = depictSrc; 
               inherit buildInputs;
-              cargoLock = diagramsSrc + "/Cargo.lock";
-              cargoToml = diagramsSrc + "/Cargo.toml";
+              cargoLock = depictSrc + "/Cargo.lock";
+              cargoToml = depictSrc + "/Cargo.toml";
               #cargoExtraArgs = if isWasm then "-p web --target wasm32-unknown-unknown" else null;
             };
-            cargoLock = diagramsSrc + "/Cargo.lock";
-            cargoToml = diagramsSrc + "/Cargo.toml";
+            cargoLock = depictSrc + "/Cargo.lock";
+            cargoToml = depictSrc + "/Cargo.toml";
             cargoCheckCommand = "";
             cargoBuildCommand = "cargo build --release -p ${subdir}" + final.lib.optionalString isWasm " --target wasm32-unknown-unknown";
 

@@ -1,15 +1,15 @@
 {
-  description = "deploy scripts for github.com/mstone/diagrams";
+  description = "deploy scripts for github.com/mstone/depict";
 
-  inputs.diagrams.url = "path:..";
+  inputs.depict.url = "path:..";
 
-  inputs.nixpkgs.follows = "diagrams/nixpkgs";
+  inputs.nixpkgs.follows = "depict/nixpkgs";
 
   inputs.deploy-rs.url = "github:serokell/deploy-rs";
   inputs.deploy-rs.inputs.nixpkgs.follows = "nixpkgs";
   inputs.deploy-rs.inputs.flake-utils.follows = "flake-utils";
 
-  outputs = {self, nixpkgs, deploy-rs, diagrams}: {
+  outputs = {self, nixpkgs, deploy-rs, depict}: {
 
     nixosConfigurations.cold = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
