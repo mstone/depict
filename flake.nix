@@ -40,24 +40,6 @@
           devShell = lib.depict { isShell = true; };
           defaultPackage = depict;
 
-          depictSrc = nix-filter.lib.filter {
-            root = self;
-            include = [
-              "Cargo.lock"
-              "Cargo.toml"
-              "src"
-              "dioxus/src"
-              "objc/src"
-              "parse/src"
-              "server/src"
-              "tikz/src"
-              "web/src"
-              (nix-filter.lib.matchExt "rs")
-              (nix-filter.lib.matchExt "toml")
-              (nix-filter.lib.matchExt "lock")
-            ];
-          };
-
           minion = with final; with pkgs; stdenv.mkDerivation {
             pname = "minion";
             version = "2.0.0-rc1";
@@ -76,17 +58,17 @@
           };
 
           server = with final; with pkgs; let
-            pkgName = "depict-server";
-            serverBin = (lib.depict { isShell = false; subdir = pkgName; });
+            subpkg = "depict-server";
+            serverBin = (lib.depict { isShell = false; subpkg = subpkg; subdir = "server"; });
           in stdenv.mkDerivation { 
-            pname = pkgName;
-            version = "1.0";
+            pname = "${subpkg}";
+            version = "0.1";
             buildInputs = [ makeWrapper ];
             phases = [ "installPhase" ];
             installPhase = ''
               mkdir -p $out/bin
-              cp ${serverBin}/bin/depict-server $out/bin/depict-server
-              wrapProgram $out/bin/depict-server \
+              cp ${serverBin}/bin/${subpkg} $out/bin/${subpkg}
+              wrapProgram $out/bin/${subpkg} \
                 --prefix PATH : "${minion}/bin/" \
                 --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]} \
                 --set WEBROOT ${web}
@@ -94,8 +76,8 @@
           };
 
           web = with final; with pkgs; let
-            pkgName = "depict-web";
-            webBin = (lib.depict { isShell = false; subdir = pkgName; isWasm = true; });
+            subpkg = "depict-web";
+            webBin = (lib.depict { isShell = false; subpkg = subpkg; subdir = "web"; isWasm = true; });
             indexHtml = writeText "index.html" ''
               <!DOCTYPE html><html><head>
               <meta charset="utf-8">
@@ -109,14 +91,14 @@
               </html>
             '';
           in stdenv.mkDerivation { 
-            pname = pkgName;
-            version = "1.0";
+            pname = "${subpkg}";
+            version = "0.1";
             phases = [ "buildPhase" "installPhase" ];
             buildInputs = [
               wasm-bindgen-cli 
             ];
             buildPhase = ''
-              cp ${webBin}/bin/${pkgName}.wasm web.wasm
+              cp ${webBin}/bin/${subpkg}.wasm web.wasm
               mkdir pkg
               wasm-bindgen --target web --out-dir pkg web.wasm
             '';
@@ -128,25 +110,24 @@
           };
 
           desktop = with final; with pkgs; let
-            pkgName = "depict-desktop";
-            pkg = (lib.depict { isShell = false; subdir = pkgName; });
+            subpkg = "depict-desktop";
+            pkg = (lib.depict { isShell = false; subpkg = subpkg; subdir = "dioxus"; });
           in stdenv.mkDerivation { 
-            pname = pkgName;
-            version = "1.0";
+            pname = subpkg;
+            version = "0.1";
             buildInputs = [ makeWrapper ];
             phases = [ "installPhase" ];
             installPhase = ''
               mkdir -p $out/bin
-              cp ${pkg}/bin/${pkgName} $out/bin/${pkgName}
-              wrapProgram $out/bin/${pkgName} \
+              cp ${pkg}/bin/${subpkg} $out/bin/${subpkg}
+              wrapProgram $out/bin/${subpkg} \
                 --prefix PATH : "${minion}/bin/" \
                 --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]}
             '';
           };
 
-          lib.depict = { isShell, isWasm ? false, subdir ? "." }: 
+          lib.depict = { isShell, isWasm ? false, subpkg ? "depict", subdir ? "." }: 
             let 
-              pnameSuffix = if subdir == "." then "depict" else "${subdir}";
               python = with final; with pkgs; python39.withPackages (ps: with ps; [cvxpy]);
               buildInputs = with final; with pkgs; [
                 #(rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
@@ -178,23 +159,23 @@
                 Cocoa
               ]);
             in with final; with pkgs; crane.lib.${final.system}.buildPackage {
-            pname = "${pnameSuffix}";
-            version = "1.0";
+            pname = "${subpkg}";
+            version = "0.1";
 
-            # src = self;
-            src = depictSrc;
+            src = self + "/${subdir}";
 
             cargoArtifacts = crane.lib.${final.system}.buildDepsOnly { 
-              src = depictSrc; 
+              src = self + "/${subdir}";
+              cargoToml = self + "/${subdir}/Cargo.toml";
+              cargoLock = self + "/${subdir}/Cargo.lock";
               inherit buildInputs;
-              cargoLock = depictSrc + "/Cargo.lock";
-              cargoToml = depictSrc + "/Cargo.toml";
-              #cargoExtraArgs = if isWasm then "-p web --target wasm32-unknown-unknown" else null;
+              cargoCheckCommand = if isWasm then "" else "cargo check --release";
+              cargoBuildCommand = if isWasm then "cargo build --release --target wasm32-unknown-unknown" else "cargo build --release";
             };
-            cargoLock = depictSrc + "/Cargo.lock";
-            cargoToml = depictSrc + "/Cargo.toml";
-            cargoCheckCommand = "";
-            cargoBuildCommand = "cargo build --release -p ${subdir}" + final.lib.optionalString isWasm " --target wasm32-unknown-unknown";
+            cargoToml = self + "/${subdir}/Cargo.toml";
+            cargoLock = self + "/${subdir}/Cargo.lock";
+            cargoCheckCommand = if isWasm then "" else "cargo check --release";
+            cargoExtraArgs = final.lib.optionalString isWasm " --target wasm32-unknown-unknown";
 
             inherit buildInputs;
 

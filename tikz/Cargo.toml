@@ -9,7 +9,7 @@ homepage = "https://github.com/mstone/depict"
 repository = "https://github.com/mstone/depict"
 
 [dependencies]
-depict = { version = "0.1", path = "..", default-features = false, features = [ "cvxpy", "minion" ] }
+depict = { version = "0.1", default-features = false, features = [ "cvxpy", "minion" ] }
 indoc = "1.0"
 nom = "7"
 petgraph = { version = "0.6" }
