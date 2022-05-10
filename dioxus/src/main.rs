@@ -142,39 +142,41 @@ fn estimate_widths<'s>(
 #[instrument(skip(data))]
 fn draw(data: String) -> Result<Drawing, Error> {
 
-    let mut p = Parser::new();
-    { 
-        let lex = Token::lexer(&data);
-        let tks = lex.collect::<Vec<_>>();
-        event!(Level::TRACE, ?tks, "LEX");
-    }
-    let mut lex = Token::lexer(&data);
-    while let Some(tk) = lex.next() {
-        p.parse(tk)
-            .map_err(|_| {
-                Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-            })
-            .in_current_span()?
-    }
+    // let mut p = Parser::new();
+    // {
+    //     let lex = Token::lexer(&data);
+    //     let tks = lex.collect::<Vec<_>>();
+    //     event!(Level::TRACE, ?tks, "LEX");
+    // }
+    // let mut lex = Token::lexer(&data);
+    // while let Some(tk) = lex.next() {
+    //     p.parse(tk)
+    //         .map_err(|_| {
+    //             Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+    //         })
+    //         .in_current_span()?
+    // }
 
-    let v: Vec<Item> = p.end_of_input()
-        .map_err(|_| {
-            Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-        })?;
+    // let v: Vec<Item> = p.end_of_input()
+    //     .map_err(|_| {
+    //         Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+    //     })?;
 
-    event!(Level::TRACE, ?v, "PARSE");
-    eprintln!("PARSE {v:#?}");
+    // event!(Level::TRACE, ?v, "PARSE");
+    // eprintln!("PARSE {v:#?}");
 
-    // let v = parse(&data[..])
-    //     .map_err(|e| match e {
-    //         nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
-    //         nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
-    //         nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
-    //     })
-    //     .in_current_span()?
-    //     .1;
+    //let vcg = calculate_vcg2(&v)?;
 
-    let vcg = calculate_vcg2(&v)?;
+    let v = parse(&data[..])
+        .map_err(|e| match e {
+            nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
+            nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
+            nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
+        })
+        .in_current_span()?
+        .1;
+
+    let vcg = calculate_vcg(&v)?;
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
     // depict::graph_drawing::draw(v, &mut vcg)?;
