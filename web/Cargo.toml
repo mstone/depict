@@ -7,7 +7,7 @@ license = "MIT"
 [dependencies]
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
-depict = { path = "..", default-features = false, features = [ "client" ] }
+depict = { version = "0.1", path = "..", default-features = false, features = [ "client" ] }
 dioxus = { version = "0.2", features = ["fermi", "web"] }
 futures = "0.3"
 indoc = "1.0"

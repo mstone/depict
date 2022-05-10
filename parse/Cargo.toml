@@ -7,7 +7,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-depict = { path = "..", default-features = false, features = [] }
+depict = { version = "0.1", path = "..", default-features = false, features = [] }
 logos = "0.12"
 miette = { version = "4", features = [ "fancy" ] }
 thiserror = "1.0"
