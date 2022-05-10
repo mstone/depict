@@ -76,16 +76,17 @@
           };
 
           server = with final; with pkgs; let
-            serverBin = (lib.depict { isShell = false; subdir = "server"; });
+            pkgName = "depict-server";
+            serverBin = (lib.depict { isShell = false; subdir = pkgName; });
           in stdenv.mkDerivation { 
-            pname = "server";
+            pname = pkgName;
             version = "1.0";
             buildInputs = [ makeWrapper ];
             phases = [ "installPhase" ];
             installPhase = ''
               mkdir -p $out/bin
-              cp ${serverBin}/bin/server $out/bin/server
-              wrapProgram $out/bin/server \
+              cp ${serverBin}/bin/depict-server $out/bin/depict-server
+              wrapProgram $out/bin/depict-server \
                 --prefix PATH : "${minion}/bin/" \
                 --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]} \
                 --set WEBROOT ${web}
@@ -93,7 +94,8 @@
           };
 
           web = with final; with pkgs; let
-            webBin = (lib.depict { isShell = false; subdir = "web"; isWasm = true; });
+            pkgName = "depict-web";
+            webBin = (lib.depict { isShell = false; subdir = pkgName; isWasm = true; });
             indexHtml = writeText "index.html" ''
               <!DOCTYPE html><html><head>
               <meta charset="utf-8">
@@ -107,14 +109,14 @@
               </html>
             '';
           in stdenv.mkDerivation { 
-            pname = "web";
+            pname = pkgName;
             version = "1.0";
             phases = [ "buildPhase" "installPhase" ];
             buildInputs = [
               wasm-bindgen-cli 
             ];
             buildPhase = ''
-              cp ${webBin}/bin/web.wasm .
+              cp ${webBin}/bin/${pkgName}.wasm web.wasm
               mkdir pkg
               wasm-bindgen --target web --out-dir pkg web.wasm
             '';
@@ -144,7 +146,7 @@
 
           lib.depict = { isShell, isWasm ? false, subdir ? "." }: 
             let 
-              pnameSuffix = if subdir == "." then "" else "-${subdir}";
+              pnameSuffix = if subdir == "." then "depict" else "${subdir}";
               python = with final; with pkgs; python39.withPackages (ps: with ps; [cvxpy]);
               buildInputs = with final; with pkgs; [
                 #(rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
@@ -176,7 +178,7 @@
                 Cocoa
               ]);
             in with final; with pkgs; crane.lib.${final.system}.buildPackage {
-            pname = "depict${pnameSuffix}";
+            pname = "${pnameSuffix}";
             version = "1.0";
 
             # src = self;
