@@ -3,6 +3,10 @@ name = "depict-desktop"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "Desktop port of Depict"
+documentation = "https://docs.rs/depict-desktop"
+homepage = "https://github.com/mstone/depict"
+repository = "https://github.com/mstone/depict"
 
 [dependencies]
 color-spantrace = "0.2"

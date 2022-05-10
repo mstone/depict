@@ -3,6 +3,10 @@ name = "depict-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "API server for Depict"
+documentation = "https://docs.rs/depict-server"
+homepage = "https://github.com/mstone/depict"
+repository = "https://github.com/mstone/depict"
 
 [dependencies]
 axum = "0.4"

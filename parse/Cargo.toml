@@ -3,6 +3,10 @@ name = "depict-parse"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "standalone parser for Depict"
+documentation = "https://docs.rs/depict-parse"
+homepage = "https://github.com/mstone/depict"
+repository = "https://github.com/mstone/depict"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

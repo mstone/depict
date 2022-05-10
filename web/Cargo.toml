@@ -3,6 +3,10 @@ name = "depict-web"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "web frontend for Depict"
+documentation = "https://docs.rs/depict-web"
+homepage = "https://github.com/mstone/depict"
+repository = "https://github.com/mstone/depict"
 
 [dependencies]
 console_error_panic_hook = "0.1"
