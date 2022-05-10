@@ -7,7 +7,7 @@ license = "MIT"
 [dependencies]
 color-spantrace = "0.2"
 depict = { version = "0.1", path = "..", default-features = false, features = [ "cvxpy", "desktop", "minion" ] }
-dioxus = { git = "https://github.com/dioxuslabs/dioxus", features = ["desktop"] }
+dioxus = { version = "0.2", features = ["desktop"] }
 futures = "0.3"
 indoc = "1.0"
 Inflector = "0.11"
