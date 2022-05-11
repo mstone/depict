@@ -92,7 +92,7 @@ says:
 
 This project is licensed under the [MIT license].
 
-[MIT license]: https://github.com/mstone/depict/blob/master/LICENSE
+[MIT license]: https://github.com/mstone/depict/blob/main/LICENSE
 
 ## Contribution
 
