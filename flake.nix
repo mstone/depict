@@ -162,20 +162,28 @@
             pname = "${subpkg}";
             version = "0.1";
 
-            src = self + "/${subdir}";
+            src = self;
 
             cargoArtifacts = crane.lib.${final.system}.buildDepsOnly { 
-              src = self + "/${subdir}";
-              cargoToml = self + "/${subdir}/Cargo.toml";
-              cargoLock = self + "/${subdir}/Cargo.lock";
+              src = self;
               inherit buildInputs;
-              cargoCheckCommand = if isWasm then "" else "cargo check --release";
-              cargoBuildCommand = if isWasm then "cargo build --release --target wasm32-unknown-unknown" else "cargo build --release";
+              cargoCheckCommand = if isWasm then "" else 
+                if final.lib.hasSuffix "darwin" final.system then ''
+                  cargo check --release -p depict-desktop -p depict-server; 
+                  cargo check --release -p depict-web --target wasm32-unknown-unknown
+                '' else ''
+                  cargo check --release -p depict-server
+                '';
+              cargoBuildCommand = if isWasm then "cargo build --release -p depict-web --target wasm32-unknown-unknown" else
+                if final.lib.hasSuffix "darwin" final.system then ''
+                  cargo build --release -p depict-desktop -p depict-server; 
+                  cargo build --release -p depict-web --target wasm32-unknown-unknown
+                '' else ''
+                  cargo build --release -p depict-server
+                '';
             };
-            cargoToml = self + "/${subdir}/Cargo.toml";
-            cargoLock = self + "/${subdir}/Cargo.lock";
-            cargoCheckCommand = if isWasm then "" else "cargo check --release";
-            cargoExtraArgs = final.lib.optionalString isWasm " --target wasm32-unknown-unknown";
+            cargoCheckCommand = if isWasm then "" else "cargo check --release -p ${subpkg}";
+            cargoBuildCommand = if isWasm then "cargo build --release -p ${subpkg} --target wasm32-unknown-unknown" else "cargo build --release -p ${subpkg}";
 
             inherit buildInputs;
 

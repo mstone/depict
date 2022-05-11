@@ -406,8 +406,6 @@ dependencies = [
 [[package]]
 name = "depict"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "beacbaa6e630dd33237ef01e71d5e9a1fb46ad2daadc35d66d5ab1a6ac798506"
 dependencies = [
  "derive_more",
  "logos",
