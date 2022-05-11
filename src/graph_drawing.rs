@@ -292,6 +292,12 @@ pub mod layout {
                 let lvl = (vec![Some(*s)], vec![]);
                 labels.push(lvl);
             }
+            Some(Item::Slash(rl, rr)) => {
+                let mut lvl = (vec![], vec![]);
+                helper_slash(&mut lvl.0, rl);
+                helper_slash(&mut lvl.1, rr);
+                labels.push(lvl);
+            },
             _ => (),
         }
     }
@@ -318,18 +324,27 @@ pub mod layout {
     #[instrument()]
     fn helper<'s>(vs: &mut Vec<Fact<&'s str>>, item: &'s Item<'s>) {
         let mut labels = vec![];
-        if let Item::Colon(l, r) = item {
-            if l.len() == 1 {
-                helper(vs, &l[0]);
-            } else {
-                helper_labels(&mut labels, r);
-                let lvl = Fact{
-                    path: helper_path(l),
-                    labels_by_level: labels,
-                };
-                vs.push(lvl);
+        match item {
+            Item::Colon(l, r) => {
+                if l.len() == 1 {
+                    helper(vs, &l[0]);
+                } else {
+                    helper_labels(&mut labels, r);
+                    let lvl = Fact{
+                        path: helper_path(l),
+                        labels_by_level: labels,
+                    };
+                    vs.push(lvl);
+                }
+            },
+            Item::Seq(ls) => {
+                vs.push(Fact{path: helper_path(ls), labels_by_level: vec![]})
+            },
+            Item::Text(s) => {
+                vs.push(Fact{path: vec![s], labels_by_level: vec![]})
             }
-        };
+            _ => {},
+        }
         event!(Level::TRACE, ?vs, "HELPER_MAIN");
     }
 

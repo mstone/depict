@@ -38,6 +38,10 @@ pub mod parser {
         // b) slashes need to bind tighter than colons 
         //    despite the fact that colons come first.
         let r = match (i.clone(), j.clone()) {
+            (Item::Text(l), Item::Colon(mut rl, rr)) => {
+                rl.insert(0, Item::Text(l));
+                Some(Item::Colon(rl, rr))
+            },
             (Item::Seq(mut lr), Item::Colon(mut rl, rr)) => {
                 while !lr.is_empty() {
                     let end = lr.pop().unwrap();
@@ -55,6 +59,10 @@ pub mod parser {
                     Some(Item::Seq(lr))
                 }
             },
+            (Item::Text(l), Item::Slash(mut rl, rr)) => {
+                rl.insert(0, Item::Text(l));
+                Some(Item::Slash(rl, rr))
+            },
             (Item::Seq(mut lr), Item::Slash(mut rl, rr)) => {
                 while !lr.is_empty() {
                     let end = lr.pop().unwrap();
@@ -67,6 +75,10 @@ pub mod parser {
                 }
                 lr.push(Item::Slash(rl, rr));
                 Some(Item::Seq(lr))
+            },
+            (Item::Slash(ll, mut lr), Item::Text(s)) => {
+                lr.push(Item::Text(s));
+                Some(Item::Slash(ll, lr))
             },
             (Item::Colon(ll, mut lr), Item::Colon(mut rl, rr)) => {
                 while !lr.is_empty() {
@@ -252,7 +264,7 @@ pub mod parser {
             if let Some(j) = j { i.push(j) }; 
             i 
         };
-        model ::= expr1(j) { if let Item::Seq(j) = j { j } else { vec![j] } };
+        model ::= expr1(j) { vec![j] };
 
         expr1 ::= expr1(j) Dash { Item::Dash(vec![j]) };
         expr1 ::= expr1(i) Comma expr1(j) { merge_item(i, j, true) };
