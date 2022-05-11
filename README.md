@@ -68,7 +68,7 @@ Alternately, if you'd like to run depict without with nix, you'll need to
 5. use `cargo` to build or run one of Depict's sub-packages, like:
 
 ```bash
-cargo run -p depict-desktop
+(cd dioxus; cargo run)
 ```
 
 
