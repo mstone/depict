@@ -181,6 +181,12 @@
                 '' else ''
                   cargo build --release -p depict-server
                 '';
+              cargoTestCommand = if isWasm then "" else
+                if final.lib.hasSuffix "darwin" final.system then ''
+                  cargo test --release -p depict-desktop -p depict-server;
+                '' else ''
+                  cargo test --release -p depict-server
+                '';
             };
             cargoCheckCommand = if isWasm then "" else "cargo check --release -p ${subpkg}";
             cargoBuildCommand = if isWasm then "cargo build --release -p ${subpkg} --target wasm32-unknown-unknown" else "cargo build --release -p ${subpkg}";
