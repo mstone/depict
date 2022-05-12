@@ -8,12 +8,11 @@
     <img src="https://img.shields.io/crates/v/depict.svg?style=flat-square"
     alt="Crates.io version" />
   </a>
-  <!-- Downloads
+  <!-- Downloads -->
   <a href="https://crates.io/crates/depict">
     <img src="https://img.shields.io/crates/d/depict.svg?style=flat-square"
       alt="Download" />
   </a>
-  -->
   <!-- docs -->
   <a href="https://docs.rs/depict">
     <img src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square"
