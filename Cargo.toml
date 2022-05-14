@@ -20,6 +20,7 @@ client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 
 [dependencies]
 derive_more = "0.99"
+enum-kinds = "0.5.1"
 logos = "0.12"
 nom = "7"
 petgraph = "0.6"

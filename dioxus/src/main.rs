@@ -67,12 +67,14 @@ impl Default for Drawing {
     }
 }
 
-fn estimate_widths<'s>(
-    vcg: &Vcg<&'s str, &'s str>, 
-    cvcg: &Cvcg<&'s str, &'s str>,
-    placement: &Placement<&'s str>,
-    layout_problem: &mut LayoutProblem<&'s str>
-) -> Result<(), Error> {
+fn estimate_widths<I>(
+    vcg: &Vcg<I, I>, 
+    cvcg: &Cvcg<I, I>,
+    placement: &Placement<I>,
+    layout_problem: &mut LayoutProblem<I>
+) -> Result<(), Error> where
+    I: Clone + std::fmt::Debug + Ord + std::hash::Hash + std::fmt::Display + Len + PartialEq<&'static str>,
+{
     // let char_width = 8.67;
     let char_width = 9.0;
     let arrow_width = 40.0;
@@ -117,11 +119,11 @@ fn estimate_widths<'s>(
                         .max()
                     );
 
-            match *ew {
-                "senses" => {
+            match ew {
+                x if *x == "senses" => {
                     percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
                 }
-                "actuates" => {
+                x if *x == "actuates" => {
                     action_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
                 }
                 _ => {}
@@ -129,7 +131,7 @@ fn estimate_widths<'s>(
         }
 
         for (lvl, (mhr, _nhr)) in hops.iter() {
-            width_by_hop.insert((*lvl, *mhr, vl, wl), (action_width, percept_width));
+            width_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), (action_width, percept_width));
             if width_by_loc.get(&(*lvl, *mhr)).is_none() {
                 width_by_loc.insert((*lvl, *mhr), action_width + percept_width);
             }
@@ -212,8 +214,8 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let mut layout_debug_vxmap = HashMap::new();
     for ((vl, wl), hops) in hops_by_edge.iter() {
         if *vl == "root" { continue; }
-        let vn = node_to_loc[&Loc::Node(*vl)];
-        let wn = node_to_loc[&Loc::Node(*wl)];
+        let vn = node_to_loc[&Loc::Node(vl.clone())];
+        let wn = node_to_loc[&Loc::Node(wl.clone())];
         let vshr = solved_locs[&vn.0][&vn.1];
         let wshr = solved_locs[&wn.0][&wn.1];
 
@@ -262,7 +264,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
         if let Loc::Node(vl) = node {
             let key = vl.to_string();
             let mut label = vert_node_labels
-                .get(*vl)
+                .get(vl)
                 .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                 .clone();
             // if !label.is_screaming_snake_case() {
@@ -285,12 +287,14 @@ fn draw(data: String) -> Result<Drawing, Error> {
                     .and_then(|rels| rels.get(ew)))
                 .map(|v| v.join("\n"));
 
-            let hops = &hops_by_edge[&(*vl, *wl)];
+            let hops = &hops_by_edge[&(vl.clone(), wl.clone())];
             // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
 
-            let offset = match *ew { 
-                "actuates" | "actuator" => -10.0,
-                "senses" | "sensor" => 10.0,
+            let offset = match ew { 
+                x if x == "actuates" => -10.0,
+                x if x == "actuator" => -10.0,
+                x if x == "senses" => 10.0,
+                x if x == "sensor" => 10.0,
                 _ => 0.0,
             };
 
@@ -303,7 +307,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
             for (n, hop) in hops.iter().enumerate() {
                 let (lvl, (_mhr, nhr)) = hop;
-                let hn = sol_by_hop[&(*lvl+1, *nhr, *vl, *wl)];
+                let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
                 let spos = ss[hn];
                 let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
                 let vpos = ((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height;
@@ -321,12 +325,12 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
                 if n == 0 {
                     let n = sol_by_loc[&((*lvl+1), *nhr)];
-                    label_hpos = Some(match *ew {
-                        "senses" => {
+                    label_hpos = Some(match ew {
+                        x if x == "senses" => {
                             // ls[n]
                             hpos
                         },
-                        "actuates" => {
+                        x if x == "actuates" => {
                             // ls[n]
                             hpos
                         },

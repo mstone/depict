@@ -151,6 +151,7 @@ pub mod graph {
 }
 
 pub mod layout {
+    use std::borrow::Cow;
     use std::collections::BTreeMap;
     use std::collections::{HashMap, hash_map::Entry};
     use std::fmt::{Debug, Display};
@@ -213,6 +214,19 @@ pub mod layout {
         }
     }
 
+    impl<'s> Trim for Cow<'s, str> {
+        fn trim(self) -> Self {
+            match self {
+                Cow::Borrowed(b) => {
+                    Cow::Borrowed(b.trim())
+                },
+                Cow::Owned(o) => {
+                    Cow::Owned(o.trim())
+                }
+            }
+        }
+    }
+
     pub trait IsEmpty {
         fn is_empty(&self) -> bool;
     }
@@ -228,6 +242,38 @@ pub mod layout {
             String::is_empty(self)
         }
     }
+
+    impl<'s> IsEmpty for Cow<'s, str> {
+        fn is_empty(&self) -> bool {
+            match self {
+                Cow::Borrowed(b) => b.is_empty(),
+                Cow::Owned(o) => o.is_empty(),
+            }
+        }
+    }
+
+    pub trait Len {
+        fn len(&self) -> usize;
+    }
+
+    impl Len for &str {
+        fn len(&self) -> usize {
+            str::len(self)
+        }
+    }
+
+    impl Len for String {
+        fn len(&self) -> usize {
+            str::len(&self).into()
+        }
+    }
+
+    impl<'s> Len for Cow<'s, str> {
+        fn len(&self) -> usize {
+            str::len(&self).into()
+        }
+    }
+
 
     // fn levels_colon_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, b: &Body<'s>) {
     //     if let Body::Slash(up, down) = &b {
@@ -269,17 +315,17 @@ pub mod layout {
     // }
 
     #[instrument()]
-    fn helper_path<'s>(l: &'s [Item<'s>]) -> Vec<&'s str>{
+    fn helper_path<'s>(l: &'s [Item<'s>]) -> Vec<Cow<'s, str>>{
         l.iter().filter_map(|i| {
             match i {
-                Item::Text(s) => Some(*s),
+                Item::Text(s) => Some(s.clone()),
                 _ => None
             }
         }).collect::<Vec<_>>()
     }
 
     #[instrument()]
-    fn helper_labels<'s>(labels: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, r: &'s [Item<'s>]) {
+    fn helper_labels<'s>(labels: &mut Vec<(Labels<Cow<'s, str>>, Labels<Cow<'s, str>>)>, r: &'s [Item<'s>]) {
         match r.first() {
             Some(_f @ Item::Colon(rl, rr)) => {
                 let mut lvl = (vec![], vec![]);
@@ -288,22 +334,39 @@ pub mod layout {
                 labels.push(lvl);
                 helper_labels(labels, rr);
             }
-            Some(Item::Text(s)) => {
-                let lvl = (vec![Some(*s)], vec![]);
-                labels.push(lvl);
-            }
             Some(Item::Slash(rl, rr)) => {
                 let mut lvl = (vec![], vec![]);
                 helper_slash(&mut lvl.0, rl);
                 helper_slash(&mut lvl.1, rr);
                 labels.push(lvl);
             },
+            Some(Item::Text(_)) => {
+                let lvl = (r.iter().map(|i| 
+                    if let Item::Text(s) = i { 
+                        Some(s.clone()) 
+                    } else { 
+                        None
+                    })
+                    .collect::<Vec<_>>(), vec![]);
+                labels.push(lvl);
+            },
+            Some(Item::Seq(r)) => {
+                let lvl = (r.iter().map(|i| 
+                    if let Item::Text(s) = i { 
+                        Some(s.clone()) 
+                    } else if let Item::Seq(s) = i { 
+                        eprintln!("TODO seq support");
+                        None
+                    } else { None })
+                    .collect::<Vec<_>>(), vec![]);
+                labels.push(lvl);
+            }
             _ => (),
         }
     }
 
     #[instrument()]
-    fn helper_lvl<'s>(lvl: &mut (Vec<Option<&'s str>>, Vec<Option<&'s str>>), rl: &'s [Item<'s>]) {
+    fn helper_lvl<'s>(lvl: &mut (Vec<Option<Cow<'s, str>>>, Vec<Option<Cow<'s, str>>>), rl: &'s [Item<'s>]) {
         if let [Item::Slash(l, r)] = rl {
             helper_slash(&mut lvl.0, l);
             helper_slash(&mut lvl.1, r);
@@ -312,17 +375,17 @@ pub mod layout {
     }
 
     #[instrument()]
-    fn helper_slash<'s>(side: &mut Vec<Option<&'s str>>, items: &'s [Item<'s>]) {
+    fn helper_slash<'s>(side: &mut Vec<Option<Cow<'s, str>>>, items: &'s [Item<'s>]) {
         for i in items {
             if let Item::Text(s) = i {
-                side.push(Some(s))
+                side.push(Some(s.clone()))
             }
         }
         event!(Level::TRACE, ?side, "HELPER_SLASH");
     }
 
     #[instrument()]
-    fn helper<'s>(vs: &mut Vec<Fact<&'s str>>, item: &'s Item<'s>) {
+    fn helper<'s>(vs: &mut Vec<Fact<Cow<'s, str>>>, item: &'s Item<'s>) {
         let mut labels = vec![];
         match item {
             Item::Colon(l, r) => {
@@ -341,14 +404,14 @@ pub mod layout {
                 vs.push(Fact{path: helper_path(ls), labels_by_level: vec![]})
             },
             Item::Text(s) => {
-                vs.push(Fact{path: vec![s], labels_by_level: vec![]})
+                vs.push(Fact{path: vec![s.clone()], labels_by_level: vec![]})
             }
             _ => {},
         }
         event!(Level::TRACE, ?vs, "HELPER_MAIN");
     }
 
-    pub fn calculate_vcg2<'s>(v: &'s [Item<'s>]) -> Result<Vcg<&'s str, &'s str>, Error> where 
+    pub fn calculate_vcg2<'s>(v: &'s [Item<'s>]) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> where 
     {
         let mut vs = Vec::new();
         for i in v {

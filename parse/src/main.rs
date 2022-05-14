@@ -1,5 +1,6 @@
 use std::env::args;
 
+use clap::Parser;
 use depict::parser::*;
 
 use logos::Logos;
@@ -23,13 +24,26 @@ pub struct Error {
     pub text: String,
 }
 
-fn do_one(path: String) -> Result<()> {
+#[derive(Parser, Debug)]
+pub struct Args {
+    #[clap(short = 'f')]
+    paths: Vec<String>,
+
+    #[clap(short = 'e')]
+    exprs: Vec<String>,
+}
+
+
+fn do_one_path(path: String) -> Result<()> {
     let data = std::fs::read_to_string(&path)
         .expect("read error");
 
     println!("\npath: {path}");
-    println!("data:\n\n{data}\n");
+    do_one_expr(path, data)
+}
 
+fn do_one_expr(path: String, data: String) -> Result<()> {
+    println!("data:\n\n{data}\n");
     { 
         let lex = Token::lexer(&data);
         let tks = lex.collect::<Vec<_>>();
@@ -37,7 +51,7 @@ fn do_one(path: String) -> Result<()> {
     }
 
     let mut lex = Token::lexer(&data);
-    let mut p = Parser::new();
+    let mut p = depict::parser::Parser::new();
 
     while let Some(tk) = lex.next() {
         println!("token: {:?}", tk);
@@ -81,8 +95,14 @@ fn main() -> Result<()> {
         )
     }))?;
 
-    for path in args().skip(1) {
-        do_one(path)?;
+    let args = Args::parse();
+
+    for path in args.paths {
+        do_one_path(path)?;
+    }
+
+    for expr in args.exprs {
+        do_one_expr(String::new(), expr)?;
     }
     Ok(())
 }
