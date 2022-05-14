@@ -264,13 +264,13 @@ pub mod layout {
 
     impl Len for String {
         fn len(&self) -> usize {
-            str::len(&self).into()
+            str::len(&self)
         }
     }
 
     impl<'s> Len for Cow<'s, str> {
         fn len(&self) -> usize {
-            str::len(&self).into()
+            str::len(&self)
         }
     }
 
@@ -379,6 +379,8 @@ pub mod layout {
         for i in items {
             if let Item::Text(s) = i {
                 side.push(Some(s.clone()))
+            } else if let Item::Comma(cs) = i {
+                helper_slash(side, cs);
             }
         }
         event!(Level::TRACE, ?side, "HELPER_SLASH");

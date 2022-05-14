@@ -22,6 +22,7 @@ pub mod parser {
     pub enum Item<'s> {
         Text(Cow<'s, str>),
         Seq(Vec<Item<'s>>),
+        Comma(Vec<Item<'s>>),
         Colon(Vec<Item<'s>>, Vec<Item<'s>>),
         Slash(Vec<Item<'s>>, Vec<Item<'s>>),
         Sq(Vec<Item<'s>>),
@@ -60,29 +61,31 @@ pub mod parser {
         // when eating a left item, eat as much as you can.
         // if you ate the whole item, then only you remain.
         // otherwise, what's left of the item eats you.
-        fn eat_left(mut self, mut i: Item<'s>, comma: bool) -> Self {
+        fn eat_left(mut self, mut i: Item<'s>) -> Self {
             if matches!(i, Item::Text(..)  | Item::Sq(..) | Item::Br(..)) {
                 i = Item::Seq(vec![i]);
             }
-            if comma {
-                self = Item::Seq(vec![Item::Seq(vec![]), self]);
-            }
             let ikind = ItemKind::from(&i);
             let jkind = ItemKind::from(&self);
+            let mut comma_buffer = vec![];
             use ItemKind::*;
             while !i.right().is_empty() {
                 let mut end = i.right().pop().unwrap();
                 let ekind = ItemKind::from(&end);
                 match (ikind, ekind, jkind) {
-                    (Seq, Text | Br | Sq, Slash | Colon | Seq) | 
-                    (Seq, Slash | Colon, Colon) |
-                    (Colon, Text | Br | Sq, Slash | Colon | Seq) => { 
+                    (Seq  , Text  | Br | Sq        , Slash | Colon | Seq) | 
+                    (Seq  , Slash | Colon          , Colon              ) |
+                    (Colon, Text  | Br | Sq | Comma, Slash | Colon | Seq) => { 
                         // we eat end; i eats us.
-                        if comma {
-                            self.left()[0].left().insert(0, end);
-                        } else {
-                            self.left().insert(0, end);
-                        }
+                        self.left().insert(0, end);
+                    },
+                    (_, Comma, Comma) => {
+                        end.right().append(self.left());
+                        i.right().push(end);
+                        return i;
+                    },
+                    (_, Text, Comma) => {
+                        comma_buffer.push(end);
                     },
                     (Seq, _, Slash | Colon) => { 
                         // i eats us.
@@ -93,7 +96,7 @@ pub mod parser {
                         i.right().push(end);
                     },
                     (_, Colon, _) => {
-                        let end = merge_item(end, self, false);
+                        let end = merge_item(end, self);
                         i.right().push(end);
                         return i
                     },
@@ -111,7 +114,15 @@ pub mod parser {
                     }
                 }
             }
-            if jkind == Seq {
+            if jkind == Comma {
+                if comma_buffer.len() > 1 {
+                    self.left().insert(0, Item::Seq(comma_buffer.into_iter().rev().collect::<Vec<_>>()));
+                } else if comma_buffer.len() == 1 {
+                    self.left().insert(0, comma_buffer.pop().unwrap())
+                }
+                i.right().push(self);
+                i
+            } else if jkind == Seq && ikind != Comma {
                 i.right().append(self.left());
                 i
             } else if ikind == Seq && i.right().is_empty() { 
@@ -125,6 +136,7 @@ pub mod parser {
         fn right(&mut self) -> &mut Vec<Item<'s>> {
             match self {
                 Item::Seq(ref mut r) => r,
+                Item::Comma(ref mut r) => r,
                 Item::Colon(_, ref mut r) => r,
                 Item::Slash(_, ref mut r) => r,
                 _ => unreachable!(),
@@ -134,6 +146,7 @@ pub mod parser {
         fn left(&mut self) -> &mut Vec<Item<'s>> {
             match self {
                 Item::Seq(ref mut l) => l,
+                Item::Comma(ref mut l) => l,
                 Item::Colon(ref mut l, _) => l,
                 Item::Slash(ref mut l, _) => l,
                 _ => unreachable!(),
@@ -141,169 +154,9 @@ pub mod parser {
         }
     }
 
-    pub fn merge_item<'s>(i: Item<'s>, j: Item<'s>, comma: bool) -> Item<'s> {
+    pub fn merge_item<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
         eprint!("MERGE {i:?} {j:?}");
-        if comma { 
-            eprint!(" COMMA");
-        }
-        let r = j.eat_left(i, comma);
-            
-            // (Item::Text(l), Item::Colon(mut rl, rr)) => {
-            //     rl.insert(0, Item::Text(l));
-            //     Item::Colon(rl, rr)
-            // },
-            // (Item::Seq(mut lr), Item::Colon(mut rl, rr)) => {
-            //     while !lr.is_empty() {
-            //         let end = lr.pop().unwrap();
-            //         if matches!(end, Item::Text(_) | Item::Tilde()) {
-            //             rl.insert(0, end);
-            //         } else {
-            //             lr.push(end);
-            //             break
-            //         }
-            //     }
-            //     if lr.is_empty() { 
-            //         Item::Colon(rl, rr)
-            //     } else {
-            //         lr.push(Item::Colon(rl, rr));
-            //         Item::Seq(lr)
-            //     }
-            // },
-            // (Item::Text(l), Item::Slash(mut rl, rr)) => {
-            //     rl.insert(0, Item::Text(l));
-            //     Item::Slash(rl, rr)
-            // },
-            // (Item::Seq(mut lr), Item::Slash(mut rl, rr)) => {
-            //     while !lr.is_empty() {
-            //         let end = lr.pop().unwrap();
-            //         if matches!(end, Item::Text(_)) {
-            //             rl.insert(0, end);
-            //         } else {
-            //             lr.push(end);
-            //             break
-            //         }
-            //     }
-            //     lr.push(Item::Slash(rl, rr));
-            //     Item::Seq(lr)
-            // },
-            // (Item::Slash(ll, mut lr), Item::Text(s)) => {
-            //     lr.push(Item::Text(s));
-            //     Item::Slash(ll, lr)
-            // },
-            // (Item::Colon(ll, mut lr), Item::Colon(mut rl, rr)) => {
-            //     while !lr.is_empty() {
-            //         let end = lr.pop().unwrap();
-            //         match end {
-            //             Item::Text(_) | Item::Tilde() | Item::Slash(_, _) => {
-            //                 rl.insert(0, end);
-            //             },
-            //             Item::Colon(_, _) => {
-            //                 let end = merge_item(end, j.clone(), comma);
-            //                 lr.push(end);
-            //                 return Item::Colon(ll, lr);
-            //             }
-            //             _ => {
-            //                 lr.push(end);
-            //                 break
-            //             }
-            //         }
-            //     }
-            //     lr.push(Item::Colon(rl, rr));
-            //     Item::Colon(ll, lr)
-            // },
-            // (Item::Colon(ll, mut lr), Item::Slash(mut rl, rr)) => {
-            //     while !lr.is_empty() {
-            //         let end = lr.pop().unwrap();
-            //         match end {
-            //             Item::Text(_) =>  {
-            //                 rl.insert(0, end);
-            //             },
-            //             Item::Colon(_, _) => {
-            //                 let end = merge_item(end, j.clone(), comma);
-            //                 lr.push(end);
-            //                 return Item::Colon(ll, lr);
-            //             },
-            //             _ => {
-            //                 lr.push(end);
-            //                 break
-            //             },
-            //         }
-            //     }
-            //     lr.push(Item::Slash(rl, rr));
-            //     Item::Colon(ll, lr)
-            // },
-            // (Item::Colon(ll, mut lr), Item::Seq(mut rl)) => {
-            //     while !lr.is_empty() {
-            //         let end = lr.pop().unwrap();
-            //         match end {
-            //             Item::Text(_) =>  {
-            //                 rl.insert(0, end);
-            //             },
-            //             Item::Colon(_, _) => {
-            //                 let end = merge_item(end, j.clone(), comma);
-            //                 lr.push(end);
-            //                 return Item::Colon(ll, lr);
-            //             },
-            //             _ => {
-            //                 lr.push(end);
-            //                 break
-            //             },
-            //         }
-            //     }
-            //     lr.append(&mut rl);
-            //     Item::Colon(ll, lr)
-            // },
-            // (Item::Seq(mut lr), j2) => {
-            //     if !lr.is_empty() {
-            //         let end = lr.pop().unwrap();
-            //         match end {
-            //             Item::Slash(rl, mut rr) => {
-            //                 rr.push(j2);
-            //                 lr.push(Item::Slash(rl, rr));
-            //                 Item::Seq(lr)
-            //             },
-            //             Item::Colon(rl, mut rr) => {
-            //                 rr.push(j2);
-            //                 lr.push(Item::Colon(rl, rr));
-            //                 Item::Seq(lr)
-            //             }
-            //             _ => {
-            //                 lr.push(end);
-            //                 lr.push(j2);
-            //                 Item::Seq(lr)
-            //             }
-            //         }
-            //     } else {
-            //         lr.push(j2);
-            //         Item::Seq(lr)
-            //     }
-            // },
-            // (Item::Colon(ll, mut lr), j2) => {
-            //     if comma {
-            //         Item::Seq(vec![Item::Colon(ll, lr), j2])
-            //     } else if !lr.is_empty() {
-            //         let end = lr.pop().unwrap();
-            //         match end {
-            //             Item::Slash(rl, mut rr) => {
-            //                 rr.push(j2);
-            //                 lr.push(Item::Slash(rl, rr));
-            //                 Item::Colon(ll, lr)
-            //             },
-            //             Item::Colon(_, _) => {
-            //                 lr.push(merge_item(end, j2, comma));
-            //                 return Item::Colon(ll, lr);
-            //             }
-            //             _ => {
-            //                 lr.push(end);
-            //                 lr.push(j2);
-            //                 Item::Colon(ll, lr)
-            //             }
-            //         }
-            //     } else {
-            //         lr.push(j2);
-            //         Item::Colon(ll, lr)
-            //     }
-            // }
+        let r = j.eat_left(i);
         eprintln!(" -> {r:?}");
         r
     }
@@ -347,9 +200,9 @@ pub mod parser {
         %right Slash;
         %right Colon;
         %left Dash;
+        %right Comma;
         %right Lsq Lbr;
         %right Rsq Rbr;
-        %right Comma;
         %left Semi;
         %right Text;
         // %left Tilde;
@@ -364,17 +217,15 @@ pub mod parser {
         };
         model ::= expr1(j) { vec![j] };
 
-        // expr1 ::= expr1(j) Dash { Item::Dash(vec![j]) };
-        expr1 ::= expr1(i) Comma expr1(j) { merge_item(i, j, true) };
         expr1 ::= Lsq model(j) Rsq { Item::Sq(j) };
         expr1 ::= Lbr model(j) Rbr { Item::Br(j) };
         expr1 ::= expr3(i) [Bang] { i };
 
         expr3 ::= Text(t) { Item::Text(Cow::Borrowed(t)) };
-        // expr3 ::= Tilde { Item::Tilde() };
         expr3 ::= Slash { Item::Slash(vec![], vec![]) };
         expr3 ::= Colon { Item::Colon(vec![], vec![]) };
-        expr3 ::= expr1(i) expr1(j) [Text] { merge_item(i, j, false) };
+        expr3 ::= Comma { Item::Comma(vec![]) };
+        expr3 ::= expr1(i) expr1(j) [Text] { merge_item(i, j) };
     }
 
     pub use fact::Parser;
