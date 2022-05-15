@@ -350,13 +350,12 @@ pub mod layout {
                     .collect::<Vec<_>>(), vec![]);
                 labels.push(lvl);
             },
-            Some(Item::Seq(r)) => {
+            Some(Item::Seq(r)) | Some(Item::Comma(r)) => {
                 let lvl = (r.iter().map(|i| 
                     if let Item::Text(s) = i { 
                         Some(s.clone()) 
-                    } else if let Item::Seq(s) = i { 
-                        eprintln!("TODO seq support");
-                        None
+                    } else if let s@Item::Seq(_) = i {
+                        Some(Cow::from(crate::printer::print1(s)))
                     } else { None })
                     .collect::<Vec<_>>(), vec![]);
                 labels.push(lvl);
@@ -380,7 +379,9 @@ pub mod layout {
             if let Item::Text(s) = i {
                 side.push(Some(s.clone()))
             } else if let Item::Comma(cs) = i {
-                helper_slash(side, cs);
+                for i in cs {
+                    side.push(Some(Cow::from(crate::printer::print1(i))));
+                }
             }
         }
         event!(Level::TRACE, ?side, "HELPER_SLASH");
@@ -391,7 +392,7 @@ pub mod layout {
         let mut labels = vec![];
         match item {
             Item::Colon(l, r) => {
-                if l.len() == 1 {
+                if l.len() == 1 && matches!(l[0], Item::Text(..)){
                     helper(vs, &l[0]);
                 } else {
                     helper_labels(&mut labels, r);
