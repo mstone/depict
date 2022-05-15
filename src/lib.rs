@@ -1,3 +1,132 @@
+
+pub mod printer {
+    use std::borrow::Cow;
+
+    use itertools::Itertools;
+
+    use super::parser::{Item};
+
+    pub fn print(model: &[Item]) -> String {
+        model.iter().map(print1).join("\n")
+    }
+
+    pub fn print1(i: &Item) -> String {
+        let mut v = Vec::new();
+        match i {
+            Item::Text(s) => v.push(s.clone()),
+            Item::Seq(s) => v.extend(s.iter().map(|i| Cow::from(print1(i)))),
+            Item::Comma(s) => {
+                v.extend(itertools::intersperse(s.iter().map(|i| Cow::from(print1(i))), Cow::from(",")));
+                if s.len() <= 1 {
+                    v.push(Cow::from(","));
+                }
+            },
+            Item::Colon(l, r) => {
+                v.extend(l.iter().map(|i| Cow::from(print1(i))));
+                v.push(Cow::from(":"));
+                v.extend(r.iter().map(|i| Cow::from(print1(i))));
+            },
+            Item::Slash(l, r) => {
+                v.extend(l.iter().map(|i| Cow::from(print1(i))));
+                v.push(Cow::from("/"));
+                v.extend(r.iter().map(|i| Cow::from(print1(i))));
+            },
+            Item::Sq(s) => {
+                v.push(Cow::from("["));
+                v.extend(s.iter().map(|i| Cow::from(print1(i))));
+                v.push(Cow::from("]"));
+            },
+            Item::Br(s) => {
+                v.push(Cow::from("{"));
+                v.extend(s.iter().map(|i| Cow::from(print1(i))));
+                v.push(Cow::from("}"));
+            },
+        }
+        v.join(" ")
+    }
+
+    #[cfg(test)]
+    mod test {
+        use std::borrow::Cow;
+
+        use proptest::prelude::*;
+        use logos::Logos;
+        use crate::parser::{Item, Parser, Token};
+
+        fn deseq(v: Vec<Item>) -> Vec<Item> {
+            if let [Item::Seq(v)] = &v[..] { 
+                v.clone()
+            } else { 
+                v
+            }
+        }
+        
+        fn arb_item() -> impl Strategy<Value = Item<'static>> {
+            let leaf = "[a-z]+".prop_map(|s| Item::Text(Cow::from(s)));
+            let leaf2 = leaf.clone().prop_recursive(1, 4, 3, |inner| {
+                prop::collection::vec(inner.clone(), 2..3).prop_map(Item::Seq)
+            });
+            let leaf3 = prop_oneof![
+                leaf.clone(),
+                leaf2.clone(),
+                prop::collection::vec(leaf.clone(), 0..3).prop_map(Item::Comma),
+            ];
+            leaf3.prop_recursive(
+                1, 4, 3, |inner| {
+                    prop_oneof![
+                        // note: this pair of cases, plus the depth limitation above, 
+                        // is a crude work-around for needing to generate only right-
+                        // associated trees of colons
+                        (inner.clone(), inner.clone()).prop_map(|(i, j)| Item::Colon(deseq(vec![i]), deseq(vec![j]))),
+                        (inner.clone(), inner.clone(), inner.clone()).prop_map(|(i, j, k)| 
+                            Item::Colon(
+                                deseq(vec![i]), 
+                                vec![Item::Colon(deseq(vec![j]), deseq(vec![k]))]
+                            )),
+
+                        (inner.clone(), inner.clone()).prop_map(|(i, j)| Item::Slash(deseq(vec![i]), deseq(vec![j]))),
+
+                        inner.clone().prop_map(|i| Item::Br(vec![i])),
+
+                        inner.clone().prop_map(|i| Item::Sq(vec![i])),
+                    ]
+                }
+            )
+        }
+
+        proptest! {
+            #[test]
+            fn doesnt_crash(s in "\\PC*") {
+                let mut lex = Token::lexer(&s);
+                let mut p = Parser::new();
+
+                for tk in lex.by_ref() {
+                    if p.parse(tk).is_err() {
+                        return Ok(());
+                    }
+                }
+                let v = p.end_of_input();
+                if v.is_err() {
+                    return Ok(());
+                }
+            }
+
+            #[test]
+            fn has_partial_inverse(i in arb_item()) {
+                let s = super::print1(&i);
+                let mut lex = Token::lexer(&s);
+                let mut p = Parser::new();
+
+                for tk in lex.by_ref() {
+                    p.parse(tk).unwrap();
+                }
+                let v = p.end_of_input().unwrap();
+                assert!(i == v[0] || i == (if let Item::Seq(v) = &v[0] { v[0].clone() } else { v[0].clone() }), "\n\ni: {i:#?}\ns: {s:?}\no: {v:#?}\n\n");
+            }
+        }
+    }
+}
+
 pub mod parser {
     use enum_kinds::EnumKind;
     // use crate::data::*;
@@ -17,7 +146,7 @@ pub mod parser {
 
     pub type Model<'s> = Vec<Item<'s>>;
 
-    #[derive(Clone, Debug, EnumKind)]
+    #[derive(Clone, Debug, EnumKind, PartialEq)]
     #[enum_kind(ItemKind)]
     pub enum Item<'s> {
         Text(Cow<'s, str>),
@@ -64,6 +193,10 @@ pub mod parser {
         fn eat_left(mut self, mut i: Item<'s>) -> Self {
             if matches!(i, Item::Text(..)  | Item::Sq(..) | Item::Br(..)) {
                 i = Item::Seq(vec![i]);
+            }
+            if matches!(i, Item::Comma(..)) && matches!(self, Item::Slash(..) | Item::Colon(..)) {
+                self.left().insert(0, i);
+                return self;
             }
             let ikind = ItemKind::from(&i);
             let jkind = ItemKind::from(&self);
@@ -115,10 +248,17 @@ pub mod parser {
                 }
             }
             if jkind == Comma {
-                if comma_buffer.len() > 1 {
-                    self.left().insert(0, Item::Seq(comma_buffer.into_iter().rev().collect::<Vec<_>>()));
-                } else if comma_buffer.len() == 1 {
-                    self.left().insert(0, comma_buffer.pop().unwrap())
+                match comma_buffer.len() {
+                    0 => {},
+                    1 => {
+                        self.left().insert(0, comma_buffer.pop().unwrap());
+                        if ikind == Seq && i.right().is_empty() {
+                            return self;
+                        }
+                    },
+                    _n => {
+                        self.left().insert(0, Item::Seq(comma_buffer.into_iter().rev().collect::<Vec<_>>()));
+                    },
                 }
                 i.right().push(self);
                 i

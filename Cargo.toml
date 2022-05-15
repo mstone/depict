@@ -18,9 +18,13 @@ desktop = []
 server = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 
+[dev-dependencies]
+proptest = "1"
+
 [dependencies]
 derive_more = "0.99"
 enum-kinds = "0.5.1"
+itertools = "0.10"
 logos = "0.12"
 nom = "7"
 petgraph = "0.6"
