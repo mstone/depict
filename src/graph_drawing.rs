@@ -326,12 +326,10 @@ pub mod layout {
 
     #[instrument()]
     fn helper_labels<'s>(labels: &mut Vec<(Labels<Cow<'s, str>>, Labels<Cow<'s, str>>)>, r: &'s [Item<'s>]) {
+        eprint!("HELPER_LABELS, r: {r:#?} ");
         match r.first() {
             Some(_f @ Item::Colon(rl, rr)) => {
-                let mut lvl = (vec![], vec![]);
-                helper_lvl(&mut lvl, rl);
-                event!(Level::TRACE, ?lvl, "HELPER_LABELS");
-                labels.push(lvl);
+                helper_labels(labels, rl);
                 helper_labels(labels, rr);
             }
             Some(Item::Slash(rl, rr)) => {
@@ -362,15 +360,8 @@ pub mod layout {
             }
             _ => (),
         }
-    }
-
-    #[instrument()]
-    fn helper_lvl<'s>(lvl: &mut (Vec<Option<Cow<'s, str>>>, Vec<Option<Cow<'s, str>>>), rl: &'s [Item<'s>]) {
-        if let [Item::Slash(l, r)] = rl {
-            helper_slash(&mut lvl.0, l);
-            helper_slash(&mut lvl.1, r);
-        }
-        event!(Level::TRACE, ?lvl, "HELPER_LVL");
+        eprintln!("-> labels: {labels:#?}");
+        event!(Level::TRACE, ?labels, "HELPER_LABELS");
     }
 
     #[instrument()]
