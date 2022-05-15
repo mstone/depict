@@ -228,7 +228,7 @@ pub mod parser {
                         // i eats us and we dissolve.
                         i.right().push(end);
                     },
-                    (_, Colon, _) => {
+                    (_, Colon, _) | (_, Slash, Comma) => {
                         let end = merge_item(end, self);
                         i.right().push(end);
                         return i
