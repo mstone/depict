@@ -70,7 +70,6 @@
               cp ${serverBin}/bin/${subpkg} $out/bin/${subpkg}
               wrapProgram $out/bin/${subpkg} \
                 --prefix PATH : "${minion}/bin/" \
-                --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]} \
                 --set WEBROOT ${web}
             '';
           };
@@ -121,14 +120,12 @@
               mkdir -p $out/bin
               cp ${pkg}/bin/${subpkg} $out/bin/${subpkg}
               wrapProgram $out/bin/${subpkg} \
-                --prefix PATH : "${minion}/bin/" \
-                --set PYTHONPATH ${python3.pkgs.makePythonPath [python3.pkgs.cvxpy]}
+                --prefix PATH : "${minion}/bin/"
             '';
           };
 
           lib.depict = { isShell, isWasm ? false, subpkg ? "depict", subdir ? "." }: 
             let 
-              python = with final; with pkgs; python39.withPackages (ps: with ps; [cvxpy]);
               buildInputs = with final; with pkgs; [
                 #(rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
                 #(rust-bin.nightly.latest.minimal.override { extensions = [ "rustfmt" ]; targets = [ "wasm32-unknown-unknown" ]; })
@@ -137,7 +134,7 @@
                   targets = [ "wasm32-unknown-unknown" ];
                 }))
                 #texlive.combined.scheme-full
-                python
+                cmake
               ] ++ final.lib.optionals isShell [
                 entr
                 trunk
@@ -166,7 +163,10 @@
 
             cargoArtifacts = crane.lib.${final.system}.buildDepsOnly { 
               src = self;
+
               inherit buildInputs;
+	      dontUseCmakeConfigure = true;
+
               cargoCheckCommand = if isWasm then "" else 
                 if final.lib.hasSuffix "darwin" final.system then ''
                   cargo check --release -p depict-desktop -p depict-server; 
@@ -192,12 +192,9 @@
             cargoBuildCommand = if isWasm then "cargo build --release -p ${subpkg} --target wasm32-unknown-unknown" else "cargo build --release -p ${subpkg}";
 
             inherit buildInputs;
+            dontUseCmakeConfigure = true;
 
             doCheck = false;
-
-            shellHook = if isShell then ''
-              export PYTHONPATH=''${PYTHONPATH:+''${PYTHONPATH}:}${python}/${python.sitePackages}
-            '' else null;
           };
         };
       };

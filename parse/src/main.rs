@@ -1,5 +1,3 @@
-use std::env::args;
-
 use clap::Parser;
 use depict::parser::*;
 

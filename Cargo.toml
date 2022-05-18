@@ -11,9 +11,8 @@ repository = "https://github.com/mstone/depict"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["minion", "cvxpy"]
+default = ["minion", "osqp"]
 minion = ["ndarray"]
-cvxpy = ["numpy", "pyo3"]
 desktop = []
 server = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
@@ -39,6 +38,9 @@ typed-index-collections = "3.0"
 # cvxpy
 numpy = { version = "0.15", optional = true }
 pyo3 = { version = "0.15.1", optional = true }
+
+# osqp
+osqp = { version = "0.6", optional = true }
 
 # minion
 ndarray = { version = "0.15", optional = true }

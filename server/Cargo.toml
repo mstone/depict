@@ -10,7 +10,7 @@ repository = "https://github.com/mstone/depict"
 
 [dependencies]
 axum = "0.4"
-depict = { path = "..", version = "0.1", default-features = false, features = [ "server", "minion", "cvxpy" ] }
+depict = { path = "..", version = "0.1", default-features = false, features = [ "server", "minion", "osqp" ] }
 futures = "0.3"
 hyper = "0.14"
 Inflector = "0.11"

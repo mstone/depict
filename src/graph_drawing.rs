@@ -38,8 +38,10 @@ pub mod error {
     #[non_exhaustive]
     #[derive(Debug, thiserror::Error)]
     pub enum LayoutError {
-        #[error("cvxpy error")]
-        CvxpyError{#[from] source: pyo3::PyErr},
+        #[error("osqp solver error")]
+        OsqpError{error: String},
+        #[error("osqp setup error")]
+        OsqpSetupError{#[from] source: osqp::SetupError},
     }
     
     #[non_exhaustive]
@@ -926,63 +928,6 @@ pub mod layout {
     pub use minion::minimize_edge_crossing;
 }
 
-pub mod py {
-    use std::marker::PhantomData;
-    use numpy::{PyReadonlyArray1, PyArray1};
-    use pyo3::{prelude::*, basic::CompareOp};
-
-    pub fn mul<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
-        a.call_method1("__mul__", (b,))
-    }
-    
-    pub fn sub<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
-        a.call_method1("__sub__", (b,))
-    }
-    
-    pub fn add<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
-        a.call_method1("__add__", (b,))
-    }
-    
-    pub struct TiPyAny<'py, K>(pub &'py PyAny, PhantomData<fn(K) -> K>)
-        where usize: From<K>;
-
-    impl<'py, K> TiPyAny<'py, K> where usize: From<K> {
-        pub fn new(py: &'py PyAny) -> TiPyAny<'py, K> {
-            Self(py, PhantomData)
-        }
-    }
-    
-    impl<'py, K> TiPyAny<'py, K> where usize: From<K> {
-        pub fn get(&self, b: K) -> PyResult<&PyAny> {
-            let k: usize = b.into();
-            self.0.get_item(k.into_py(self.0.py()))
-        }
-    }
-    
-    pub fn get(a: &PyAny, b: usize) -> PyResult<&PyAny> {
-        a.get_item(b.into_py(a.py()))
-    }
-    
-    pub fn geq<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
-        a.rich_compare(b, CompareOp::Ge)
-    }
-    
-    pub fn leq<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
-        a.rich_compare(b, CompareOp::Le)
-    }
-    
-    pub fn eq<'py>(a: &'py PyAny, b: &'py PyAny) -> PyResult<&'py PyAny> {
-        a.rich_compare(b, CompareOp::Eq)
-    }
-
-    pub fn get_value(a: &PyAny) -> PyResult<PyReadonlyArray1<f64>> {
-        Ok(a
-            .getattr("value")?
-            .extract::<&PyArray1<f64>>()?
-            .readonly())
-    }
-}
-
 pub mod index {
     use std::{ops::{Add, Sub}, fmt::Display};
 
@@ -1115,22 +1060,21 @@ pub mod index {
 }
 
 pub mod geometry {
+    use osqp::{self, CscMatrix};
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::visit::EdgeRef;
-    use pyo3::types::{PyModule, IntoPyDict, PyList};
-    use pyo3::{prepare_freethreaded_python, PyResult, Python, PyAny, IntoPy, PyErr};
     use sorted_vec::SortedVec;
     use tracing::{event, Level};
     use tracing_error::InstrumentError;
     use typed_index_collections::TiVec;
 
-    use crate::graph_drawing::error::LayoutError;
-    use crate::graph_drawing::py::{TiPyAny, add, leq, geq, sub, mul, get_value};
+    use crate::graph_drawing::error::{LayoutError, OrErrExt};
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
     use super::layout::{Loc, Hop, Vcg, Placement};
 
+    use std::borrow::{Cow, Borrow};
     use std::cmp::max;
     use std::collections::{HashMap, BTreeMap, HashSet};
     use std::fmt::{Debug, Display};
@@ -1269,6 +1213,272 @@ pub mod geometry {
         pub ss: TiVec<HopSol, f64>,
         pub ts: TiVec<VerticalRank, f64>,
     }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub enum AnySol {
+        L(LocSol),
+        R(LocSol),
+        S(HopSol),
+        T(usize)
+    }
+
+    #[derive(Debug)]
+    pub struct Vars {
+        vars: HashMap<AnySol, Var>
+    }
+
+    impl Display for Vars {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let vs = self.vars.iter().map(|(a, b)| (b, a)).collect::<BTreeMap<_, _>>();
+            write!(f, "Vars {{")?;
+            for (var, _sol) in vs.iter() {
+                write!(f, "{var}, ")?;
+            }
+            write!(f, "}}")
+        }
+    }
+
+    impl Display for Var {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "v{}({})", self.index, self.sol)
+        }
+    }
+
+    impl Display for Monomial {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self.coeff {
+                x if x == -1. => write!(f, "-{}", self.var),
+                x if x == 1. => write!(f, "{}", self.var),
+                _ => write!(f, "{}{}", self.coeff, self.var)
+            }
+        }
+    }
+
+    impl Display for AnySol {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                AnySol::L(loc) => write!(f, "l{}", loc.0),
+                AnySol::R(loc) => write!(f, "r{}", loc.0),
+                AnySol::S(hop) => write!(f, "s{}", hop.0),
+                AnySol::T(idx) => write!(f, "t{}", idx),
+            }
+        }
+    }
+
+    impl Display for Constraints {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Constraints {{")?;
+            for (l, comb, u) in self.constrs.iter() {
+                write!(f, "{l} <= ")?;
+                for term in comb.iter() {
+                    write!(f, "{term} ")?;
+                }
+                if *u != f64::INFINITY {
+                    write!(f, "<= {u}, ")?;
+                } else {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "}}")
+        }
+    }
+
+    impl Vars {
+        fn new() -> Self {
+            Self { vars: Default::default() }
+        }
+
+        fn get(&mut self, index: AnySol) -> Monomial {
+            let len = self.vars.len();
+            let var = self.vars
+                .entry(index)
+                .or_insert(Var{index: len, sol: index});
+            From::from(&*var)
+        }
+    }
+
+    pub struct Constraints {
+        constrs: Vec<(f64, Vec<Monomial>, f64)>,
+    }
+
+    impl Constraints {
+        fn new() -> Self {
+            Self { constrs: Default::default() }
+        }
+
+        // L <= Ax <= U 
+        /// l < r => r - l > 0 => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
+        fn leq(&mut self, V: &mut Vars, lhs: AnySol, rhs: AnySol) {
+            if lhs == rhs {
+                return
+            }
+            self.constrs.push((0., vec![-V.get(lhs), V.get(rhs)], f64::INFINITY));
+        }
+
+        /// l + c < r => c < r - l => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
+        fn leqc(&mut self, V: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+            self.constrs.push((c, vec![-V.get(lhs), V.get(rhs)], f64::INFINITY));
+        }
+
+        /// l > r => l - r > 0 => A += [-1(r) ... 1(s) ...], L += 0, U += (FMAX/infty)
+        fn geq(&mut self, V: &mut Vars, lhs: AnySol, rhs: AnySol) {
+            if lhs == rhs {
+                return
+            }
+            self.constrs.push((0., vec![V.get(lhs), -V.get(rhs)], f64::INFINITY));
+        }
+
+        /// l > r + c => l - r > c => A += [1(r) ... -1(s) ...], L += c, U += (FMAX/infty)
+        fn geqc(&mut self, V: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+            self.constrs.push((c, vec![V.get(lhs), -V.get(rhs)], f64::INFINITY));
+        }
+
+        fn eq(&mut self, lc: &[Monomial]) {
+            self.constrs.push((0., Vec::from(lc), 0.));
+        }
+
+        fn sym(&mut self, V: &mut Vars, Pd: &mut Vec<Monomial>, lhs: AnySol, rhs: AnySol) {
+            // P[i, j] = 100 => obj += 100 * x_i * x_j
+            // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
+            // x_k = x_i - x_j => x_k - x_i + x_j = 0
+            // then P[k,k] = 100, and [l,A,u] += [0],[1(k), -1(i), 1(j)],[0]
+            // 0 <= k-i+j && k-i+j <= 0    =>    i <= k+j && k+j <= i       => i-j <= k && k <= i-j => k == i-j
+            // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
+            // obj.push(...)
+            let t = V.get(AnySol::T(V.vars.len()));
+            let symmetry_cost = 1.0;
+            Pd.push(symmetry_cost * t);
+            self.eq(&[t, -V.get(lhs), V.get(rhs)]);
+        }
+    }
+
+    fn as_csc_matrix<'s>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial]]) -> CscMatrix<'s> {
+        let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
+        let mut indptr = vec![];
+        let mut indices = vec![];
+        let mut data = vec![];
+        let mut cur_col = 0;
+        for (row, comb) in rows.iter().enumerate() {
+            for term in comb.iter() {
+                if term.coeff != 0. {
+                    let old = cols
+                        .entry(term.var.index)
+                        .or_default()
+                        .insert(row, term.coeff);
+                    assert!(old.is_none());
+                }
+            }
+        }
+        let nrows = nrows.unwrap_or(rows.len());
+        let ncols = ncols.unwrap_or(cols.len());
+        // indptr.push(data.len());
+        for (col, rows) in cols.iter() {
+            for _ in cur_col..=*col {
+                indptr.push(data.len());
+            }
+            for (row, coeff) in rows {
+                indices.push(*row);
+                data.push(*coeff);
+            }
+            // indptr.push(data.len());
+            cur_col = *col+1;
+        }
+        for _ in cur_col..=ncols {
+            indptr.push(data.len());
+        }
+        CscMatrix{
+            nrows,
+            ncols,
+            indptr: Cow::Owned(indptr),
+            indices: Cow::Owned(indices),
+            data: Cow::Owned(data),
+        }
+    }
+
+    fn as_diag_csc_matrix<'s>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial]) -> CscMatrix<'s> {
+        let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
+        let mut indptr = vec![];
+        let mut indices = vec![];
+        let mut data = vec![];
+        let mut cur_col = 0;
+        for (_, term) in rows.iter().enumerate() {
+            if term.coeff != 0. {
+                let old = cols
+                    .entry(term.var.index)
+                    .or_default()
+                    .insert(term.var.index, term.coeff);
+                assert!(old.is_none());
+            }
+        }
+        let nrows = nrows.unwrap_or(rows.len());
+        let ncols = ncols.unwrap_or(cols.len());
+        // indptr.push(data.len());
+        for (col, rows) in cols.iter() {
+            for _ in cur_col..=*col {
+                indptr.push(data.len());
+            }
+            for (row, coeff) in rows {
+                indices.push(*row);
+                data.push(*coeff);
+            }
+            // indptr.push(data.len());
+            cur_col = *col+1;
+        }
+        for _ in cur_col..=ncols {
+            indptr.push(data.len());
+        }
+        CscMatrix{
+            nrows,
+            ncols,
+            indptr: Cow::Owned(indptr),
+            indices: Cow::Owned(indices),
+            data: Cow::Owned(data),
+        }
+    }
+
+    impl<'s> From<Constraints> for CscMatrix<'s> {
+        fn from(c: Constraints) -> Self {
+            let A = &c.constrs
+                .iter()
+                .map(|(_, comb, _)| &comb[..])
+                .collect::<Vec<_>>();
+            as_csc_matrix(None, None, &A)
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+    pub struct Var {
+        index: usize,
+        sol: AnySol,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct Monomial {
+        var: Var,
+        coeff: f64,
+    }
+
+    impl std::ops::Neg for Monomial {
+        type Output = Self;
+        fn neg(mut self) -> Self::Output {
+            self.coeff = -self.coeff;
+            self
+        }
+    }
+
+    impl From<&Var> for Monomial {
+        fn from(var: &Var) -> Self {
+            Monomial{ var: *var, coeff: 1. }
+        }
+    }
+
+    impl std::ops::Mul<Monomial> for f64 {
+        type Output = Monomial;
+        fn mul(self, mut rhs: Monomial) -> Self::Output {
+            rhs.coeff *= self;
+            rhs
+        }
+    }
     
     pub fn position_sols<'s, V, E>(
         vcg: &'s Vcg<V, E>,
@@ -1308,406 +1518,486 @@ pub mod geometry {
         
         let num_locs = all_locs.len();
         let num_hops = all_hops.len();
-        prepare_freethreaded_python();
-        let res: PyResult<LayoutSolution> = Python::with_gil(|py| {
-            let cp = PyModule::import(py, "cvxpy")?;
-            let var = cp.getattr("Variable")?;
-            let sq = cp.getattr("norm")?;
-            let abs = cp.getattr("abs")?;
-            let constant = cp.getattr("Constant")?;
-            let problem = cp.getattr("Problem")?;
-            let minimize = cp.getattr("Minimize")?;
-            let square = |a: &PyAny| {sq.call1((a,))};
-            let _absv = |a: &PyAny| {abs.call1((a,))};
-            let as_constant = |a: i32| { constant.call1((a.into_py(py),)) };
-            let as_constantf = |a: f64| { constant.call1((a.into_py(py),)) };
-            let hundred: &PyAny = as_constant(100)?;
-            let _thousand: &PyAny = as_constant(1000)?;
-            let _ten: &PyAny = as_constant(10)?;
-            let _one: &PyAny = as_constant(1)?;
-            let _two: &PyAny = as_constant(2)?;
-            let zero: &PyAny = as_constant(0)?;
-            let symmetry_cost: &PyAny = as_constantf(1.0)?;
-            let l = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
-            let l = TiPyAny::<LocSol>::new(l);
-            let r = var.call((num_locs,), Some([("pos", true)].into_py_dict(py)))?;
-            let r = TiPyAny::<LocSol>::new(r);
-            let s = var.call((num_hops,), Some([("pos", true)].into_py_dict(py)))?;
-            let s = TiPyAny::<HopSol>::new(s);
-            let sep = as_constantf(20.0)?;
-            let dsep = as_constantf(40.0)?;
-            let _tenf = as_constantf(10.0)?;
-            let mut cvec: Vec<&PyAny> = vec![];
-            let mut obj = zero;
     
-            let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
-            // cvec.push(eq(l.get(root_n)?, zero)?);
-            // cvec.push(eq(r.get(root_n)?, one)?);
-            obj = add(obj, r.get(root_n)?)?;
-    
-            #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-            enum Loc2<V> {
-                Node{vl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: LocSol},
-                Hop{vl: V, wl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: HopSol},
+        let sep = 20.0;
+        let symmetry_cost = 100.0;
+
+        let mut V: Vars = Vars::new();
+        let mut C: Constraints = Constraints::new();
+        let mut Pd: Vec<Monomial> = vec![];
+        let mut Q: Vec<Monomial> = vec![];
+        let mut A: Vec<(f64, Vec<Monomial>, f64)> = vec![];
+
+        let L = AnySol::L;
+        let R = AnySol::R;
+        let S = AnySol::S;
+        let T = AnySol::T;
+        
+        let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
+        // q[r[root_n]] = 1  <-- obj += r[root_n]
+        // obj = add(obj, r.get(root_n)?)?;
+        Q.push(V.get(R(root_n)));
+
+        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        enum Loc2<V> {
+            Node{vl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: LocSol},
+            Hop{vl: V, wl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: HopSol},
+        }
+
+        let mut level_to_object = BTreeMap::<VerticalRank, BTreeMap<SolvedHorizontalRank, HashSet<_>>>::new();
+        for ((vl, wl), hops) in hops_by_edge.iter() {
+            let vn = node_to_loc[&Loc::Node(vl.clone())];
+            let wn = node_to_loc[&Loc::Node(wl.clone())];
+            let vshr = solved_locs[&vn.0][&vn.1];
+            let wshr = solved_locs[&wn.0][&wn.1];
+            let vsol = sol_by_loc[&vn];
+            let wsol = sol_by_loc[&wn];
+
+            level_to_object.entry(vn.0).or_default().entry(vshr).or_default().insert(Loc2::Node{vl, loc: vn, shr: vshr, sol: vsol});
+            level_to_object.entry(wn.0).or_default().entry(wshr).or_default().insert(Loc2::Node{vl: wl, loc: wn, shr: wshr, sol: wsol});
+
+            for (_n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
+                let shr = solved_locs[lvl][mhr];
+                let shrd = solved_locs[&(*lvl+1)][nhr];
+                let lvl1 = *lvl+1;
+                let src_sol = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
+                let dst_sol = sol_by_hop[&(lvl1, *nhr, vl.clone(), wl.clone())];
+                level_to_object.entry(*lvl).or_default().entry(shr).or_default().insert(Loc2::Hop{vl, wl, loc: (*lvl, *mhr), shr, sol: src_sol});
+                level_to_object.entry(lvl1).or_default().entry(shrd).or_default().insert(Loc2::Hop{vl, wl, loc: (lvl1, *nhr), shr: shrd, sol: dst_sol});
+                // let vxh = format!("{vl} {wl} {lvl},{shr}"));
+                // let wxh = format!("{vl} {wl} {lvl1},{shrd}");
+                // layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
+                // if n == 0 {
+                //     layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
+                // }
+                // if n == hops.len()-1 {
+                //     layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
+                // }
             }
-    
-            let mut level_to_object = BTreeMap::<VerticalRank, BTreeMap<SolvedHorizontalRank, HashSet<_>>>::new();
-            for ((vl, wl), hops) in hops_by_edge.iter() {
-                let vn = node_to_loc[&Loc::Node(vl.clone())];
-                let wn = node_to_loc[&Loc::Node(wl.clone())];
-                let vshr = solved_locs[&vn.0][&vn.1];
-                let wshr = solved_locs[&wn.0][&wn.1];
-                let vsol = sol_by_loc[&vn];
-                let wsol = sol_by_loc[&wn];
-    
-                level_to_object.entry(vn.0).or_default().entry(vshr).or_default().insert(Loc2::Node{vl, loc: vn, shr: vshr, sol: vsol});
-                level_to_object.entry(wn.0).or_default().entry(wshr).or_default().insert(Loc2::Node{vl: wl, loc: wn, shr: wshr, sol: wsol});
-    
-                for (_n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                    let shr = solved_locs[lvl][mhr];
-                    let shrd = solved_locs[&(*lvl+1)][nhr];
-                    let lvl1 = *lvl+1;
-                    let src_sol = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
-                    let dst_sol = sol_by_hop[&(lvl1, *nhr, vl.clone(), wl.clone())];
-                    level_to_object.entry(*lvl).or_default().entry(shr).or_default().insert(Loc2::Hop{vl, wl, loc: (*lvl, *mhr), shr, sol: src_sol});
-                    level_to_object.entry(lvl1).or_default().entry(shrd).or_default().insert(Loc2::Hop{vl, wl, loc: (lvl1, *nhr), shr: shrd, sol: dst_sol});
-                    // let vxh = format!("{vl} {wl} {lvl},{shr}"));
-                    // let wxh = format!("{vl} {wl} {lvl1},{shrd}");
-                    // layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
-                    // if n == 0 {
-                    //     layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
-                    // }
-                    // if n == hops.len()-1 {
-                    //     layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
-                    // }
-                }
-            }
-            event!(Level::TRACE, ?level_to_object, "LEVEL TO OBJECT");
-            // eprintln!("LEVEL TO OBJECT: {level_to_object:#?}");
-    
-            for LocRow{ovr, ohr, loc, ..} in all_locs.iter() {
-                let ovr = *ovr; 
-                let ohr = *ohr;
-                let locs = &solved_locs[&ovr];
-                let shr = locs[&ohr];
-                let n = sol_by_loc[&(ovr, ohr)];
-                let min_width = *width_by_loc.get(&(ovr, ohr))
-                    .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>(format!("missing node width: {ovr}, {ohr}")))?;
-                let mut min_width = min_width.round() as usize;
-    
-                if let Loc::Node(vl) = loc {
-                    let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
-                    let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
-                    let mut v_dsts = v_ers
-                        .iter()
-                        .map(|er| { 
-                            dag
-                                .node_weight(er.target())
-                                .map(Clone::clone)
-                                .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>("missing node weight"))
-                        })
-                        .into_iter()
-                        .collect::<Result<Vec<_>, PyErr>>()?;
-                    let mut w_srcs = w_ers
-                        .iter()
-                        .map(|er| { 
-                            dag
-                                .node_weight(er.source())
-                                .map(Clone::clone)
-                                .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyIndexError, _>("missing node weight"))
-                        })
-                        .into_iter()
-                        .collect::<Result<Vec<_>, PyErr>>()?;
-    
-                    v_dsts.sort(); v_dsts.dedup();
-                    v_dsts.sort_by_key(|dst| {
-                        let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
-                        let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                        (shr, -(svr.0 as i32))
-                    });
-                    let v_outs = v_dsts
-                        .iter()
-                        .map(|dst| { (vl.clone(), dst.clone()) })
-                        .collect::<Vec<_>>();
-    
-                    w_srcs.sort(); w_srcs.dedup();
-                    w_srcs.sort_by_key(|src| {
-                        let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
-                        let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                        (shr, -(svr.0 as i32))
-                    });
-                    let w_ins = w_srcs
-                        .iter()
-                        .map(|src| { (src.clone(), vl.clone()) })
-                        .collect::<Vec<_>>();
-    
-                    let v_out_first_hops = v_outs
-                        .iter()
-                        .map(|(vl, wl)| {
-                            #[allow(clippy::unwrap_used)]
-                            let (lvl, (mhr, _nhr)) = hops_by_edge[&(vl.clone(), wl.clone())].iter().next().unwrap();
-                            (*lvl, *mhr, vl.clone(), wl.clone())
-                        })
-                        .collect::<Vec<_>>();
-                    let w_in_last_hops = w_ins
-                        .iter()
-                        .map(|(vl, wl)| {
-                            #[allow(clippy::unwrap_used)]
-                            let (lvl, (mhr, _nhr)) = hops_by_edge[&(vl.clone(), wl.clone())].iter().rev().next().unwrap();
-                            (*lvl, *mhr, vl.clone(), wl.clone())
-                        })
-                        .collect::<Vec<_>>();
-                    
-                    let out_width: f64 = v_out_first_hops
-                        .iter()
-                        .map(|idx| {
-                            let widths = width_by_hop[idx];
-                            widths.0 + widths.1
-                        })
-                        .sum();
-                    let in_width: f64 = w_in_last_hops
-                        .iter()
-                        .map(|idx| {
-                            let widths = width_by_hop[idx];
-                            widths.0 + widths.1
-                        })
-                        .sum();
-    
-                    let in_width = in_width.round() as usize;
-                    let out_width = out_width.round() as usize;
-                    let orig_width = min_width;
-                    // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
-                    min_width = max(orig_width, max(in_width, out_width));
-                    event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
-                    // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
-                }
-    
-                if let Loc::Hop(_lvl, vl, wl) = loc {
-                    let ns = sol_by_hop[&(ovr, ohr, vl.clone(), wl.clone())];
-                    cvec.push(leq(l.get(n)?, s.get(ns)?)?);
-                    cvec.push(leq(s.get(ns)?, r.get(n)?)?);
-                    event!(Level::TRACE, ?loc, %n, %min_width, "X3: l{n} <= s{ns} <= r{n}");
-                }
-            
-                cvec.push(geq(l.get(n)?, l.get(root_n)?)?);
-                cvec.push(leq(r.get(n)?, r.get(root_n)?)?);
-    
-                event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
-                cvec.push(geq(r.get(n)?, add(l.get(n)?, as_constantf(min_width as f64)?)?)?);
-    
-                // WIDTH
-                // BUG! WHY DOES THIS MATTER???????
-                // obj = add(obj, sub(r.get(n)?, l.get(n)?)?)?;
-                if shr > SolvedHorizontalRank(0) {
-                    #[allow(clippy::unwrap_used)]
-                    let ohrp = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap());
-                    let np = sol_by_loc[&(ovr, ohrp)];
-                    let shrp = locs[&ohrp];
-                    cvec.push(geq(l.get(n)?, add(r.get(np)?, sep)?)?);
-                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, "X1: l{n} >= r{np} + ε")
-                }
-                if shr < SolvedHorizontalRank(locs.len()-1) {
-                    #[allow(clippy::unwrap_used)]
-                    let ohrn = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap());
-                    let nn = sol_by_loc[&(ovr,ohrn)];
-                    let shrn = locs[&(ohrn)];
-                    cvec.push(leq(r.get(n)?, sub(l.get(nn)?, sep)?)?);
-                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, "X2: r{n} <= l{nn} - ε")
-                }
-            }
-            for hop_row in all_hops.iter() {
-                let HopRow{lvl, mhr, nhr, vl, wl, ..} = &hop_row;
-    
-                let shr = &solved_locs[lvl][mhr];
-                let n = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
-    
-                // the hop that we're positioning is either freefloating or attached.
-                // we'll have separate hoprows for the top and the bottom of each hop.
-                // terminal hoprows have nhr >> |graph|.
-                // if we're freefloating, then our horizontal adjacencies are null, 
-                // boxes, or (possibly-labeled) hops.
-                // otherwise, if we're attached, we have a node and so we need to 
-                // figure out if we're on that node; hence whether we are terminal 
-                // or we have a downward successor.
-                // finally, if we are attached, we need to position ourselves w.r.t. the
-                // boundaries of the node we're attached to and to any other parallel hops.
-                let all_objects = &level_to_object[lvl][shr];
-                let node = all_objects.iter().find(|loc| matches!(loc, Loc2::Node{..}));
-                let num_objects: usize = level_to_object.iter().flat_map(|row| row.1.iter().map(|cell| cell.1.len())).sum();
-                let terminal = nhr.0 > num_objects;
-                let default_hop_width = (20.0, 20.0);
-                let (action_width, percept_width) = {
-                    width_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).unwrap_or(&default_hop_width)
-                };
-                let action_width = *action_width;
-                let percept_width = *percept_width;
-    
-                cvec.push(geq(s.get(n)?, add(l.get(root_n)?, as_constantf(action_width)?)?)?);
-                cvec.push(leq(s.get(n)?, add(r.get(root_n)?, as_constantf(percept_width)?)?)?);
-    
-                if !terminal {
-                    let nd = sol_by_hop[&((*lvl+1), *nhr, (*vl).clone(), (*wl).clone())];
-                    obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
-                }
-    
-                event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
-                if let Some(Loc2::Node{sol: nd, ..}) = node {
-                    cvec.push(geq(s.get(n)?, add(l.get(*nd)?, add(sep, as_constantf(action_width)?)?)?)?);
-                    cvec.push(leq(s.get(n)?, sub(r.get(*nd)?, add(sep, as_constantf(percept_width)?)?)?)?);
-    
-                    if terminal {
-                        let mut terminal_hops = all_objects
-                            .iter()
-                            .filter(|obj| { matches!(obj, Loc2::Hop{loc: (_, onhr), ..} if onhr.0 > num_objects) })
-                            .collect::<Vec<_>>();
-                            #[allow(clippy::unit_return_expecting_ord)]
-    
-                        terminal_hops.sort_by_key(|hop| {
-                            if let Loc2::Hop{shr: tshr, ..} = hop {
-                                tshr
-                            } else {
-                                unreachable!();
-                            }
-                        });
-    
-                        for (ox, hop) in terminal_hops.iter().enumerate() {
-                            if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
-                                let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
-                                if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
-                                    let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
-                                    cvec.push(leq(s.get(*onl)?, sub(s.get(*on)?, add(sep, as_constantf(owidth_l.1 + owidth.0)?)?)?)?);
-                                    obj = add(obj, mul(symmetry_cost, square(sub(s.get(*on)?, s.get(*onl)?)?)?)?)?;
-                                }
-                                else {
-                                    obj = add(obj, square(sub(l.get(*nd)?, s.get(*on)?)?)?)?;
-                                }
-                                if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
-                                    let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
-                                    cvec.push(leq(s.get(*on)?, sub(s.get(*onr)?, add(sep, as_constantf(owidth_r.0 + owidth.1)?)?)?)?);
-                                    obj = add(obj, mul(symmetry_cost, square(sub(s.get(*onr)?, s.get(*on)?)?)?)?)?;
-                                }
-                                else {
-                                    obj = add(obj, square(sub(r.get(*nd)?, s.get(*on)?)?)?)?;
-                                }
-                            }
-                        }
-                    } else {
-                        let mut initial_hops = all_objects
-                            .iter()
-                            .filter(|obj| { matches!(obj, Loc2::Hop{loc: (_, onhr), ..} if onhr.0 <= num_objects) })
-                            .collect::<Vec<_>>();
-    
-                        #[allow(clippy::unit_return_expecting_ord)]
-                        initial_hops.sort_by_key(|hop| {
-                            if let Loc2::Hop{vl: hvl, wl: hwl, ..} = hop {
-                                #[allow(clippy::unwrap_used)]
-                                let (hvr, (_hmhr, hnhr)) = hops_by_edge[&((*hvl).clone(), (*hwl).clone())].iter().next().unwrap();
-                                solved_locs[&(*hvr+1)][hnhr]
-                            } else {
-                                unreachable!();
-                            }
-                        });
-    
-                        for (ox, hop) in initial_hops.iter().enumerate() {
-                            if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
-                                let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
-                                if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
-                                    let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
-                                    cvec.push(leq(s.get(*onl)?, sub(s.get(*on)?, add(sep, as_constantf(owidth_l.1 + owidth.0)?)?)?)?);
-                                    obj = add(obj, mul(symmetry_cost, square(sub(s.get(*on)?, s.get(*onl)?)?)?)?)?;
-                                } else {
-                                    obj = add(obj, square(sub(l.get(*nd)?, s.get(*on)?)?)?)?;
-                                }
-                                if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
-                                    let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
-                                    cvec.push(leq(s.get(*on)?, sub(s.get(*onr)?, add(sep, as_constantf(owidth_r.0 + owidth.1)?)?)?)?);
-                                    obj = add(obj, mul(symmetry_cost, square(sub(s.get(*onr)?, s.get(*on)?)?)?)?)?;
-                                }
-                                else {
-                                    obj = add(obj, square(sub(r.get(*nd)?, s.get(*on)?)?)?)?;
-                                }
-                            }
-                        }
-                    }
-                }
-            
-                let same_height_objects = &level_to_object[lvl];
-    
-                if let Some(left_objects) = shr.0.checked_sub(1).and_then(|shrl| same_height_objects.get(&SolvedHorizontalRank(shrl))) {
-                    event!(Level::TRACE, ?left_objects, "POS LEFT OBJECTS");
-                    for lo in left_objects.iter() {
-                        event!(Level::TRACE, ?lo, "POS LEFT OBJECT");
-                        match lo {
-                            Loc2::Node{sol: ln, ..} => {
-                                cvec.push(geq(s.get(n)?, add(l.get(*ln)?, add(sep, as_constantf(action_width)?)?)?)?);
-                            },
-                            Loc2::Hop{vl: lvl, wl: lwl, loc: (lvr, lhr), sol: ln, ..} => {
-                                let (_action_width_l, percept_width_l) = width_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).unwrap_or(&default_hop_width);
-                                cvec.push(geq(s.get(n)?, add(s.get(*ln)?, add(dsep, as_constantf(percept_width_l + action_width)?)?)?)?);
-                            },
-                        }
-                    }
-                }
-    
-                if let Some(right_objects) = same_height_objects.get(&(*shr+1)) {
-                    event!(Level::TRACE, ?right_objects, "POS RIGHT OBJECTS");
-                    for ro in right_objects.iter() {
-                        event!(Level::TRACE, ?ro, "POS RIGHT OBJECT");
-                        match ro {
-                            Loc2::Node{sol: rn, ..} => {
-                                cvec.push(leq(s.get(n)?, add(l.get(*rn)?, add(sep, as_constantf(action_width)?)?)?)?);
-                            },
-                            Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
-                                let (action_width_r, _percept_width_r) = width_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_width);
-                                cvec.push(leq(s.get(n)?, sub(s.get(*rn)?, add(dsep, as_constantf(action_width_r + percept_width)?)?)?)?);
-                            },
-                        }
-                    }
-                }
+        }
+        event!(Level::TRACE, ?level_to_object, "LEVEL TO OBJECT");
+        // eprintln!("LEVEL TO OBJECT: {level_to_object:#?}");
+
+        for LocRow{ovr, ohr, loc, ..} in all_locs.iter() {
+            let ovr = *ovr; 
+            let ohr = *ohr;
+            let locs = &solved_locs[&ovr];
+            let shr = locs[&ohr];
+            let n = sol_by_loc[&(ovr, ohr)];
+            let min_width = *width_by_loc.get(&(ovr, ohr))
+                .ok_or_else::<Error,_>(|| LayoutError::OsqpError{error: format!("missing node width: {ovr}, {ohr}")}.in_current_span().into())?;
+            let mut min_width = min_width.round() as usize;
+
+            if let Loc::Node(vl) = loc {
+                let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
+                let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
+                let mut v_dsts = v_ers
+                    .iter()
+                    .map(|er| { 
+                        dag
+                            .node_weight(er.target())
+                            .map(Clone::clone)
+                            .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.in_current_span().into())
+                    })
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut w_srcs = w_ers
+                    .iter()
+                    .map(|er| { 
+                        dag
+                            .node_weight(er.source())
+                            .map(Clone::clone)
+                            .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.in_current_span().into())
+                    })
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                v_dsts.sort(); v_dsts.dedup();
+                v_dsts.sort_by_key(|dst| {
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
+                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+                    (shr, -(svr.0 as i32))
+                });
+                let v_outs = v_dsts
+                    .iter()
+                    .map(|dst| { (vl.clone(), dst.clone()) })
+                    .collect::<Vec<_>>();
+
+                w_srcs.sort(); w_srcs.dedup();
+                w_srcs.sort_by_key(|src| {
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
+                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+                    (shr, -(svr.0 as i32))
+                });
+                let w_ins = w_srcs
+                    .iter()
+                    .map(|src| { (src.clone(), vl.clone()) })
+                    .collect::<Vec<_>>();
+
+                let v_out_first_hops = v_outs
+                    .iter()
+                    .map(|(vl, wl)| {
+                        #[allow(clippy::unwrap_used)]
+                        let (lvl, (mhr, _nhr)) = hops_by_edge[&(vl.clone(), wl.clone())].iter().next().unwrap();
+                        (*lvl, *mhr, vl.clone(), wl.clone())
+                    })
+                    .collect::<Vec<_>>();
+                let w_in_last_hops = w_ins
+                    .iter()
+                    .map(|(vl, wl)| {
+                        #[allow(clippy::unwrap_used)]
+                        let (lvl, (mhr, _nhr)) = hops_by_edge[&(vl.clone(), wl.clone())].iter().rev().next().unwrap();
+                        (*lvl, *mhr, vl.clone(), wl.clone())
+                    })
+                    .collect::<Vec<_>>();
                 
-                event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP END");
+                let out_width: f64 = v_out_first_hops
+                    .iter()
+                    .map(|idx| {
+                        let widths = width_by_hop[idx];
+                        widths.0 + widths.1
+                    })
+                    .sum();
+                let in_width: f64 = w_in_last_hops
+                    .iter()
+                    .map(|idx| {
+                        let widths = width_by_hop[idx];
+                        widths.0 + widths.1
+                    })
+                    .sum();
+
+                let in_width = in_width.round() as usize;
+                let out_width = out_width.round() as usize;
+                let orig_width = min_width;
+                // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
+                min_width = max(orig_width, max(in_width, out_width));
+                event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
+                // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
             }
-    
-            // SPACE
-            obj = minimize.call1((obj,))?;
+
+            if let Loc::Hop(_lvl, vl, wl) = loc {
+                let ns = sol_by_hop[&(ovr, ohr, vl.clone(), wl.clone())];
+                
+                C.leq(&mut V, L(n), S(ns));
+                C.leq(&mut V, S(ns), R(n));
+                event!(Level::TRACE, ?loc, %n, %min_width, "X3: l{n} <= s{ns} <= r{n}");
+            }
+        
+            C.leq(&mut V, L(root_n), L(n));
+            C.leq(&mut V, R(n), R(root_n));
+
+            event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
+            C.leqc(&mut V, L(n), R(n), min_width as f64);
+
+            // WIDTH
+            // BUG! WHY DOES THIS MATTER???????
+            // obj = add(obj, sub(r.get(n)?, l.get(n)?)?)?;
+            if shr > SolvedHorizontalRank(0) {
+                #[allow(clippy::unwrap_used)]
+                let ohrp = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap());
+                let np = sol_by_loc[&(ovr, ohrp)];
+                let shrp = locs[&ohrp];
+                C.leqc(&mut V, R(np), L(n), sep);
+                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, "X1: l{n} >= r{np} + ε")
+            }
+            if shr < SolvedHorizontalRank(locs.len()-1) {
+                #[allow(clippy::unwrap_used)]
+                let ohrn = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap());
+                let nn = sol_by_loc[&(ovr,ohrn)];
+                let shrn = locs[&(ohrn)];
+                C.leqc(&mut V, R(n), L(nn), sep);
+                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, "X2: r{n} <= l{nn} - ε")
+            }
+        }
+        for hop_row in all_hops.iter() {
+            let HopRow{lvl, mhr, nhr, vl, wl, ..} = &hop_row;
+
+            let shr = &solved_locs[lvl][mhr];
+            let n = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
+
+            // the hop that we're positioning is either freefloating or attached.
+            // we'll have separate hoprows for the top and the bottom of each hop.
+            // terminal hoprows have nhr >> |graph|.
+            // if we're freefloating, then our horizontal adjacencies are null, 
+            // boxes, or (possibly-labeled) hops.
+            // otherwise, if we're attached, we have a node and so we need to 
+            // figure out if we're on that node; hence whether we are terminal 
+            // or we have a downward successor.
+            // finally, if we are attached, we need to position ourselves w.r.t. the
+            // boundaries of the node we're attached to and to any other parallel hops.
+            let all_objects = &level_to_object[lvl][shr];
+            let node = all_objects.iter().find(|loc| matches!(loc, Loc2::Node{..}));
+            let num_objects: usize = level_to_object.iter().flat_map(|row| row.1.iter().map(|cell| cell.1.len())).sum();
+            let terminal = nhr.0 > num_objects;
+            let default_hop_width = (20.0, 20.0);
+            let (action_width, percept_width) = {
+                width_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).unwrap_or(&default_hop_width)
+            };
+            let action_width = *action_width;
+            let percept_width = *percept_width;
+
+            C.leqc(&mut V, L(root_n), S(n), action_width);
+            C.leqc(&mut V, S(n), R(root_n), percept_width);
+
+            if !terminal {
+                let nd = sol_by_hop[&((*lvl+1), *nhr, (*vl).clone(), (*wl).clone())];
+                C.sym(&mut V, &mut Pd, S(n), S(nd));
+            }
+
+            event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
+            if let Some(Loc2::Node{sol: nd, ..}) = node {
+                // Sn >= Lnd + sep + aw
+                // Lnd + sep + aw <= Sn
+                // Lnd <= Sn-sep-aw
+                C.geqc(&mut V, S(n), L(*nd), sep + action_width);
+                C.leqc(&mut V, S(n), R(*nd), sep + percept_width);
+
+                if terminal {
+                    let mut terminal_hops = all_objects
+                        .iter()
+                        .filter(|obj| { matches!(obj, Loc2::Hop{loc: (_, onhr), ..} if onhr.0 > num_objects) })
+                        .collect::<Vec<_>>();
+                        #[allow(clippy::unit_return_expecting_ord)]
+
+                    terminal_hops.sort_by_key(|hop| {
+                        if let Loc2::Hop{shr: tshr, ..} = hop {
+                            tshr
+                        } else {
+                            unreachable!();
+                        }
+                    });
+
+                    for (ox, hop) in terminal_hops.iter().enumerate() {
+                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
+                            let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
+                            if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
+                                let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
+                                C.leqc(&mut V, S(*onl), S(*on), sep + owidth_l.1 + owidth.0);
+                                C.sym(&mut V, &mut Pd, S(*on), S(*onl));
+                            }
+                            else {
+                                C.sym(&mut V, &mut Pd, L(*nd), S(*on));
+                            }
+                            if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
+                                let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
+                                C.leqc(&mut V, S(*on), S(*onr), sep + owidth_r.0 + owidth.1);
+                                C.sym(&mut V, &mut Pd, S(*onr), S(*on));
+                            }
+                            else {
+                                C.sym(&mut V, &mut Pd, R(*nd), S(*on));
+                            }
+                        }
+                    }
+                } else {
+                    let mut initial_hops = all_objects
+                        .iter()
+                        .filter(|obj| { matches!(obj, Loc2::Hop{loc: (_, onhr), ..} if onhr.0 <= num_objects) })
+                        .collect::<Vec<_>>();
+
+                    #[allow(clippy::unit_return_expecting_ord)]
+                    initial_hops.sort_by_key(|hop| {
+                        if let Loc2::Hop{vl: hvl, wl: hwl, ..} = hop {
+                            #[allow(clippy::unwrap_used)]
+                            let (hvr, (_hmhr, hnhr)) = hops_by_edge[&((*hvl).clone(), (*hwl).clone())].iter().next().unwrap();
+                            solved_locs[&(*hvr+1)][hnhr]
+                        } else {
+                            unreachable!();
+                        }
+                    });
+
+                    for (ox, hop) in initial_hops.iter().enumerate() {
+                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
+                            let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
+                            if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
+                                let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
+                                C.leqc(&mut V, S(*onl), S(*on), sep + owidth_l.1 + owidth.0);
+                                C.sym(&mut V, &mut Pd, S(*on), S(*onl));
+                            } else {
+                                C.sym(&mut V, &mut Pd, L(*nd), S(*on));
+                            }
+                            if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
+                                let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
+                                C.leqc(&mut V, S(*on), S(*onr), sep + owidth_r.0 + owidth.1);
+                                C.sym(&mut V, &mut Pd, S(*onr), S(*on));
+                            }
+                            else {
+                                C.sym(&mut V, &mut Pd, R(*nd), S(*on));
+                            }
+                        }
+                    }
+                }
+            }
+        
+            let same_height_objects = &level_to_object[lvl];
+
+            if let Some(left_objects) = shr.0.checked_sub(1).and_then(|shrl| same_height_objects.get(&SolvedHorizontalRank(shrl))) {
+                event!(Level::TRACE, ?left_objects, "POS LEFT OBJECTS");
+                for lo in left_objects.iter() {
+                    event!(Level::TRACE, ?lo, "POS LEFT OBJECT");
+                    match lo {
+                        Loc2::Node{sol: ln, ..} => {
+                            C.geqc(&mut V, S(n), L(*ln), sep + action_width);
+                        },
+                        Loc2::Hop{vl: lvl, wl: lwl, loc: (lvr, lhr), sol: ln, ..} => {
+                            let (_action_width_l, percept_width_l) = width_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).unwrap_or(&default_hop_width);
+                            C.geqc(&mut V, S(n), S(*ln), (2.*sep) + percept_width_l + action_width);
+                        },
+                    }
+                }
+            }
+
+            if let Some(right_objects) = same_height_objects.get(&(*shr+1)) {
+                event!(Level::TRACE, ?right_objects, "POS RIGHT OBJECTS");
+                for ro in right_objects.iter() {
+                    event!(Level::TRACE, ?ro, "POS RIGHT OBJECT");
+                    match ro {
+                        Loc2::Node{sol: rn, ..} => {
+                            C.leqc(&mut V, S(n), L(*rn), sep + action_width);
+                        },
+                        Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
+                            let (action_width_r, _percept_width_r) = width_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_width);
+                            C.leqc(&mut V, S(n), S(*rn), (2.*sep) + action_width_r + percept_width);
+                        },
+                    }
+                }
+            }
             
-            let constr = PyList::new(py, cvec);
-    
-            event!(Level::DEBUG, ?obj, "OBJECTIVE");
-    
-            let prb = problem.call1((obj, constr))?;
-            let is_dcp = prb.call_method1("is_dcp", ())?;
-            let is_dcp_str = is_dcp.str()?;
-            event!(Level::DEBUG, ?is_dcp_str, "IS_DCP");
-    
-            // prb.call_method1("solve", ("ECOS",))?;
-            prb.call_method1("solve", ())?;
-            let status = prb.getattr("status")?;
-            let status_str = status.str()?;
-            event!(Level::DEBUG, ?status_str, "PROBLEM STATUS");
-    
-            let lv = get_value(l.0)?;
-            let lv = lv.as_slice()?;
-    
-            let rv = get_value(r.0)?;
-            let rv = rv.as_slice()?;
-    
-            let sv = get_value(s.0)?;
-            let sv = sv.as_slice()?;
-    
-            // eprintln!("L: {:.2?}\n", lv);
-            // eprintln!("R: {:.2?}\n", rv);
-            // eprintln!("S: {:.2?}\n", sv);
-            let ts = row_height_offsets.values().copied().collect::<TiVec<VerticalRank, _>>();
-            let ls = lv.iter().copied().collect::<TiVec<LocSol, _>>();
-            let rs = rv.iter().copied().collect::<TiVec<LocSol, _>>(); 
-            let ss = sv.iter().copied().collect::<TiVec<HopSol, _>>();
-    
-            Ok(LayoutSolution{ls, rs, ss, ts})
-        });
-        event!(Level::DEBUG, ?res, "PY");
-        res
-            .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))
+            event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP END");
+        }
+
+        // add non-negativity constraints for all vars
+        for (sol, var) in V.vars.iter() {
+            if matches!(sol, AnySol::L(_) | AnySol::R(_) | AnySol::S(_)) {
+                C.constrs.push((0., vec![var.into()], f64::INFINITY));
+            }
+        }
+
+        use osqp::{Problem};
+
+        let n = V.vars.len();
+        // eprintln!("VARS: {V:#?}");
+        // let nnz = Pd.iter().filter(|v| v.coeff != 0.).count();
+        // P, q, A, l, u.
+        // conceptually, we walk over the columns, then the rows, 
+        // recording each non-zero value + its row index, and 
+        // as we finish each column, the current data length.
+        // let P = CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
+
+        let sparsePd = &Pd[..];
+        eprintln!("sparsePd: {sparsePd:?}");
+        let P2 = as_diag_csc_matrix(Some(n), Some(n), sparsePd);
+        print_tuples("P2", &P2);
+
+        let mut Q2 = Vec::with_capacity(n);
+        Q2.resize(n, 0.);
+        for q in Q.iter() {
+            Q2[q.var.index] += q.coeff; 
+        }
+        
+
+        let mut L2 = vec![];
+        let mut U2 = vec![];
+        for (l, _, u) in C.constrs.iter() {
+            L2.push(*l);
+            U2.push(*u);
+        }
+        eprintln!("V[{}]: {V}", V.vars.len());
+        eprintln!("C[{}]: {C}", &C.constrs.len());
+
+        let A2: CscMatrix = C.into();
+
+        eprintln!("P2[{},{}]: {P2:?}", P2.nrows, P2.ncols);
+        eprintln!("Q2[{}]: {Q2:?}", Q2.len());
+        eprintln!("L2[{}]: {L2:?}", L2.len());
+        eprintln!("U2[{}]: {U2:?}", U2.len());
+        eprintln!("A2[{},{}]: {A2:?}", A2.nrows, A2.ncols);
+        
+        // let q = &[1., 1.];
+        // let A = &[
+        //     [1., 1.],
+        //     [1., 0.],
+        //     [0., 1.],
+        // ];
+        // let l = &[0., 0., 0.];
+        // let u = &[1., 1., 1.];
+
+        let settings = osqp::Settings::default()
+            .verbose(false);
+
+        // let mut prob = Problem::new(P, q, A, l, u, &settings)
+        let mut prob = Problem::new(P2, &Q2[..], A2, &L2[..], &U2[..], &settings)
+            .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
+        
+        let result = prob.solve();
+        println!("STATUS {:?}", result);
+        let x = result.x().or_err(LayoutError::OsqpError{error: "failed to solve problem".into()})?;
+        println!("{:?}", x);
+
+        // eprintln!("L: {:.2?}\n", lv);
+        // eprintln!("R: {:.2?}\n", rv);
+        // eprintln!("S: {:.2?}\n", sv);
+        let ts = row_height_offsets.values().copied().collect::<TiVec<VerticalRank, _>>();
+        let mut ls = V.vars.iter()
+            .filter_map(|(sol, var)| {
+                if let AnySol::L(l) = sol { 
+                    Some((l, x[var.index]))
+                } else { 
+                    None 
+                }
+            })
+            .collect::<Vec<_>>();
+        ls.sort_by_key(|(l, _)| **l);
+        let ls = ls.iter().map(|(_, v)| *v).collect::<TiVec<LocSol, _>>();
+
+        let mut rs = V.vars.iter()
+            .filter_map(|(sol, var)| {
+                if let AnySol::R(r) = sol { 
+                    Some((r, x[var.index]))
+                } else { 
+                    None 
+                }
+            })
+            .collect::<Vec<_>>();
+        rs.sort_by_key(|(r, _)| **r);
+        let rs = rs.iter().map(|(_, v)| *v).collect::<TiVec<LocSol, _>>();
+
+        let mut ss = V.vars.iter()
+            .filter_map(|(sol, var)| {
+                if let AnySol::S(s) = sol { 
+                    Some((s, x[var.index]))
+                } else { 
+                    None 
+                }
+            })
+            .collect::<Vec<_>>();
+        ss.sort_by_key(|(s, _)| **s);
+        let ss = ss.iter().map(|(_, v)| *v).collect::<TiVec<HopSol, _>>();
+
+        let res = LayoutSolution{ls, rs, ss, ts};
+        event!(Level::DEBUG, ?res, "LAYOUT");
+        Ok(res)
+    }
+
+    fn print_tuples(name: &str, m: &CscMatrix) {
+        // conceptually, we walk over the columns, then the rows,
+        // recording each non-zero value + its row index, and
+        // as we finish each column, the current data length.
+        // let P = CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
+        eprintln!("{name}: {:?}", m);
+        let mut n = 0;
+        let mut col = 0;
+        let indptr = &m.indptr[..];
+        let indices = &m.indices[..];
+        let data = &m.data[..];
+        while n < data.len() {
+            while indptr[col+1] <= n {
+                col += 1;
+            }
+            let row = indices[n];
+            let val = data[n];
+            n += 1;
+            eprintln!("{name}[{},{}] = {}", row, col, val);
+        }
     }
 }
 

@@ -522,7 +522,7 @@ pub mod parser {
     }
 }
 
-#[cfg(all(feature="minion", feature="cvxpy"))]
+#[cfg(all(feature="minion", feature="osqp"))]
 pub mod graph_drawing;
 
 #[cfg(any(feature="client", feature="server"))]
