@@ -1,17 +1,15 @@
-use depict::graph_drawing::error::Error;
+use depict::graph_drawing::error::{Error};
 use depict::graph_drawing::geometry::{*};
 use depict::graph_drawing::graph::roots;
 use depict::graph_drawing::layout::{*};
-use depict::parser::{parse, Fact};
+use depict::parser::{Fact, Parser, Token, Item};
 
 use std::fs::read_to_string;
 use std::env::args;
 
-use std::io::{self};
-use std::process::{exit};
-
-use nom::error::convert_error;
 use indoc::indoc;
+use logos::Logos;
+use miette::{Diagnostic, NamedSource, Result};
 use petgraph::dot::{Dot};
 
 
@@ -263,24 +261,54 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn main() -> io::Result<()> {
+#[derive(Debug, Diagnostic, thiserror::Error)]
+#[diagnostic(code(depict::parse_error))]
+pub enum TikzError {
+    #[error("parse error")]
+    ParseError {
+        #[source_code]
+        src: NamedSource,
+
+        #[label = "Unexpected token"]
+        span: std::ops::Range<usize>,
+
+        text: String,
+    },
+    #[error("io error")]
+    IoError {
+        #[from] source: std::io::Error
+    },
+}
+
+pub fn main() -> Result<()> {
     for path in args().skip(1) {
-        let contents = read_to_string(path)?;
+        let data = read_to_string(path.clone())
+            .map_err(|e| TikzError::IoError{source: e})?;
         // println!("{}\n\n", &contents);
-        let v = parse(&contents[..]);
-        match v {
-            Err(nom::Err::Error(v2)) => {
-                println!("{}", convert_error(&contents[..], v2));
-                exit(1);
-            },
-            Ok(("", v2)) => {
-                render(v2).unwrap();
-            }
-            _ => {
-                println!("{:#?}", v);
-                exit(2);
-            }
+        let mut p = Parser::new();
+        let mut lex = Token::lexer(&data);
+        while let Some(tk) = lex.next() {
+            p.parse(tk)
+                .map_err(|_| { 
+                    TikzError::ParseError{
+                        src: NamedSource::new(path.clone(), data.clone()), 
+                        span: lex.span(), 
+                        text: lex.slice().into()
+                    }
+                })?
         }
+
+        let v: Vec<Item> = p.end_of_input().map_err(|_| { 
+            TikzError::ParseError{
+                src: NamedSource::new(path.clone(), data.clone()), 
+                span: lex.span(), 
+                text: lex.slice().into()
+            }
+        })?;
+
+        eprintln!("PARSE {v:#?}");
+
+        // let vcg = calculate_vcg2(&v)?;
     }
     Ok(())
 }

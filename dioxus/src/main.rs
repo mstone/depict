@@ -15,7 +15,7 @@ use dioxus::prelude::*;
 // use dioxus_desktop::use_window;
 use tao::dpi::LogicalSize;
 
-use depict::parser::{parse, Parser, Token, Item};
+use depict::parser::{Parser, Token, Item};
 use logos::Logos;
 
 use color_spantrace::colorize;
@@ -25,13 +25,11 @@ use futures::StreamExt;
 
 use indoc::indoc;
 
-use inflector::Inflector;
-
 use petgraph::Graph;
 use petgraph::dot::Dot;
 
 use tracing::{instrument, event, Level};
-use tracing_error::{InstrumentResult, ExtractSpanTrace, TracedError};
+use tracing_error::{InstrumentResult, ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -91,7 +89,7 @@ fn estimate_widths<I>(
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
         if let Loc::Node(vl) = node {
-            let mut label = vert_node_labels
+            let label = vert_node_labels
                 .get(vl)
                 .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                 .clone();
@@ -169,16 +167,6 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
     let vcg = calculate_vcg2(&v)?;
 
-    // let v = parse(&data[..])
-    //     .map_err(|e| match e {
-    //         nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
-    //         nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
-    //         nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
-    //     })
-    //     .in_current_span()?
-    //     .1;
-
-    // let vcg = calculate_vcg(&v)?;
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
     // depict::graph_drawing::draw(v, &mut vcg)?;
@@ -263,7 +251,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
         if let Loc::Node(vl) = node {
             let key = vl.to_string();
-            let mut label = vert_node_labels
+            let label = vert_node_labels
                 .get(vl)
                 .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                 .clone();

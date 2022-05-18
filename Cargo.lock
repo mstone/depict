@@ -625,7 +625,6 @@ dependencies = [
  "itertools",
  "logos",
  "ndarray",
- "nom",
  "numpy",
  "osqp",
  "petgraph",
@@ -698,7 +697,7 @@ dependencies = [
  "depict",
  "futures",
  "hyper",
- "nom",
+ "logos",
  "petgraph",
  "serde",
  "serde_json",
@@ -716,9 +715,14 @@ version = "0.1.0"
 dependencies = [
  "depict",
  "indoc 1.0.6",
- "nom",
+ "logos",
+ "miette",
  "petgraph",
  "rand",
+ "thiserror",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
 ]
 
 [[package]]

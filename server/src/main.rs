@@ -14,38 +14,39 @@ use depict::graph_drawing::geometry::position_sols;
 use depict::graph_drawing::graph::roots;
 use depict::graph_drawing::index::OriginalHorizontalRank;
 use depict::graph_drawing::index::VerticalRank;
-use depict::graph_drawing::layout::Cvcg;
+use depict::graph_drawing::layout::{Cvcg, calculate_vcg2, Len};
 use depict::graph_drawing::layout::Loc;
 use depict::graph_drawing::layout::Placement;
 use depict::graph_drawing::layout::Vcg;
 use depict::graph_drawing::layout::calculate_locs_and_hops;
-use depict::graph_drawing::layout::calculate_vcg;
 use depict::graph_drawing::layout::condense;
 use depict::graph_drawing::layout::minimize_edge_crossing;
 use depict::graph_drawing::layout::or_insert;
 use depict::graph_drawing::layout::rank;
 
+use depict::parser::{Parser, Token, Item};
+
 use inflector::Inflector;
+use logos::Logos;
 use petgraph::Graph;
 use petgraph::dot::Dot;
-use serde::{Deserialize, Serialize};
 
 use tokio::task::JoinError;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{instrument, event, Level};
-use tracing_error::{InstrumentResult, ExtractSpanTrace, TracedError};
+use tracing_error::{InstrumentResult, TracedError};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use depict::parser::*;
-use depict::graph_drawing::*;
 use depict::rest::*;
 
-fn estimate_widths<'s>(
-    vcg: &Vcg<&'s str, &'s str>, 
-    cvcg: &Cvcg<&'s str, &'s str>,
-    placement: &Placement<&'s str>,
-    layout_problem: &mut LayoutProblem<&'s str>
-) -> Result<(), Error> {
+fn estimate_widths<I>(
+    vcg: &Vcg<I, I>, 
+    cvcg: &Cvcg<I, I>,
+    placement: &Placement<I>,
+    layout_problem: &mut LayoutProblem<I>
+) -> Result<(), Error> where
+  I: Clone + std::fmt::Debug + Ord + Eq + PartialEq + PartialOrd + std::hash::Hash + std::fmt::Display + Len + PartialEq<&'static str>
+{
     // let char_width = 8.67;
     let char_width = 9.0;
     let arrow_width = 40.0;
@@ -90,11 +91,11 @@ fn estimate_widths<'s>(
                         .max()
                     );
 
-            match *ew {
-                "senses" => {
+            match ew {
+                x if x == &"senses" => {
                     percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
                 }
-                "actuates" => {
+                x if x == &"actuates" => {
                     action_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
                 }
                 _ => {}
@@ -102,7 +103,7 @@ fn estimate_widths<'s>(
         }
 
         for (lvl, (mhr, _nhr)) in hops.iter() {
-            width_by_hop.insert((*lvl, *mhr, vl, wl), (action_width, percept_width));
+            width_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), (action_width, percept_width));
             if width_by_loc.get(&(*lvl, *mhr)).is_none() {
                 width_by_loc.insert((*lvl, *mhr), action_width + percept_width);
             }
@@ -118,19 +119,19 @@ pub struct DrawError {
 }
 
 impl From<Error> for DrawError {
-    fn from(source: Error) -> Self {
+    fn from(_source: Error) -> Self {
         Self {}
     }
 }
 
 impl From<JoinError> for DrawError {
-    fn from(source: JoinError) -> Self {
+    fn from(_source: JoinError) -> Self {
         Self {}
     }
 }
 
 impl<E> From<TracedError<E>> for DrawError {
-    fn from(source: TracedError<E>) -> Self {
+    fn from(_source: TracedError<E>) -> Self {
         Self {}
     }
 }
@@ -148,16 +149,31 @@ async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError
     let data = draw_rx.text.clone();
 
     tokio::task::spawn_blocking(move || {
-        let v = parse(&data[..])
-            .map_err(|e| match e {
-                nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(&data[..], e)) },
-                nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(&data[..], e)) },
-                nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
-            })
-            .in_current_span()?
-            .1;
+        let mut p = Parser::new();
+        {
+            let lex = Token::lexer(&data);
+            let tks = lex.collect::<Vec<_>>();
+            event!(Level::TRACE, ?tks, "LEX");
+        }
+        let mut lex = Token::lexer(&data);
+        while let Some(tk) = lex.next() {
+            p.parse(tk)
+                .map_err(|_| {
+                    Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+                })
+                .in_current_span()?
+        }
 
-        let vcg = calculate_vcg(&v)?;
+        let v: Vec<Item> = p.end_of_input()
+            .map_err(|_| {
+                Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+            })
+            .in_current_span()?;
+
+        event!(Level::TRACE, ?v, "PARSE");
+        eprintln!("PARSE {v:#?}");
+
+        let vcg = calculate_vcg2(&v)?;
         let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
         // depict::graph_drawing::draw(v, &mut vcg)?;
@@ -193,8 +209,8 @@ async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError
         let mut layout_debug_vxmap = HashMap::new();
         for ((vl, wl), hops) in hops_by_edge.iter() {
             if *vl == "root" { continue; }
-            let vn = node_to_loc[&Loc::Node(*vl)];
-            let wn = node_to_loc[&Loc::Node(*wl)];
+            let vn = node_to_loc[&Loc::Node(vl.clone())];
+            let wn = node_to_loc[&Loc::Node(wl.clone())];
             let vshr = solved_locs[&vn.0][&vn.1];
             let wshr = solved_locs[&wn.0][&wn.1];
 
@@ -243,7 +259,7 @@ async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError
             if let Loc::Node(vl) = node {
                 let key = vl.to_string();
                 let mut label = vert_node_labels
-                    .get(*vl)
+                    .get(vl)
                     .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                     .clone();
                 if !label.is_screaming_snake_case() {
@@ -266,12 +282,12 @@ async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError
                         .and_then(|rels| rels.get(ew)))
                     .map(|v| v.join("\n"));
 
-                let hops = &hops_by_edge[&(*vl, *wl)];
+                let hops = &hops_by_edge[&(vl.clone(), wl.clone())];
                 // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
 
-                let offset = match *ew { 
-                    "actuates" | "actuator" => -10.0,
-                    "senses" | "sensor" => 10.0,
+                let offset = match ew { 
+                    x if x == "actuates" || x == "actuator" => -10.0,
+                    x if x == "senses" || x == "sensor" => 10.0,
                     _ => 0.0,
                 };
 
@@ -284,7 +300,7 @@ async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError
 
                 for (n, hop) in hops.iter().enumerate() {
                     let (lvl, (_mhr, nhr)) = hop;
-                    let hn = sol_by_hop[&(*lvl+1, *nhr, *vl, *wl)];
+                    let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
                     let spos = ss[hn];
                     let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
                     let vpos = ((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height;
@@ -302,12 +318,12 @@ async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError
 
                     if n == 0 {
                         let n = sol_by_loc[&((*lvl+1), *nhr)];
-                        label_hpos = Some(match *ew {
-                            "senses" => {
+                        label_hpos = Some(match ew {
+                            x if x == "senses" => {
                                 // ls[n]
                                 hpos
                             },
-                            "actuates" => {
+                            x if x == "actuates" => {
                                 // ls[n]
                                 hpos
                             },

@@ -57,10 +57,6 @@ pub mod error {
     #[derive(Debug, thiserror::Error)]
     pub enum Error {
         #[error(transparent)]
-        ParsingError{
-            #[from] source: TracedError<nom::Err<String>>,
-        },
-        #[error(transparent)]
         TypeError{
             #[from] source: TracedError<TypeError>,
         },
@@ -90,7 +86,6 @@ pub mod error {
         fn span_trace(&self) -> Option<&SpanTrace> {
             use std::error::Error as _;
             match self {
-                Error::ParsingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
                 Error::TypeError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
                 Error::GraphDrawingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
                 Error::RankingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
@@ -254,7 +249,7 @@ pub mod layout {
         }
     }
 
-    pub trait Len {
+    pub trait Len: IsEmpty {
         fn len(&self) -> usize;
     }
 
@@ -266,13 +261,13 @@ pub mod layout {
 
     impl Len for String {
         fn len(&self) -> usize {
-            str::len(&self)
+            str::len(self)
         }
     }
 
     impl<'s> Len for Cow<'s, str> {
         fn len(&self) -> usize {
-            str::len(&self)
+            str::len(self)
         }
     }
 
@@ -1074,7 +1069,7 @@ pub mod geometry {
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
     use super::layout::{Loc, Hop, Vcg, Placement};
 
-    use std::borrow::{Cow, Borrow};
+    use std::borrow::{Cow};
     use std::cmp::max;
     use std::collections::{HashMap, BTreeMap, HashSet};
     use std::fmt::{Debug, Display};
@@ -1308,36 +1303,36 @@ pub mod geometry {
 
         // L <= Ax <= U 
         /// l < r => r - l > 0 => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        fn leq(&mut self, V: &mut Vars, lhs: AnySol, rhs: AnySol) {
+        fn leq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
             if lhs == rhs {
                 return
             }
-            self.constrs.push((0., vec![-V.get(lhs), V.get(rhs)], f64::INFINITY));
+            self.constrs.push((0., vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
         }
 
         /// l + c < r => c < r - l => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        fn leqc(&mut self, V: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
-            self.constrs.push((c, vec![-V.get(lhs), V.get(rhs)], f64::INFINITY));
+        fn leqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+            self.constrs.push((c, vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
         }
 
         /// l > r => l - r > 0 => A += [-1(r) ... 1(s) ...], L += 0, U += (FMAX/infty)
-        fn geq(&mut self, V: &mut Vars, lhs: AnySol, rhs: AnySol) {
+        fn geq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
             if lhs == rhs {
                 return
             }
-            self.constrs.push((0., vec![V.get(lhs), -V.get(rhs)], f64::INFINITY));
+            self.constrs.push((0., vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
         }
 
         /// l > r + c => l - r > c => A += [1(r) ... -1(s) ...], L += c, U += (FMAX/infty)
-        fn geqc(&mut self, V: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
-            self.constrs.push((c, vec![V.get(lhs), -V.get(rhs)], f64::INFINITY));
+        fn geqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+            self.constrs.push((c, vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
         }
 
         fn eq(&mut self, lc: &[Monomial]) {
             self.constrs.push((0., Vec::from(lc), 0.));
         }
 
-        fn sym(&mut self, V: &mut Vars, Pd: &mut Vec<Monomial>, lhs: AnySol, rhs: AnySol) {
+        fn sym(&mut self, v: &mut Vars, pd: &mut Vec<Monomial>, lhs: AnySol, rhs: AnySol) {
             // P[i, j] = 100 => obj += 100 * x_i * x_j
             // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
             // x_k = x_i - x_j => x_k - x_i + x_j = 0
@@ -1345,10 +1340,10 @@ pub mod geometry {
             // 0 <= k-i+j && k-i+j <= 0    =>    i <= k+j && k+j <= i       => i-j <= k && k <= i-j => k == i-j
             // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
             // obj.push(...)
-            let t = V.get(AnySol::T(V.vars.len()));
+            let t = v.get(AnySol::T(v.vars.len()));
             let symmetry_cost = 1.0;
-            Pd.push(symmetry_cost * t);
-            self.eq(&[t, -V.get(lhs), V.get(rhs)]);
+            pd.push(symmetry_cost * t);
+            self.eq(&[t, -v.get(lhs), v.get(rhs)]);
         }
     }
 
@@ -1438,11 +1433,11 @@ pub mod geometry {
 
     impl<'s> From<Constraints> for CscMatrix<'s> {
         fn from(c: Constraints) -> Self {
-            let A = &c.constrs
+            let a = &c.constrs
                 .iter()
                 .map(|(_, comb, _)| &comb[..])
                 .collect::<Vec<_>>();
-            as_csc_matrix(None, None, &A)
+            as_csc_matrix(None, None, a)
         }
     }
 
@@ -1515,23 +1510,17 @@ pub mod geometry {
         event!(Level::TRACE, ?row_height_offsets, "ROW HEIGHT OFFSETS");
         event!(Level::TRACE, ?width_by_hop, "WIDTH BY HOP");
         
-        
-        let num_locs = all_locs.len();
-        let num_hops = all_hops.len();
     
         let sep = 20.0;
-        let symmetry_cost = 100.0;
 
         let mut V: Vars = Vars::new();
         let mut C: Constraints = Constraints::new();
         let mut Pd: Vec<Monomial> = vec![];
         let mut Q: Vec<Monomial> = vec![];
-        let mut A: Vec<(f64, Vec<Monomial>, f64)> = vec![];
 
         let L = AnySol::L;
         let R = AnySol::R;
         let S = AnySol::S;
-        let T = AnySol::T;
         
         let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
         // q[r[root_n]] = 1  <-- obj += r[root_n]
@@ -2003,46 +1992,57 @@ pub mod geometry {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::{error::Error};
-    use crate::{parser::parse, graph_drawing::{layout::{*}, graph::roots, index::VerticalRank, geometry::calculate_sols}};
+    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, graph::roots, index::VerticalRank, geometry::calculate_sols, error::Kind}};
     use tracing_error::InstrumentResult;
+    use logos::Logos;
 
     #[test]
     #[allow(clippy::unwrap_used)]    
     pub fn no_swaps() -> Result<(), Error> {
-        let data = "A c q: y / z. d e af: w / x";
-        let v = parse(data)
-            .map_err(|e| match e {
-                nom::Err::Error(e) => { nom::Err::Error(nom::error::convert_error(data, e)) },
-                nom::Err::Failure(e) => { nom::Err::Failure(nom::error::convert_error(data, e)) },
-                nom::Err::Incomplete(n) => { nom::Err::Incomplete(n) },
-            })
-            .in_current_span()?
-            .1;
+        let data = "A c q: y / z\nd e af: w / x";
+        let mut p = Parser::new();
+        let mut lex = Token::lexer(data);
+        while let Some(tk) = lex.next() {
+            p.parse(tk)
+                .map_err(|_| {
+                    Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+                })
+                .in_current_span()?
+        }
 
-        let Vcg{vert, vert_vxmap, ..} = calculate_vcg(&v)?;
+        let v: Vec<Item> = p.end_of_input()
+            .map_err(|_| {
+                Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+            })
+            .in_current_span()?;
+
+        let vcg = calculate_vcg2(&v)?;
+        let Vcg{vert, vert_vxmap, ..} = vcg;
         let vx = vert_vxmap["e"];
         let wx = vert_vxmap["af"];
-        assert_eq!(vert.node_weight(vx), Some(&"e"));
-        assert_eq!(vert.node_weight(wx), Some(&"af"));
+        assert_eq!(vert.node_weight(vx), Some(&Cow::from("e")));
+        assert_eq!(vert.node_weight(wx), Some(&Cow::from("af")));
 
         let Cvcg{condensed, condensed_vxmap} = condense(&vert)?;
         let cvx = condensed_vxmap["e"];
         let cwx = condensed_vxmap["af"];
-        assert_eq!(condensed.node_weight(cvx), Some(&"e"));
-        assert_eq!(condensed.node_weight(cwx), Some(&"af"));
+        assert_eq!(condensed.node_weight(cvx), Some(&Cow::from("e")));
+        assert_eq!(condensed.node_weight(cwx), Some(&Cow::from("af")));
 
         let roots = roots(&condensed)?;
 
         let paths_by_rank = rank(&condensed, &roots)?;
-        assert_eq!(paths_by_rank[&VerticalRank(3)][0], ("root", "af"));
+        assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("af")));
 
         let placement = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
         let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
-        let nv: Loc<&str, &str> = Loc::Node("e");
-        let nw: Loc<&str, &str> = Loc::Node("af");
-        let np: Loc<&str, &str> = Loc::Node("c");
-        let nq: Loc<&str, &str> = Loc::Node("q");
+        let nv: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("e"));
+        let nw: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("af"));
+        let np: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("c"));
+        let nq: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("q"));
         let lv = node_to_loc[&nv];
         let lw = node_to_loc[&nw];
         let lp = node_to_loc[&np];
