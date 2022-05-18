@@ -61,10 +61,9 @@ This should produce a window similar to the one shown in the screenshot above.
 Alternately, if you'd like to run depict without with nix, you'll need to
 
 1. install the [minion](https://github.com/minion/minion) constraint solver
-2. install the [cvxpy](https://www.cvxpy.org) convex optimization library
-3. install a recent Rust compiler
-4. ensure that the directory containing the `minion` executable is on `PATH` and that `PYTHONPATH` links to `cvxpy`.
-5. use `cargo` to build or run one of Depict's sub-packages, like:
+2. install a recent Rust compiler
+3. ensure that the directory containing the `minion` executable is on `PATH`.
+4. use `cargo` to build or run one of Depict's sub-packages, like:
 
 ```bash
 cargo run -p depict-desktop
