@@ -398,7 +398,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                 children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
-                        class: "absolute border border-black text-center z-10 bg-white", // bg-opacity-50
+                        style: "position: absolute; padding-top: 3px; padding-bottom: 3px; box-sizing: border-box; border: 1px solid black; text-align: center; z-index: 10; background-color: #fff;", // bg-opacity-50
                         top: "{vpos}px",
                         left: "{hpos}px",
                         width: "{width}px",
@@ -415,7 +415,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                 children.push(cx.render(rsx!{
                     div {
                         key: "{key}",
-                        class: "absolute",
+                        style: "position: absolute;",
                         svg {
                             fill: "none",
                             stroke: "{stroke_color}",
@@ -475,12 +475,12 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                                     _ => "",
                                 };
                                 rsx!(div {
-                                    class: "absolute",
+                                    style: "position: absolute;",
                                     left: "{hpos}px",
                                     // width: "{width}px",
                                     top: "calc({vpos}px + 40px)",
                                     div {
-                                        class: "whitespace-pre z-50 bg-white border-box text-sm font-mono {border}",
+                                        style: "white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
                                         transform: "{translate}",
                                         "{text}"
                                     }
@@ -546,21 +546,19 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     }));
 
     cx.render(rsx!{
-        link { href:"https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css", rel:"stylesheet" }
         div {
             // key: "editor",
-            class: "width-full z-20 p-4",
+            style: "width: 100%; z-index: 20; padding: 1rem;",
             div {
-                class: "max-w-3xl mx-auto flex flex-col",
+                style: "max-width: 48rem; margin-left: auto; margin-right: auto; flex-direction: column;",
                 div {
                     // key: "editor_label",
-                    class: "fs-24",
                     "Model"
                 }
                 div {
                     // key: "editor_editor",
                     textarea {
-                        class: "border",
+                        style: "border-width: 1px; border-color: #000;",
                         rows: "6",
                         cols: "80",
                         autocomplete: "off",
@@ -578,45 +576,45 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                     }
                 }
                 div {
-                    class: "text-sm text-gray-400 width-full",
+                    style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
                     div {
                         span {
-                            class: "text-black",
+                            style: "color: #000;",
                             "Syntax: "
                         }
                         span {
-                            class: "italic",
+                            style: "font-style: italic;",
                             "node node ... : action action... / percept percept ... : action... / percept..."
                         }
                     }
                     div {
                         span {
-                            class: "text-black",
+                            style: "color: #000;",
                             "Example: "
                         }
                         span {
-                            class: "italic",
+                            style: "font-style: italic;",
                             "person microwave food: open, start, stop / beep : heat. person food: stir"
                         },
                     }
                 }
                 // div {
-                //     class: "text-sm text-gray-400 width-full",
+                //     style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
                 //     span {
-                //         class: "text-black",
+                //         style: "color: #000;",
                 //         "Crossing Number: "
                 //     }
                 //     span {
-                //         class: "italic",
+                //         style: "font-style: italic;",
                 //         crossing_number
                 //     }
                 // }
             }
         }
         div {
-            class: "width-full",
+            style: "width: 100%;",
             div {
-                class: "relative mx-auto border border-black",
+                style: "position: relative; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
                 width: "{viewbox_width}px",
                 nodes
             }
