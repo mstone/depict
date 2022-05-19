@@ -811,7 +811,7 @@ pub mod layout {
 
             // std::process::exit(0);
 
-            let mut minion = Command::new("/Users/mstone/src/minion/result/bin/minion");
+            let mut minion = Command::new("minion");
             minion
                 .arg("-printsolsonly")
                 .arg("-printonlyoptimal")

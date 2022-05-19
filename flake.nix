@@ -145,6 +145,7 @@
                 cargo-outdated
                 cargo-expand
                 rustfmt
+                minion
               ] ++ final.lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                 AppKit
                 Security
