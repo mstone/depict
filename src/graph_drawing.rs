@@ -1262,16 +1262,16 @@ pub mod geometry {
 
     impl Display for Constraints {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "Constraints {{\n")?;
+            writeln!(f, "Constraints {{")?;
             for (l, comb, u) in self.constrs.iter() {
                 write!(f, "    {l} <= ")?;
                 for term in comb.iter() {
                     write!(f, "{term} ")?;
                 }
                 if *u != f64::INFINITY {
-                    write!(f, "<= {u},\n")?;
+                    writeln!(f, "<= {u},")?;
                 } else {
-                    write!(f, ",\n")?;
+                    writeln!(f, ",")?;
                 }
             }
             write!(f, "}}")
@@ -1297,13 +1297,13 @@ pub mod geometry {
     }
 
     impl Constraints {
-        fn new() -> Self {
+        pub fn new() -> Self {
             Self { constrs: Default::default() }
         }
 
         // L <= Ax <= U 
         /// l < r => r - l > 0 => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        fn leq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
+        pub fn leq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
             if lhs == rhs {
                 return
             }
@@ -1311,12 +1311,12 @@ pub mod geometry {
         }
 
         /// l + c < r => c < r - l => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        fn leqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+        pub fn leqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
             self.constrs.push((c, vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
         }
 
         /// l > r => l - r > 0 => A += [-1(r) ... 1(s) ...], L += 0, U += (FMAX/infty)
-        fn geq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
+        pub fn geq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
             if lhs == rhs {
                 return
             }
@@ -1324,15 +1324,15 @@ pub mod geometry {
         }
 
         /// l > r + c => l - r > c => A += [1(r) ... -1(s) ...], L += c, U += (FMAX/infty)
-        fn geqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+        pub fn geqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
             self.constrs.push((c, vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
         }
 
-        fn eq(&mut self, lc: &[Monomial]) {
+        pub fn eq(&mut self, lc: &[Monomial]) {
             self.constrs.push((0., Vec::from(lc), 0.));
         }
 
-        fn sym(&mut self, v: &mut Vars, pd: &mut Vec<Monomial>, lhs: AnySol, rhs: AnySol) {
+        pub fn sym(&mut self, v: &mut Vars, pd: &mut Vec<Monomial>, lhs: AnySol, rhs: AnySol) {
             // P[i, j] = 100 => obj += 100 * x_i * x_j
             // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
             // x_k = x_i - x_j => x_k - x_i + x_j = 0
@@ -1344,6 +1344,12 @@ pub mod geometry {
             let symmetry_cost = 100.0;
             pd.push(symmetry_cost * t);
             self.eq(&[t, -v.get(lhs), v.get(rhs)]);
+        }
+    }
+
+    impl Default for Constraints {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
@@ -1921,7 +1927,7 @@ pub mod geometry {
         eprintln!("STATUS {:?}", result);
         let x = result.x().or_err(LayoutError::OsqpError{error: "failed to solve problem".into()})?;
         // eprintln!("{:?}", x);
-        let mut solutions = V.vars.iter().map(|(sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
+        let mut solutions = V.vars.iter().map(|(_sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
         solutions.sort_by_key(|(a, _)| *a);
         for (var, val) in solutions {
             if !matches!(var.sol, AnySol::T(_)) {
