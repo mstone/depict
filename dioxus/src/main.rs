@@ -6,7 +6,7 @@ use std::panic::catch_unwind;
 use depict::graph_drawing::error::{Error, OrErrExt, Kind};
 use depict::graph_drawing::geometry::{*};
 use depict::graph_drawing::graph::roots;
-use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank};
+use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
 use depict::graph_drawing::layout::{*};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
@@ -42,8 +42,8 @@ pub struct Label {
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Node {
-  Div { key: String, label: String, hpos: f64, vpos: f64, width: f64 },
-  Svg { key: String, path: String, rel: String, label: Option<Label> },
+  Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, loc: LocSol, estimated_width: f64 },
+  Svg { key: String, path: String, rel: String, label: Option<Label>, hop: HopSol, estimated_width: (f64,f64) },
 }
 
 #[derive(Clone, Debug)]
@@ -258,15 +258,23 @@ fn draw(data: String) -> Result<Drawing, Error> {
             // if !label.is_screaming_snake_case() {
             //     label = label.to_title_case();
             // }
-            texts.push(Node::Div{key, label, hpos, vpos, width});
+            let estimated_width = layout_problem.width_by_loc[&(*ovr, *ohr)];
+            texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
         }
     }
 
     let mut arrows = vec![];
 
     for cer in condensed.edge_references() {
+        let mut prev_vwe = None;
         for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
             if *vl == "root" { continue; }
+
+            if prev_vwe == Some((vl, wl, ew)) {
+                continue
+            } else {
+                prev_vwe = Some((vl, wl, ew))
+            }
 
             let label_text = vert_edge_labels
                 .get(vl)
@@ -292,9 +300,11 @@ fn draw(data: String) -> Result<Drawing, Error> {
             let mut label_vpos = None;
             // use rand::Rng;
             // let mut rng = rand::thread_rng();
+            let mut hn0 = None;
+            let mut estimated_width0 = None;
 
             for (n, hop) in hops.iter().enumerate() {
-                let (lvl, (_mhr, nhr)) = hop;
+                let (lvl, (mhr, nhr)) = hop;
                 let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
                 let spos = ss[hn];
                 let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
@@ -302,6 +312,8 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 let mut vpos2 = (lvl.0 as f64) * height_scale + vpad + ts[(*lvl+1)] * line_height;
 
                 if n == 0 {
+                    hn0 = Some(hn);
+                    estimated_width0 = Some(layout_problem.width_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())]);
                     let mut vpos = vpos;
                     if *ew == "senses" {
                         vpos += 33.0; // box height + arrow length
@@ -324,7 +336,17 @@ fn draw(data: String) -> Result<Drawing, Error> {
                         },
                         _ => hpos
                     });
-                    label_width = Some(rs[n] - ls[n]);
+                    label_width = Some(match ew {
+                        x if x == "senses" => {
+                            // ls[n]
+                            rs[n] - spos
+                        },
+                        x if x == "actuates" => {
+                            // ls[n]
+                            spos - ls[n]
+                        },
+                        _ => rs[n] - ls[n]
+                    });
                     label_vpos = Some(((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height);
                 }
 
@@ -344,7 +366,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             if let (Some(label_text), Some(label_hpos), Some(label_width), Some(label_vpos)) = (label_text, label_hpos, label_width, label_vpos) {
                 label = Some(Label{text: label_text, hpos: label_hpos, width: label_width, vpos: label_vpos})
             }
-            arrows.push(Node::Svg{key, path, rel: ew.to_string(), label});
+            arrows.push(Node::Svg{key, path, rel: ew.to_string(), label, hop: hn0.unwrap(), estimated_width: estimated_width0.unwrap()});
         }
     }
 
@@ -372,7 +394,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
     nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
     for node in nodes {
         match node {
-            Node::Div{key, label, hpos, vpos, width} => {
+            Node::Div{key, label, hpos, vpos, width, ..} => {
                 children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
@@ -386,7 +408,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                     }
                 }));
             },
-            Node::Svg{key, path, rel, label} => {
+            Node::Svg{key, path, rel, label, ..} => {
                 let marker_orient = if rel == "actuates" { "auto" } else { "auto-start-reverse" };
                 let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
                 let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };

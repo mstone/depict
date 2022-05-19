@@ -1262,16 +1262,16 @@ pub mod geometry {
 
     impl Display for Constraints {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "Constraints {{")?;
+            write!(f, "Constraints {{\n")?;
             for (l, comb, u) in self.constrs.iter() {
-                write!(f, "{l} <= ")?;
+                write!(f, "    {l} <= ")?;
                 for term in comb.iter() {
                     write!(f, "{term} ")?;
                 }
                 if *u != f64::INFINITY {
-                    write!(f, "<= {u}, ")?;
+                    write!(f, "<= {u},\n")?;
                 } else {
-                    write!(f, ", ")?;
+                    write!(f, ",\n")?;
                 }
             }
             write!(f, "}}")
@@ -1341,7 +1341,7 @@ pub mod geometry {
             // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
             // obj.push(...)
             let t = v.get(AnySol::T(v.vars.len()));
-            let symmetry_cost = 1.0;
+            let symmetry_cost = 100.0;
             pd.push(symmetry_cost * t);
             self.eq(&[t, -v.get(lhs), v.get(rhs)]);
         }
@@ -1918,9 +1918,16 @@ pub mod geometry {
             .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
         
         let result = prob.solve();
-        println!("STATUS {:?}", result);
+        eprintln!("STATUS {:?}", result);
         let x = result.x().or_err(LayoutError::OsqpError{error: "failed to solve problem".into()})?;
-        println!("{:?}", x);
+        // eprintln!("{:?}", x);
+        let mut solutions = V.vars.iter().map(|(sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
+        solutions.sort_by_key(|(a, _)| *a);
+        for (var, val) in solutions {
+            if !matches!(var.sol, AnySol::T(_)) {
+                eprintln!("{} = {}", var.sol, val);
+            }
+        }
 
         // eprintln!("L: {:.2?}\n", lv);
         // eprintln!("R: {:.2?}\n", rv);
@@ -1936,6 +1943,7 @@ pub mod geometry {
             })
             .collect::<Vec<_>>();
         ls.sort_by_key(|(l, _)| **l);
+        eprintln!("ls: {ls:?}");
         let ls = ls.iter().map(|(_, v)| *v).collect::<TiVec<LocSol, _>>();
 
         let mut rs = V.vars.iter()
@@ -1948,6 +1956,7 @@ pub mod geometry {
             })
             .collect::<Vec<_>>();
         rs.sort_by_key(|(r, _)| **r);
+        eprintln!("rs: {rs:?}");
         let rs = rs.iter().map(|(_, v)| *v).collect::<TiVec<LocSol, _>>();
 
         let mut ss = V.vars.iter()
@@ -1960,6 +1969,7 @@ pub mod geometry {
             })
             .collect::<Vec<_>>();
         ss.sort_by_key(|(s, _)| **s);
+        eprintln!("ss: {ss:?}");
         let ss = ss.iter().map(|(_, v)| *v).collect::<TiVec<HopSol, _>>();
 
         let res = LayoutSolution{ls, rs, ss, ts};
