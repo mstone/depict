@@ -154,6 +154,14 @@
                 AppKit
                 WebKit
                 Cocoa
+              ]) ++ final.lib.optionals stdenv.isLinux ([
+                pkg-config
+                glib
+                gdk-pixbuf
+                gtk3
+                webkitgtk
+                libayatana-appindicator-gtk3
+                libappindicator-gtk3
               ]);
             in with final; with pkgs; crane.lib.${final.system}.buildPackage {
             pname = "${subpkg}";
