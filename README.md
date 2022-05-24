@@ -33,13 +33,7 @@
 
 ![Depict "microwave" model screenshot](https://raw.githubusercontent.com/mstone/depict/main/doc/microwave.gif)
 
-People who need to communicate about complex systems often draw pictures with boxes and arrows to explain, in a given situation:
-* what things are present, 
-* how they are called, 
-* which of them matter, and 
-* how they are related.
-
-Unfortunately, many people find it hard to make these drawings quickly and legibly with conventional tools. They often struggle to uncross arrows or to keep parts of their drawing from colliding, especially while editing text labels. These challenges also makes the drawings hard to reuse and to maintain over time as ideas and situations evolve.
+People who need to communicate about complex systems often draw pictures with boxes and arrows. Unfortunately, many people find it hard to make these drawings quickly and legibly with conventional tools. They often struggle to uncross arrows or to keep parts of their drawing from colliding, especially while editing text labels. These challenges also make the drawings hard to reuse and to maintain over time.
 
 *Depict* can help:
 * concisely describe processes, systems, and concepts of operations
@@ -85,6 +79,21 @@ says:
 * in the space between `person` and `microwave`, there are three actions, `open`, `start`, and `stop`, and one feedback, `beep`, 
 * in the space between `microwave` and `food`, there is one action, `heat`.
 * finally, there is also a direct relationship between `person` and `food` consisting of the action: `stir`.
+
+
+## Syntax
+
+The language of depictions loosely consists of 
+
+| production |   |                                                         |
+|------------|---|---------------------------------------------------------|
+|definitions |::=| *name* **:** *expr*,
+|relations   |::=| *name* *name* ... (**:** *labels* (**/** */ *labels*)?)*
+|labels      |::=| *label*... for single-word labels 
+|labels      |::=| *label* (**,** *label*)* for multi-word labels
+|nesting     |::=| **[** *model* **]**
+|alternatives|::=| **{** *model* **}**
+
 
 ## License
 

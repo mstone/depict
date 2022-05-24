@@ -1,5 +1,24 @@
 
+//! depict is library for automatically drawing beautiful, readable pictures of 
+//! models of systems, processes, and concepts of operation (ConOps).
+//! 
+//! # Summary
+//! 
+//! dpict may be best understood as a compiler from a textual language of 
+//! "depict-expressions" ("depictions") to "pictures". It is implemented as a 
+//! library for easy use by downstream packages like [depict_desktop], [depict_web], 
+//! [depict_server], [depict_tikz], and [depict_parse].
+//! 
+//! [depict_desktop]: ../depict_desktop/index.html
+//! [depict_parse]: ../depict_parse/index.html
+//! [depict_server]: ../depict_server/index.html
+//! [depict_tikz]: ../depict_tikz/index.html
+//! [depict_web]: ../depict_web/index.html
 pub mod printer {
+    //! A pretty-printer for "depiction" parse trees
+    //! 
+    //! (The main purpose of the pretty-printer is to help test the 
+    //! [parser](super::parser) via [proptest].)
     use std::borrow::Cow;
 
     use itertools::Itertools;
@@ -61,6 +80,12 @@ pub mod printer {
             }
         }
         
+        /// Generate an arbitrary [Item]
+        /// 
+        /// (Note: one challenge in this area is that in normal use, [Item] has 
+        /// associativity and precedence invariants enforced by [Parser] and, 
+        /// as a consequence, "arbitary" items need to be carefully constructed 
+        /// to enforce these invariants.)
         fn arb_item() -> impl Strategy<Value = Item<'static>> {
             let leaf = "[a-z]+".prop_map(|s| Item::Text(Cow::from(s)));
             let leaf2 = leaf.clone().prop_recursive(1, 4, 3, |inner| {
@@ -128,14 +153,32 @@ pub mod printer {
 }
 
 pub mod parser {
+    //! The parser for "depictions"
+    //! 
+    //! # Summary
+    //! 
+    //! The language of depictions loosely consists of:
+    //! 
+    //! * definitions ::= *name* **:** *expr*,
+    //! * relations ::=  *name* *name* ... (**:** *labels* (**/** */ *labels*)?)*
+    //! * labels ::= *label*... for single-word labels or *label* (**,** *label*)* for multi-word labels
+    //! * nesting ::= **[** *model* **]**
+    //! * alternatives ::= **{** *model* **}**
+    //! 
+    //! # Links
+    //! 
+    //! [Model] and [Item] values can be pretty-printed by [`print()`](crate::printer::print) and [`print1()`](crate::printer::print1), respectively.
+    //! 
     use enum_kinds::EnumKind;
     use std::borrow::Cow;
     use std::hash::Hash;
 
     use pomelo::pomelo;
 
+    /// Depictions consist of [Item]s.
     pub type Model<'s> = Vec<Item<'s>>;
 
+    /// Items are the main "expression" type of depictions.
     #[derive(Clone, Debug, EnumKind, PartialEq)]
     #[enum_kind(ItemKind)]
     pub enum Item<'s> {
@@ -177,6 +220,7 @@ pub mod parser {
     }
 
     impl<'s> Item<'s> {
+        /// Fold the item on the right (`self` or `j`) with an item on the left (`i`).
         // when eating a left item, eat as much as you can.
         // if you ate the whole item, then only you remain.
         // otherwise, what's left of the item eats you.
@@ -263,6 +307,7 @@ pub mod parser {
             }
         }
 
+        /// Get a &mut reference to `self`'s right-most sequence if one exists, or panic.
         fn right(&mut self) -> &mut Vec<Item<'s>> {
             match self {
                 Item::Seq(ref mut r) => r,
@@ -273,6 +318,7 @@ pub mod parser {
             }
         }
 
+        /// Get a &mut reference to `self`'s left-most sequence if one exists, or panic.
         fn left(&mut self) -> &mut Vec<Item<'s>> {
             match self {
                 Item::Seq(ref mut l) => l,
@@ -284,7 +330,8 @@ pub mod parser {
         }
     }
 
-    pub fn merge_item<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
+    /// Combine the two right-most items.
+    fn merge_item<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
         eprint!("MERGE {i:?} {j:?}");
         let r = j.eat_left(i);
         eprintln!(" -> {r:?}");
@@ -358,12 +405,29 @@ pub mod parser {
         expr3 ::= expr1(i) expr1(j) [Text] { merge_item(i, j) };
     }
 
+    /// The [pomelo!]-generated depiction parser
     pub use fact::Parser;
+
+    /// The [pomelo!]-generated depiction lexer.
+    /// 
+    /// To use, please bring the [Logos] trait into scope like so:
+    /// ```ignore
+    /// use logos::Logos;
+    /// ```
     pub use fact::Token;
 
 
     pub type Labels<I> = Vec<Option<I>>;
 
+    /// The intermediate representation (IR) of depictions
+    /// 
+    /// In depict, models are viewed as asserting a claimed set of "facts" 
+    /// to be depicted.
+    /// 
+    /// These "facts" are represented by [Fact]s, each of which record a 
+    /// claim like "the sequence `path` model entities are related with 
+    /// labels for the forward and backward dimensions of each such 
+    /// atomic relationship in the corresponding entries of `labels_by_level`."
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub struct Fact<I> {
         pub path: Vec<I>,
@@ -376,9 +440,11 @@ pub mod graph_drawing;
 
 #[cfg(any(feature="client", feature="server"))]
 pub mod rest {
+    //! Message types and codecs for client-server implementations of depict APIs
     use serde::{Deserialize, Serialize};
     use petgraph::Graph;
 
+    /// Labels describe positioned boxes of text.
     #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
     pub struct Label {
         pub text: String,
@@ -387,12 +453,16 @@ pub mod rest {
         pub vpos: f64,
     }
 
+    /// Positioned graphical elements, with unique keys.
     #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
     pub enum Node {
-    Div { key: String, label: String, hpos: f64, vpos: f64, width: f64 },
-    Svg { key: String, path: String, rel: String, label: Option<Label> },
+        /// Boxes
+        Div { key: String, label: String, hpos: f64, vpos: f64, width: f64 },
+        /// Arrows with optional textual labels
+        Svg { key: String, path: String, rel: String, label: Option<Label> },
     }
 
+    /// The data of a drawing of a "depiction".
     #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Drawing {
         pub crossing_number: Option<usize>,
@@ -401,11 +471,13 @@ pub mod rest {
         pub nodes: Vec<Node>,
     }
 
+    /// A drawing request containing a "depiction" to draw.
     #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Draw {
         pub text: String
     }
 
+    /// A drawing response containing a [Drawing].
     #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct DrawResp {
         pub drawing: Drawing

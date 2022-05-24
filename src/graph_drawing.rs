@@ -1,6 +1,27 @@
+//! The depict compiler backend
+//! 
+//! # Summary
+//! 
+//! Like most compilers, depict has a front-end [parser](crate::parser), 
+//! a backend, and a intermediate representation (IR) to connect them.
+//! 
+//! The depict backend is responsible for gradually transforming the IR 
+//! into lower-level constructs: ultimately, into geometric representations of 
+//! visual objects that, when drawn, will beautifully and correctly portray
+//! the modelling relationships recorded in the IR being compiled.
+
 #![deny(clippy::unwrap_used)]
 
 pub mod error {
+    //! Error types for graph_drawing
+    //! 
+    //! # Summary
+    //! 
+    //! depict's backend exposes errors with fine-grained types and 
+    //! makes extensive use of [SpanTrace]s for error reporting.
+    //! 
+    //! [OrErrExt] and [OrErrMutExt] provide methods to help attach
+    //! current span information to [Option]s. 
     use std::ops::Range;
 
     use petgraph::algo::NegativeCycle;
@@ -94,6 +115,7 @@ pub mod error {
         }
     }
 
+    /// A trait to use to annotate [Option] values with rich error information.
     pub trait OrErrExt<E> {
         type Item;
         fn or_err(self, error: E) -> Result<Self::Item, Error>;
@@ -111,6 +133,7 @@ pub mod error {
         fn or_err_mut(&mut self) -> Result<&mut Self::Item, Error>;
     }
 
+    /// A trait to use to annotate `&mut` [Option] references values with rich error information.
     impl<V> OrErrMutExt for Option<V> {
         type Item = V;
         fn or_err_mut(&mut self) -> Result<&mut V, Error> {
@@ -127,6 +150,7 @@ pub mod error {
 }
 
 pub mod graph {
+    //! Graph-theoretic helpers
     use std::fmt::Debug;
 
     use petgraph::{EdgeDirection::Incoming, Graph};
@@ -135,6 +159,7 @@ pub mod graph {
 
     use super::error::{Error, Kind, OrErrExt};
 
+    /// Find the roots of the input graph `dag`
     pub fn roots<V: Clone + Debug + Ord, E>(dag: &Graph<V, E>) -> Result<SortedVec<V>, Error> {
         let roots = dag
             .externals(Incoming)
@@ -148,6 +173,54 @@ pub mod graph {
 }
 
 pub mod layout {
+    //! Choose geometric relations to use to express model relationships
+    //! 
+    //! # Summary
+    //! 
+    //! The purpose of the [layout](self) module is to convert descriptions of 
+    //! model relationships to be drawn into geometric relationships between 
+    //! visual "objects". For example, suppose we would like to express that a 
+    //! "person" controls a "microwave" via actions named "open", "start", or 
+    //! "stop" and via feedback named "beep". One conceptual picture that we 
+    //! might wish to draw of this scenario looks roughly like:
+    //! 
+    //! ```text
+    //!         person
+    //! open     | ^     beep
+    //! start    | |  
+    //! stop     v |
+    //!       microwave
+    //! ```
+    //! 
+    //! In this situation, we need to convert the modeling relations like 
+    //!   "`person` controls `microwave`" 
+    //! and details like
+    //!   "`person` can `open` `microwave'`"
+    //! into visual choices like "we're going to represent `person` 
+    //! and `microwave` as boxes, person should be vertically positioned 
+    //! above `microwave`, and in the space between the `person` box and 
+    //! the `microwave` box, we are going to place a downward-directed 
+    //! arrow, an upward-directed arrow, one label to the left of the 
+    //! downward arrrow with the text 'open, start, stop', and one label 
+    //! to the right of the upward arrow with the text 'beep'."
+    //! 
+    //! # Guide-level explanation
+    //! 
+    //! The heart of the [layout](self) algorithm is to 
+    //! 
+    //! 1. form a [Vcg], witnessing a partial order on items as a "vertical constraint graph"
+    //! 2. [`condense()`] the [Vcg] to a [Cvcg], which is a simple graph, by merging parallel edges into single edges labeled with lists of Vcg edge labels.
+    //! 3. [`rank()`] the condensed VCG by finding longest-paths
+    //! 4. Calculate a [Placement] of the ranked Cvcg by 
+    //! 
+    //! use the integer program 
+    //! described in <cite>[Optimal Sankey Diagrams Via Integer Programming]</cite> ([author's copy])
+    //! implemented via the [minion](https://github.com/minion/minion) constraint
+    //! solver to minimize edge-crossing 
+    //! 
+    //! [Optimal Sankey Diagrams Via Integer Programming]: https://doi.org/10.1109/PacificVis.2018.00025
+    //! [author's copy]: https://ialab.it.monash.edu/~dwyer/papers/optimal-sankey-diagrams.pdf
+    
     use std::borrow::Cow;
     use std::collections::BTreeMap;
     use std::collections::{HashMap, hash_map::Entry};
@@ -560,9 +633,12 @@ pub mod layout {
 
     use crate::graph_drawing::index::{OriginalHorizontalRank, VerticalRank};
 
+    /// A graphical object to be positioned relative to other objects
     #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone)]
     pub enum Loc<V,E> {
+        /// A "box"
         Node(V),
+        /// One hop of an "arrow"
         Hop(VerticalRank, E, E),
     }
 
@@ -586,6 +662,7 @@ pub mod layout {
 
     pub type RankedPaths<V> = BTreeMap<VerticalRank, SortedVec<(V, V)>>;
 
+    /// Set up a [Placement] problem
     pub fn calculate_locs_and_hops<'s, V, E>(
         dag: &'s Graph<V, E>, 
         paths_by_rank: &'s RankedPaths<V>
@@ -691,6 +768,7 @@ pub mod layout {
         Ok(Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc})
     }
 
+    /// A placement solver based on the [minion](https://github.com/minion/minion) constraint solver
     pub mod minion {
         use std::collections::{BTreeMap, HashMap};
         use std::fmt::{Debug, Display};
@@ -920,10 +998,23 @@ pub mod layout {
         }
     }
 
+    /// Solve for horizontal ranks that minimize edge crossing
     pub use minion::minimize_edge_crossing;
 }
 
 pub mod index {
+    //! Index types for graph_drawing
+    //! 
+    //! # Summary
+    //! 
+    //! A key challenge the depict backend faces is to transform collections 
+    //! of relations into collections of constraints and collections of 
+    //! constraints into collections of variables representing geometry.
+    //! 
+    //! Typed collections ease this task.
+    //! 
+    //! This module collects the types of indices that may be used to index
+    //! these typed collections.
     use std::{ops::{Add, Sub}, fmt::Display};
 
     use derive_more::{From, Into};
@@ -1055,6 +1146,38 @@ pub mod index {
 }
 
 pub mod geometry {
+    //! Generate beautiful geometry consistent with given relations.
+    //! 
+    //! # Summary 
+    //! 
+    //! The purpose of the `geometry` module is to generate beautiful geometry 
+    //! (positions, widths, paths) consistent with given geometric relations between 
+    //! graphical objects to be positioned (ex: "object A should be placed to the left 
+    //! of object b").
+    //! 
+    //! # Guide-level explanation
+    //! 
+    //! Convex optimization is a powerful framework for finding sets of numbers 
+    //! (representing the coordinates of points and guides) that "solve" a given
+    //! layout problem in an optimal way consistent with given costs and constraints.
+    //! 
+    //! Conveniently, it allows us to express both geometric constraints like 
+    //! "the horizontal position of the right-hand border of box A must be less 
+    //! the horizontal position of the left-hand side of the bounding box of hop C1"
+    //! as well as more flexible desiderata like "subject to these constraints, 
+    //! minimize the square of the difference of the positions of hops C1.1 and C2.2".
+    //! 
+    //! # Reference-level explanation
+    //! 
+    //! `geometry` is implemented in terms of the [OSQP](https://osqp.org) convex 
+    //! quadratic program solver and its Rust bindings in the [osqp] crate.
+    //! 
+    //! Abstractly, the data and the steps required to convert geometric relations into geometry are:
+    //! 
+    //! 1. the input data need to be organized (here, via [`calculate_sols()`]) so that constraints can be generated and so that the optimization objective can be formed.
+    //! 2. then, once constraints and the objective are generated, they need to be formatted as an [osqp::CscMatrix] and associated `&[f64]` slices, passed to [osqp::Problem], and solved.
+    //! 3. then, the resulting [osqp::Solution] needs to be destructured so that the resulting solution values can be returned to [`position_sols()`]'s caller as a [LayoutSolution].
+
     use osqp::{self, CscMatrix};
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::visit::EdgeRef;
