@@ -56,3 +56,6 @@ members = [
   "tikz",
   "web",
 ]
+
+[profile.release]
+debug = true
