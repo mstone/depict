@@ -33,7 +33,9 @@
 
 ![Depict "microwave" model screenshot](https://raw.githubusercontent.com/mstone/depict/main/doc/microwave.gif)
 
-People who need to communicate about complex systems often draw pictures with boxes and arrows. Unfortunately, many people find it hard to make these drawings quickly and legibly with conventional tools. They often struggle to uncross arrows or to keep parts of their drawing from colliding, especially while editing text labels. These challenges also make the drawings hard to reuse and to maintain over time.
+People who need to communicate about complex systems often draw pictures with boxes and arrows. 
+
+Unfortunately, many people find it hard to make these drawings quickly and legibly with conventional tools. They often struggle to uncross arrows or to keep parts of their drawing from colliding, especially while editing text labels. These challenges also make the drawings hard to reuse and to maintain over time.
 
 *Depict* can help:
 * concisely describe processes, systems, and concepts of operations
@@ -85,9 +87,9 @@ says:
 
 The language of depictions loosely consists of 
 
-| production |   |                                                         |
+| production |   | syntax                                                  |
 |------------|---|---------------------------------------------------------|
-|definitions |::=| *name* **:** *expr*,
+|definitions |::=| *name* **:** *expr*
 |relations   |::=| *name* *name* ... (**:** *labels* (**/** */ *labels*)?)*
 |labels      |::=| *label*... for single-word labels 
 |labels      |::=| *label* (**,** *label*)* for multi-word labels
