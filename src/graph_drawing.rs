@@ -172,6 +172,151 @@ pub mod graph {
     }
 }
 
+pub mod index {
+    //! Index types for graph_drawing
+    //! 
+    //! # Summary
+    //! 
+    //! A key challenge the depict backend faces is to transform collections 
+    //! of relations into collections of constraints and collections of 
+    //! constraints into collections of variables representing geometry.
+    //! 
+    //! Typed collections ease this task.
+    //! 
+    //! This module collects the types of indices that may be used to index
+    //! these typed collections.
+    use std::{ops::{Add, Sub}, fmt::Display};
+
+    use derive_more::{From, Into};
+
+    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    pub struct VerticalRank(pub usize);
+
+    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    pub struct OriginalHorizontalRank(pub usize);
+
+    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    pub struct SolvedHorizontalRank(pub usize);
+
+    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    pub struct LocSol(pub usize);
+
+    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    pub struct HopSol(pub usize);
+
+    impl Add<usize> for VerticalRank {
+        type Output = Self;
+
+        fn add(self, rhs: usize) -> Self::Output {
+            Self(self.0 + rhs)
+        }
+    }
+
+    impl Add<usize> for OriginalHorizontalRank {
+        type Output = Self;
+
+        fn add(self, rhs: usize) -> Self::Output {
+            Self(self.0 + rhs)
+        }
+    }
+
+    impl Add<usize> for SolvedHorizontalRank {
+        type Output = Self;
+
+        fn add(self, rhs: usize) -> Self::Output {
+            Self(self.0 + rhs)
+        }
+    }
+
+    impl Add<usize> for LocSol {
+        type Output = Self;
+
+        fn add(self, rhs: usize) -> Self::Output {
+            Self(self.0 + rhs)
+        }
+    }
+
+    impl Add<usize> for HopSol {
+        type Output = Self;
+
+        fn add(self, rhs: usize) -> Self::Output {
+            Self(self.0 + rhs)
+        }
+    }
+
+    impl Sub<usize> for VerticalRank {
+        type Output = Self;
+
+        fn sub(self, rhs: usize) -> Self::Output {
+            Self(self.0 - rhs)
+        }
+    }
+
+    impl Sub<usize> for OriginalHorizontalRank {
+        type Output = Self;
+
+        fn sub(self, rhs: usize) -> Self::Output {
+            Self(self.0 - rhs)
+        }
+    }
+
+    impl Sub<usize> for SolvedHorizontalRank {
+        type Output = Self;
+
+        fn sub(self, rhs: usize) -> Self::Output {
+            Self(self.0 - rhs)
+        }
+    }
+
+    impl Sub<usize> for LocSol {
+        type Output = Self;
+
+        fn sub(self, rhs: usize) -> Self::Output {
+            Self(self.0 - rhs)
+        }
+    }
+
+    impl Sub<usize> for HopSol {
+        type Output = Self;
+
+        fn sub(self, rhs: usize) -> Self::Output {
+            Self(self.0 - rhs)
+        }
+    }
+
+    impl Display for VerticalRank {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{}", self.0))
+        }
+    }
+
+    impl Display for OriginalHorizontalRank {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{}", self.0))
+        }
+    }
+
+    impl Display for SolvedHorizontalRank {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{}", self.0))
+        }
+    }
+
+    impl Display for LocSol {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{}", self.0))
+        }
+    }
+
+    impl Display for HopSol {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{}", self.0))
+        }
+    }
+
+}
+
+
 pub mod layout {
     //! Choose geometric relations to use to express model relationships
     //! 
@@ -1000,149 +1145,6 @@ pub mod layout {
 
     /// Solve for horizontal ranks that minimize edge crossing
     pub use minion::minimize_edge_crossing;
-}
-
-pub mod index {
-    //! Index types for graph_drawing
-    //! 
-    //! # Summary
-    //! 
-    //! A key challenge the depict backend faces is to transform collections 
-    //! of relations into collections of constraints and collections of 
-    //! constraints into collections of variables representing geometry.
-    //! 
-    //! Typed collections ease this task.
-    //! 
-    //! This module collects the types of indices that may be used to index
-    //! these typed collections.
-    use std::{ops::{Add, Sub}, fmt::Display};
-
-    use derive_more::{From, Into};
-
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct VerticalRank(pub usize);
-
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct OriginalHorizontalRank(pub usize);
-
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct SolvedHorizontalRank(pub usize);
-
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct LocSol(pub usize);
-
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct HopSol(pub usize);
-
-    impl Add<usize> for VerticalRank {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Add<usize> for OriginalHorizontalRank {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Add<usize> for SolvedHorizontalRank {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Add<usize> for LocSol {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Add<usize> for HopSol {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Sub<usize> for VerticalRank {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Sub<usize> for OriginalHorizontalRank {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Sub<usize> for SolvedHorizontalRank {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Sub<usize> for LocSol {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Sub<usize> for HopSol {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Display for VerticalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
-
-    impl Display for OriginalHorizontalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
-
-    impl Display for SolvedHorizontalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
-
-    impl Display for LocSol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
-
-    impl Display for HopSol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
 }
 
 pub mod geometry {
