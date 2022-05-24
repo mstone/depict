@@ -1,6 +1,6 @@
 [package]
 name = "depict-tikz"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "tikz port for Depict"
@@ -9,7 +9,7 @@ homepage = "https://github.com/mstone/depict"
 repository = "https://github.com/mstone/depict"
 
 [dependencies]
-depict = { path = "..", version = "0.1", default-features = false, features = [ "minion", "osqp" ] }
+depict = { path = "..", version = "0.2", default-features = false, features = [ "minion", "osqp" ] }
 indoc = "1.0"
 logos = "0.12"
 miette = { version = "4", features = [ "fancy" ] }

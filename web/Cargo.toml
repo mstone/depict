@@ -1,6 +1,6 @@
 [package]
 name = "depict-web"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "web frontend for Depict"
@@ -11,7 +11,7 @@ repository = "https://github.com/mstone/depict"
 [dependencies]
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
-depict = { path = "..", version = "0.1", default-features = false, features = [ "client" ] }
+depict = { path = "..", version = "0.2", default-features = false, features = [ "client" ] }
 dioxus = { version = "0.2", features = ["fermi", "web"] }
 futures = "0.3"
 indoc = "1.0"
