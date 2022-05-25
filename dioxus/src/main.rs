@@ -43,7 +43,7 @@ pub struct Label {
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Node {
   Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, loc: LocSol, estimated_width: f64 },
-  Svg { key: String, path: String, rel: String, label: Option<Label>, hop: HopSol, estimated_width: (f64,f64) },
+  Svg { key: String, path: String, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_width: (f64,f64) },
 }
 
 #[derive(Clone, Debug)]
@@ -300,19 +300,27 @@ fn draw(data: String) -> Result<Drawing, Error> {
             let mut label_vpos = None;
             // use rand::Rng;
             // let mut rng = rand::thread_rng();
-            let mut hn0 = None;
+            let mut hn0 = vec![];
             let mut estimated_width0 = None;
 
             for (n, hop) in hops.iter().enumerate() {
                 let (lvl, (mhr, nhr)) = hop;
-                let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
+                // let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
+                let hn = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
                 let spos = ss[hn];
+                let hnd = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
+                let sposd = ss[hnd];
                 let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
+                let hposd = (sposd + offset).round();
                 let vpos = ((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height;
                 let mut vpos2 = (lvl.0 as f64) * height_scale + vpad + ts[(*lvl+1)] * line_height;
 
                 if n == 0 {
-                    hn0 = Some(hn);
+                    hn0.push(hn);
+                }
+                hn0.push(hnd);
+                
+                if n == 0 {
                     estimated_width0 = Some(layout_problem.width_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())]);
                     let mut vpos = vpos;
                     if *ew == "senses" {
@@ -325,25 +333,26 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
                 if n == 0 {
                     let n = sol_by_loc[&((*lvl+1), *nhr)];
+                    // let n = sol_by_loc[&((*lvl), *mhr)];
                     label_hpos = Some(match ew {
                         x if x == "senses" => {
                             // ls[n]
-                            hpos
+                            hposd
                         },
                         x if x == "actuates" => {
                             // ls[n]
-                            hpos
+                            hposd
                         },
-                        _ => hpos
+                        _ => hposd
                     });
                     label_width = Some(match ew {
                         x if x == "senses" => {
                             // ls[n]
-                            rs[n] - spos
+                            rs[n] - sposd
                         },
                         x if x == "actuates" => {
                             // ls[n]
-                            spos - ls[n]
+                            sposd - ls[n]
                         },
                         _ => rs[n] - ls[n]
                     });
@@ -354,7 +363,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
                     vpos2 -= 7.0; // arrowhead length
                 }
 
-                path.push(format!("L {hpos} {vpos2}"));
+                path.push(format!("L {hposd} {vpos2}"));
 
             }
 
@@ -366,7 +375,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             if let (Some(label_text), Some(label_hpos), Some(label_width), Some(label_vpos)) = (label_text, label_hpos, label_width, label_vpos) {
                 label = Some(Label{text: label_text, hpos: label_hpos, width: label_width, vpos: label_vpos})
             }
-            arrows.push(Node::Svg{key, path, rel: ew.to_string(), label, hop: hn0.unwrap(), estimated_width: estimated_width0.unwrap()});
+            arrows.push(Node::Svg{key, path, rel: ew.to_string(), label, hops: hn0, estimated_width: estimated_width0.unwrap()});
         }
     }
 

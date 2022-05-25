@@ -816,6 +816,7 @@ pub mod layout {
         V: Clone + Debug + Display + Ord + Hash, 
         E: Clone + Debug + Ord 
     {
+        // Rank vertices by the length of the longest path reaching them.
         let mut vx_rank = HashMap::new();
         let mut hx_rank = HashMap::new();
         for (rank, paths) in paths_by_rank.iter() {
@@ -828,17 +829,29 @@ pub mod layout {
 
         let mut loc_to_node = HashMap::new();
         let mut node_to_loc = HashMap::new();
-
         let mut locs_by_level = BTreeMap::new();
-        for (rank, paths) in paths_by_rank.iter() {
-            let l = *rank;
-            for (a, (_cvl, cwl)) in paths.iter().enumerate() {
-                let a = OriginalHorizontalRank(a);
-                locs_by_level.entry(l).or_insert_with(TiVec::new).push(a);
-                loc_to_node.insert((l, a), Loc::Node(cwl.clone()));
-                node_to_loc.insert(Loc::Node(cwl.clone()), (l, a));
-            }
+
+        for (wl, rank) in vx_rank.iter() {
+            let paths = &paths_by_rank[rank];
+            let mhr = paths.iter().position(|e| e.1 == *wl)
+                .or_err(Kind::IndexingError{})?;
+            let mhr = OriginalHorizontalRank(mhr);
+            locs_by_level
+                .entry(*rank)
+                .or_insert_with(TiVec::new)
+                .push(mhr);
+            loc_to_node.insert((*rank, mhr), Loc::Node(wl.clone()));
+            node_to_loc.insert(Loc::Node(wl.clone()), (*rank, mhr));
         }
+        // for (rank, paths) in paths_by_rank.iter() {
+        //     let l = *rank;
+        //     for (a, (_cvl, cwl)) in paths.iter().enumerate() {
+        //         let a = OriginalHorizontalRank(a);
+        //         locs_by_level.entry(l).or_insert_with(TiVec::new).push(a);
+        //         loc_to_node.insert((l, a), Loc::Node(cwl.clone()));
+        //         node_to_loc.insert(Loc::Node(cwl.clone()), (l, a));
+        //     }
+        // }
 
         event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V1");
 
@@ -1661,7 +1674,7 @@ pub mod geometry {
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
         enum Loc2<V> {
             Node{vl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: LocSol},
-            Hop{vl: V, wl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: HopSol},
+            Hop{vl: V, wl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: HopSol, pshr: Option<SolvedHorizontalRank>},
         }
 
         let mut level_to_object = BTreeMap::<VerticalRank, BTreeMap<SolvedHorizontalRank, HashSet<_>>>::new();
@@ -1682,8 +1695,8 @@ pub mod geometry {
                 let lvl1 = *lvl+1;
                 let src_sol = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
                 let dst_sol = sol_by_hop[&(lvl1, *nhr, vl.clone(), wl.clone())];
-                level_to_object.entry(*lvl).or_default().entry(shr).or_default().insert(Loc2::Hop{vl, wl, loc: (*lvl, *mhr), shr, sol: src_sol});
-                level_to_object.entry(lvl1).or_default().entry(shrd).or_default().insert(Loc2::Hop{vl, wl, loc: (lvl1, *nhr), shr: shrd, sol: dst_sol});
+                level_to_object.entry(*lvl).or_default().entry(shr).or_default().insert(Loc2::Hop{vl, wl, loc: (*lvl, *mhr), shr, sol: src_sol, pshr: None});
+                level_to_object.entry(lvl1).or_default().entry(shrd).or_default().insert(Loc2::Hop{vl, wl, loc: (lvl1, *nhr), shr: shrd, sol: dst_sol, pshr: Some(shr)});
                 // let vxh = format!("{vl} {wl} {lvl},{shr}"));
                 // let wxh = format!("{vl} {wl} {lvl1},{shrd}");
                 // layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
@@ -1869,19 +1882,20 @@ pub mod geometry {
                 // Sn >= Lnd + sep + aw
                 // Lnd + sep + aw <= Sn
                 // Lnd <= Sn-sep-aw
+                eprintln!("XXXX POS HOP CONSTR L{nd} <= S{n} <= R{nd}");
                 C.geqc(&mut V, S(n), L(*nd), sep + action_width);
                 C.leqc(&mut V, S(n), R(*nd), sep + percept_width);
 
                 if terminal {
                     let mut terminal_hops = all_objects
                         .iter()
-                        .filter(|obj| { matches!(obj, Loc2::Hop{loc: (_, onhr), ..} if onhr.0 > num_objects) })
+                        .filter(|obj| { matches!(obj, Loc2::Hop{pshr, ..} if pshr.is_some()) })
                         .collect::<Vec<_>>();
                         #[allow(clippy::unit_return_expecting_ord)]
 
                     terminal_hops.sort_by_key(|hop| {
-                        if let Loc2::Hop{shr: tshr, ..} = hop {
-                            tshr
+                        if let Loc2::Hop{pshr: Some(pshr), ..} = hop {
+                            pshr
                         } else {
                             unreachable!();
                         }
@@ -1893,18 +1907,18 @@ pub mod geometry {
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
                                 C.leqc(&mut V, S(*onl), S(*on), sep + owidth_l.1 + owidth.0);
-                                C.sym(&mut V, &mut Pd, S(*on), S(*onl));
+                                // C.sym(&mut V, &mut Pd, S(*on), S(*onl));
                             }
                             else {
-                                C.sym(&mut V, &mut Pd, L(*nd), S(*on));
+                                // C.sym(&mut V, &mut Pd, L(*nd), S(*on));
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
                                 C.leqc(&mut V, S(*on), S(*onr), sep + owidth_r.0 + owidth.1);
-                                C.sym(&mut V, &mut Pd, S(*onr), S(*on));
+                                // C.sym(&mut V, &mut Pd, S(*onr), S(*on));
                             }
                             else {
-                                C.sym(&mut V, &mut Pd, R(*nd), S(*on));
+                                // C.sym(&mut V, &mut Pd, R(*nd), S(*on));
                             }
                         }
                     }
@@ -1931,17 +1945,17 @@ pub mod geometry {
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
                                 C.leqc(&mut V, S(*onl), S(*on), sep + owidth_l.1 + owidth.0);
-                                C.sym(&mut V, &mut Pd, S(*on), S(*onl));
+                                // C.sym(&mut V, &mut Pd, S(*on), S(*onl));
                             } else {
-                                C.sym(&mut V, &mut Pd, L(*nd), S(*on));
+                                // C.sym(&mut V, &mut Pd, L(*nd), S(*on));
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
                                 C.leqc(&mut V, S(*on), S(*onr), sep + owidth_r.0 + owidth.1);
-                                C.sym(&mut V, &mut Pd, S(*onr), S(*on));
+                                // C.sym(&mut V, &mut Pd, S(*onr), S(*on));
                             }
                             else {
-                                C.sym(&mut V, &mut Pd, R(*nd), S(*on));
+                                // C.sym(&mut V, &mut Pd, R(*nd), S(*on));
                             }
                         }
                     }
@@ -2042,7 +2056,14 @@ pub mod geometry {
         // let u = &[1., 1., 1.];
 
         let settings = osqp::Settings::default()
-            .verbose(false);
+            // .check_termination(Some(200))
+            // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
+            // .adaptive_rho_interval(Some(25))
+            // .eps_abs(1e-1)
+            // .eps_rel(1e-1)
+            // .max_iter(16_000_000)
+            // .polish(true)
+            .verbose(true);
 
         // let mut prob = Problem::new(P, q, A, l, u, &settings)
         let mut prob = Problem::new(P2, &Q2[..], A2, &L2[..], &U2[..], &settings)
