@@ -3,12 +3,118 @@
 //! # Summary
 //! 
 //! Like most compilers, depict has a front-end [parser](crate::parser), 
-//! a backend, and a intermediate representation (IR) to connect them.
+//! a multi-stage backend, and various intermediate representations (IRs) 
+//! to connect them.
 //! 
 //! The depict backend is responsible for gradually transforming the IR 
 //! into lower-level constructs: ultimately, into geometric representations of 
-//! visual objects that, when drawn, will beautifully and correctly portray
+//! visual objects that, when drawn, beautifully and correctly portray
 //! the modelling relationships recorded in the IR being compiled.
+//! 
+//! # Guide-level Explanation
+//! 
+//! At a high level, the depict backend consists of [layout] and [geometry] modules.
+//! 
+//! `layout` is responsible for producing a coarse-grained map, called a 
+//! [Placement](layout::Placement), that "positions" visual components relative 
+//! to one another literally by calculating ordering relations between them.
+//! 
+//! `geometry` is then responsible for calculating positions and dimensions for these
+//! components -- essentially, for "meshing" them -- in order to produce instructions
+//! that can be passed to a *depict* front-end for drawing using a conventional 
+//! drawing backend like [Dioxus](https://dioxuslabs.com) or [TikZ](https://ctan.org/pkg/pgf).
+//! 
+//! # Reference-level Explanation
+//! 
+//! ## Approach
+//! 
+//! Both layout and geometry calculation follow the same general approach which is:
+//! 
+//! 1. elaborate the input data into a collection of lower-level entities
+//! along with additional collections that map indices for the input data into 
+//! indices for the corresponding refined objects that enable navigation.
+//! 
+//! 2. map the refinement and the associated collections of indices into the input 
+//! format for a solver, such as [minion](https://github.com/minion/minion) for layout
+//! or [OSQP](https://osqp.org) for geometry.
+//! 
+//! 3. solve the relevant problem, and then map the resulting solution back to
+//! data about the refinement.
+//! 
+//! ## Vocabulary
+//! 
+//! The refinement for `layout` is a collection of "locs". Each "loc" represents a visual
+//! cell that is ordered vertically into ranks and horizontally within ranks, into which
+//! geometry can conceptually be placed.
+//! 
+//! Due to requirements of the edge crossing minimization algorithm, it is necessary to
+//! refine edges that span more than one rank into collections of "hops" that such that
+//! each hop spans only a single rank.
+//! 
+//! As a result, there are two kinds of "locs", "node locs" and "hop locs".
+//! 
+//! Locs are indexed by pairs of (VerticalRank, OriginalHorizontalRank), called LocIx.
+//! 
+//! Node locs have just these coordinates. Hop locs, by contrast, span ranks and so 
+//! have coordinates for both their upper end-point -- (ovr, mhr), for "Original 
+//! Vertical Rank, m-Horizontal Rank", and their lower end-point (ovr+1, nhr). 
+//! Lexically, ohr+1 is also often abbreviated ohr**d** for "down".
+//! 
+//! The result of solving the layout problem is a map from 
+//! 
+//!   VerticalRank -> OriginalHorizontalRank -> SolvedHorizontalRank
+//! 
+//! describing a permutation of the indices of the locs being ordered.
+//! 
+//! As with original horizontal ranks, solved horizontal ranks get abbreviated as
+//! "shr" (for the solved horizontal rank of the upper endpoint of a hop), "shrd"
+//! for the solved horizontal rank of the lower endpoint of a hop, and with further
+//! abbreviations like "shrl", "shrr" for the solved horizontal ranks of left and 
+//! right neighbors.
+//! 
+//! The layout problem itself has additional further vocabulary: for every distinct
+//! pair of locs with a given rank, there is an ordering variable x_ij that will be
+//! set to 1 if loc i should be left of loc j and for every distinct pair of hops 
+//! with the same starting rank there are crossing number variables c[r][u1, v1, u2, v2] 
+//! that will be summed to count whether or not hop (u1, v1) crosses hop (u2, v2)
+//! given the relative ordering of locs (r, u1), (r, u2), (r+1, v1), and (r+1, v2).
+//! 
+//! Finally, hops have an additional subtlety which is that the collections of hops
+//! used by geometry are not the same as those solved for by layout because the 
+//! refinement used in geometry refines collections of hops into collections of control 
+//! points to use to represent the edge bundle to be meshed by adding a fake/sentinel
+//! hop with an unreasonably large "nhr" value for each previous final hop so that 
+//! procedures that iterate over sequences of hops can simulate iterating over control 
+//! points.
+//! 
+//! ## Other Details
+//! 
+//! To make the layout refinement from the input data, we vertically rank the nodes 
+//! by using Floyd-Warshall with negative weights to find all-pairs longest paths, 
+//! and then filter down to paths that start at a root.
+//! 
+//! These paths are then sorted/grouped by length to produce `paths_by_rank`, which
+//! tells us the possible ranks of each destination node, of which we then pick the
+//! largest.
+//! 
+//! The next step is to create a [Placement](layout::placement), 
+//! via [`calculate_locs_and_hops()`](layout::calculate_locs_and_hops).
+//! 
+//! The data of this refinement (and its associated maps of indices) is captured 
+//! in multiple collections, including
+//! 
+//! * `hops_by_level` (which tells us all the hops starting on a given level)
+//! * `hops_by_edge` (which tells us all the hops for a given edge, sorted by start level)
+//! * `locs_by_level` (which collects the indices of all node or intermediate hop locs)
+//! * `loc_to_node` (which records what kind of loc is present at a given index)
+//! * `node_to_loc` (which records the indices of each kind of (node | intermediate hop))
+//! * `mhrs` (which, at a given level, records the original horizontal ranks of the objects and is used for mhr assignment)
+//! 
+//! Then [`minimize_edge_crossing()`](layout::minimize_edge_crossing) consumes the given Placement 
+//! (PlacementProblem) and produces a PlacementSolution (a crossing number + (lvl, mhr) -> (shr) map) 
+//! that permutes (nodes and intermediate hops), within levels, to minimize edge crossing, by further 
+//! embedding the layout IR into variables and constraints that model the possible ordering relations between
+//! layout problem objects and their crossing numbers.
 
 #![deny(clippy::unwrap_used)]
 
@@ -356,12 +462,10 @@ pub mod layout {
     //! 1. form a [Vcg], witnessing a partial order on items as a "vertical constraint graph"
     //! 2. [`condense()`] the [Vcg] to a [Cvcg], which is a simple graph, by merging parallel edges into single edges labeled with lists of Vcg edge labels.
     //! 3. [`rank()`] the condensed VCG by finding longest-paths
-    //! 4. Calculate a [Placement] of the ranked Cvcg by 
-    //! 
-    //! use the integer program 
-    //! described in <cite>[Optimal Sankey Diagrams Via Integer Programming]</cite> ([author's copy])
+    //! 4. [`calculate_locs_and_hops()`] from the ranked paths of the CVCG to form a [Placement] by refining edge bundles (i.e., condensed edges) into hops
+    //! 5. [`minimize_edge_crossing()`] using the integer program described in <cite>[Optimal Sankey Diagrams Via Integer Programming]</cite> ([author's copy])
     //! implemented via the [minion](https://github.com/minion/minion) constraint
-    //! solver to minimize edge-crossing 
+    //! solver, resulting in a `ovr -> ohr -> shr` map.
     //! 
     //! [Optimal Sankey Diagrams Via Integer Programming]: https://doi.org/10.1109/PacificVis.2018.00025
     //! [author's copy]: https://ialab.it.monash.edu/~dwyer/papers/optimal-sankey-diagrams.pdf
@@ -488,46 +592,6 @@ pub mod layout {
             str::len(self)
         }
     }
-
-
-    // fn levels_colon_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, b: &Body<'s>) {
-    //     if let Body::Slash(up, down) = &b {
-    //         let up = up.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-    //         let down = down.0.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-    //         lvls.push((up, down));
-    //     }
-    //     if let Body::Nest(a, b) = b {
-    //         levels_colon_helper(lvls, a);
-    //         levels_helper(lvls, b);
-    //     }
-    // }
-
-    // fn levels_helper<'s>(lvls: &mut Vec<(Labels<&'s str>, Labels<&'s str>)>, body: &Body<'s>) {
-    //     match body {
-    //         Body::Colon(Item(i, Some(b))) => {
-    //             match b.as_ref() {
-    //                 Body::Colon(_) => {
-    //                     levels_helper(lvls, b);
-    //                 },
-    //                 Body::Sq(_) | Body::Br(_) => {
-    //                     let up = i.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-    //                     lvls.push((up, vec![]));
-    //                 },
-    //                 Body::Slash(_, _) | Body::Nest(_, _) => {
-    //                     levels_colon_helper(lvls, b); 
-    //                 },
-    //             }
-    //         },
-    //         Body::Colon(Item(i, None)) => {
-    //             let up = i.iter().map(|s| Some(*s)).collect::<Vec<_>>();
-    //             lvls.push((up, vec![]));
-    //         },
-    //         Body::Slash(_, _) => {
-    //             levels_colon_helper(lvls, body);
-    //         },
-    //         _ => {}
-    //     }
-    // }
 
     #[instrument()]
     fn helper_path<'s>(l: &'s [Item<'s>]) -> Vec<Cow<'s, str>>{

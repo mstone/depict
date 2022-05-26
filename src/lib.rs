@@ -1,19 +1,13 @@
 
-//! depict is library for automatically drawing beautiful, readable pictures of 
+//! depict is library for drawing beautiful, readable pictures of 
 //! models of systems, processes, and concepts of operation (ConOps).
 //! 
 //! # Summary
 //! 
-//! dpict may be best understood as a compiler from a textual language of 
+//! depict may be best understood as a compiler from a textual language of 
 //! "depict-expressions" ("depictions") to "pictures". It is implemented as a 
-//! library for easy use by downstream packages like [depict_desktop], [depict_web], 
-//! [depict_server], [depict_tikz], and [depict_parse].
-//! 
-//! [depict_desktop]: ../depict_desktop/index.html
-//! [depict_parse]: ../depict_parse/index.html
-//! [depict_server]: ../depict_server/index.html
-//! [depict_tikz]: ../depict_tikz/index.html
-//! [depict_web]: ../depict_web/index.html
+//! library for easy use by downstream packages like depict's desktop and web
+//! front-ends.
 pub mod printer {
     //! A pretty-printer for "depiction" parse trees
     //! 
@@ -169,6 +163,26 @@ pub mod parser {
     //! 
     //! [Model] and [Item] values can be pretty-printed by [`print()`](crate::printer::print) and [`print1()`](crate::printer::print1), respectively.
     //! 
+    //! # Guide-level Explanation
+    //! 
+    //! (tbd.)
+    //! 
+    //! # Reference-level Explanation
+    //! 
+    //! The parser for the loose grammar shown above is actually produced by the [pomelo]
+    //! LALR(1) parser-generator proc-macro.
+    //! 
+    //! The two key ideas of the LALR(1) grammar given to pomelo are 
+    //! 
+    //! 1. to build the parse tree by giving merge rules for how to combine adjacent 
+    //! parse-tree fragments to be driven by a single "juxtaposition rule" that, 
+    //! combined with precedence information, drives the merging process backward from
+    //! right to left according to the shift-reduce conflict resolutions specified by
+    //! the precedence rules
+    //! 
+    //! 2. to check that the resulting parser produces desirable parse trees by
+    //! demanding that it be a partial inverse to the [printer](crate::printer) 
+    //! pretty-printer.
     use enum_kinds::EnumKind;
     use std::borrow::Cow;
     use std::hash::Hash;
