@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, BufWriter};
 use std::panic::catch_unwind;
 
 use depict::graph_drawing::error::{Error, OrErrExt, Kind};
@@ -478,11 +478,11 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                                 } else { 
                                     "translate(1.5ex)"
                                 };
-                                let border = match rel.as_str() { 
-                                    // "actuates" => "border border-red-300",
-                                    // "senses" => "border border-blue-300",
-                                    _ => "",
-                                };
+                                // let border = match rel.as_str() { 
+                                //     // "actuates" => "border border-red-300",
+                                //     // "senses" => "border border-blue-300",
+                                //     _ => "",
+                                // };
                                 rsx!(div {
                                     style: "position: absolute;",
                                     left: "{hpos}px",
@@ -523,6 +523,115 @@ pub struct AppProps {
     drawing_receiver: Cell<Option<UnboundedReceiver<Drawing>>>,
 }
 
+use svg::{Document, node::{element::{Group, Marker, Path, Rectangle, Text as TextElt}, Node as _, Text}};
+
+pub fn as_data_svg(drawing: Drawing) -> String {
+    let viewbox_width = drawing.viewbox_width;
+    let mut nodes = drawing.nodes;
+    let viewbox_height = 768f64;
+
+    let mut svg = Document::new()
+        .set("viewBox", (0f64, 0f64, viewbox_width, viewbox_height))
+        .set("text-rendering", "optimizeLegibility");
+
+    svg.append(Marker::new()
+        .set("id", "arrowhead")
+        .set("markerWidth", 7)
+        .set("markerHeight", 10)
+        .set("refX", 0)
+        .set("refY", 5)
+        .set("orient", "auto")
+        .set("viewBox", "0 0 10 10")
+        .add(Path::new()
+            .set("d", "M 0 0 L 10 5 L 0 10 z")
+            .set("fill", "black")
+        )
+    );
+    svg.append(Marker::new()
+        .set("id", "arrowheadrev")
+        .set("markerWidth", 7)
+        .set("markerHeight", 10)
+        .set("refX", 0)
+        .set("refY", 5)
+        .set("orient", "auto-start-reverse")
+        .set("viewBox", "0 0 10 10")
+        .add(Path::new()
+            .set("d", "M 0 0 L 10 5 L 0 10 z")
+            .set("fill", "black")
+        )
+    );
+
+    nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    for node in nodes {
+        match node {
+            Node::Div{label, hpos, vpos, width, ..} => {
+                    svg.append(Group::new()
+                        .set("transform", format!("translate({hpos}, {vpos})"))
+                        .add(Rectangle::new()
+                            .set("width", width)
+                            .set("height", 26f64)
+                            .set("stroke", "black")
+                            .set("fill", "none"))
+                        .add(TextElt::new()
+                            .set("text-anchor", "middle")
+                            .set("transform", format!("translate({}, {})", width / 2., 16.))
+                            .set("font-family", "serif") // 'Times New Roman', Times, serif
+                            .set("fill", "black")
+                            .set("stroke", "none")
+                            .add(Text::new(label)))
+                    );
+            },
+            Node::Svg{path, rel, label, ..} => {
+                
+                let mut path_elt = Path::new()
+                    .set("d", path)
+                    .set("stroke", "black");
+                
+                match rel.as_str() {
+                    "actuates" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
+                    "senses" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
+                    _ => {},
+                };
+
+                if let Some(Label{text, hpos, width: _, vpos, ..}) = label {
+                    for (lineno, line) in text.lines().enumerate() {
+                        let translate = if rel == "actuates" { 
+                            format!("translate({}, {})", hpos-12., vpos + 56. + (20. * lineno as f64))
+                        } else { 
+                            format!("translate({}, {})", hpos+12., vpos + 56. + (20. * lineno as f64))
+                        };
+                        let anchor = if rel == "actuates" {
+                            "end"
+                        } else {
+                            "start"
+                        };
+                        svg.append(Group::new()
+                            .add(TextElt::new()
+                                .set("font-family", "ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace")
+                                .set("fill", "black")
+                                .set("stroke", "none")
+                                .set("transform", translate)
+                                .set("text-anchor", anchor)
+                                .add(Text::new(line))
+                            )
+                        );
+                    }
+                }
+
+                svg.append(Group::new()
+                    .add(path_elt)
+                );
+            },
+        }
+    }
+
+    let mut buf = BufWriter::new(Vec::new());
+    svg::write(&mut buf, &svg).unwrap();
+    let bytes = buf.into_inner().unwrap();
+    let svg_str = String::from_utf8(bytes).unwrap();
+    format!("data:image/svg+xml;utf8,{svg_str}")
+}
+
 pub fn app(cx: Scope<AppProps>) -> Element {
     let model = use_state(&cx, || String::from(PLACEHOLDER));
     let drawing = use_state(&cx, Drawing::default);
@@ -554,12 +663,14 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         None => rsx!(div{}),
     }));
 
+    let data_svg = as_data_svg(drawing.get().clone());
+
     cx.render(rsx!{
         div {
             // key: "editor",
             style: "width: 100%; z-index: 20; padding: 1rem;",
             div {
-                style: "max-width: 48rem; margin-left: auto; margin-right: auto; flex-direction: column;",
+                style: "max-width: 36rem; margin-left: auto; margin-right: auto; flex-direction: column;",
                 div {
                     // key: "editor_label",
                     "Model"
@@ -584,27 +695,42 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         "{model}"
                     }
                 }
-                div {
-                    style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
+                div { 
+                    style: "display: flex; flex-direction: row; justify-content: space-between;",
                     div {
-                        span {
-                            style: "color: #000;",
-                            "Syntax: "
+                        style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: calc(100% - 8rem);",
+                        div {
+                            span {
+                                style: "color: #000;",
+                                "Syntax: "
+                            }
+                            span {
+                                style: "font-style: italic;",
+                                "node ... : action ... / percept ... : action ... / percept ..."
+                            }
                         }
-                        span {
-                            style: "font-style: italic;",
-                            "node node ... : action action... / percept percept ... : action... / percept..."
+                        div {
+                            span {
+                                style: "color: #000;",
+                                "Example: "
+                            }
+                            span {
+                                style: "font-style: italic;",
+                                "person microwave food: open, start, stop / beep : heat"
+                            },
                         }
                     }
                     div {
-                        span {
-                            style: "color: #000;",
-                            "Example: "
+                        style: "display: flex; flex-direction: column; align-items: end;",
+                        a {
+                            href: "{data_svg}",
+                            download: "depict.svg",
+                            "Export SVG"
                         }
                         span {
-                            style: "font-style: italic;",
-                            "person microwave food: open, start, stop / beep : heat. person food: stir"
-                        },
+                            style: "font-style: italic; font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity));",
+                            "('Copy Link' to use)"
+                        }
                     }
                 }
                 // div {
@@ -702,7 +828,7 @@ pub fn main() -> io::Result<()> {
 
             app_menu.add_native_item(tao::menu::MenuItem::CloseWindow);
             app_menu.add_native_item(tao::menu::MenuItem::Quit);
-            menu_bar.add_submenu("STAMPEDE", true, app_menu);
+            menu_bar.add_submenu("Depict", true, app_menu);
             menu_bar.add_submenu("Edit", true, edit_menu);
 
             c

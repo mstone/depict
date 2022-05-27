@@ -907,15 +907,6 @@ pub mod layout {
             loc_to_node.insert((*rank, mhr), Loc::Node(wl.clone()));
             node_to_loc.insert(Loc::Node(wl.clone()), (*rank, mhr));
         }
-        // for (rank, paths) in paths_by_rank.iter() {
-        //     let l = *rank;
-        //     for (a, (_cvl, cwl)) in paths.iter().enumerate() {
-        //         let a = OriginalHorizontalRank(a);
-        //         locs_by_level.entry(l).or_insert_with(TiVec::new).push(a);
-        //         loc_to_node.insert((l, a), Loc::Node(cwl.clone()));
-        //         node_to_loc.insert(Loc::Node(cwl.clone()), (l, a));
-        //     }
-        // }
 
         event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V1");
 

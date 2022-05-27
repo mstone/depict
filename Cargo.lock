@@ -647,6 +647,7 @@ dependencies = [
  "petgraph",
  "serde",
  "serde_json",
+ "svg",
  "tao",
  "tokio",
  "tracing",
@@ -2767,6 +2768,12 @@ checksum = "a8b945e45b417b125a8ec51f1b7df2f8df7920367700d1f98aedd21e5735f8b2"
 dependencies = [
  "atty",
 ]
+
+[[package]]
+name = "svg"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e72d8b19ab05827afefcca66bf47040c1e66a0901eb814784c77d4ec118bd309"
 
 [[package]]
 name = "syn"
