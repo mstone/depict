@@ -2118,9 +2118,10 @@ pub mod geometry {
             // .check_termination(Some(200))
             // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
             // .adaptive_rho_interval(Some(25))
-            // .eps_abs(1e-1)
-            // .eps_rel(1e-1)
-            // .max_iter(16_000_000)
+            .eps_abs(1e-1)
+            .eps_rel(1e-1)
+            // .max_iter(16_000)
+            .max_iter(400)
             // .polish(true)
             .verbose(true);
 
@@ -2130,7 +2131,15 @@ pub mod geometry {
         
         let result = prob.solve();
         eprintln!("STATUS {:?}", result);
-        let x = result.x().or_err(LayoutError::OsqpError{error: "failed to solve problem".into()})?;
+        let solution = match result {
+            osqp::Status::Solved(solution) => Ok(solution),
+            osqp::Status::SolvedInaccurate(solution) => Ok(solution),
+            osqp::Status::MaxIterationsReached(solution) => Ok(solution),
+            osqp::Status::TimeLimitReached(solution) => Ok(solution),
+            _ => Err(LayoutError::OsqpError{error: "failed to solve problem".into(),}.in_current_span()),
+        }?;
+        let x = solution.x();
+
         // eprintln!("{:?}", x);
         let mut solutions = V.vars.iter().map(|(_sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
         solutions.sort_by_key(|(a, _)| *a);
