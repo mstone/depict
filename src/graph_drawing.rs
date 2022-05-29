@@ -2111,6 +2111,7 @@ pub mod geometry {
         // let u = &[1., 1., 1.];
 
         let settings = osqp::Settings::default()
+            .adaptive_rho(false)
             // .check_termination(Some(200))
             // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
             // .adaptive_rho_interval(Some(25))
