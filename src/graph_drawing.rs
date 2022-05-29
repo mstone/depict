@@ -1944,7 +1944,7 @@ pub mod geometry {
                 if terminal {
                     let mut terminal_hops = all_objects
                         .iter()
-                        .filter(|obj| { matches!(obj, Loc2::Hop{pshr, ..} if pshr.is_some()) })
+                        .filter(|obj| { matches!(obj, Loc2::Hop{wl: owl, pshr, ..} if *owl == wl && pshr.is_some()) })
                         .collect::<Vec<_>>();
                         #[allow(clippy::unit_return_expecting_ord)]
 
@@ -1955,6 +1955,7 @@ pub mod geometry {
                             unreachable!();
                         }
                     });
+                    event!(Level::TRACE, ?hop_row, ?node, ?terminal_hops, "POS HOP TERMINAL");
 
                     for (ox, hop) in terminal_hops.iter().enumerate() {
                         if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
@@ -1980,7 +1981,7 @@ pub mod geometry {
                 } else {
                     let mut initial_hops = all_objects
                         .iter()
-                        .filter(|obj| { matches!(obj, Loc2::Hop{loc: (_, onhr), ..} if onhr.0 <= num_objects) })
+                        .filter(|obj| { matches!(obj, Loc2::Hop{vl: ovl, loc: (_, onhr), ..} if *ovl == vl && onhr.0 <= num_objects) })
                         .collect::<Vec<_>>();
 
                     #[allow(clippy::unit_return_expecting_ord)]
@@ -1993,6 +1994,8 @@ pub mod geometry {
                             unreachable!();
                         }
                     });
+                    
+                    event!(Level::TRACE, ?hop_row, ?node, ?initial_hops, "POS HOP INITIAL");
 
                     for (ox, hop) in initial_hops.iter().enumerate() {
                         if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
