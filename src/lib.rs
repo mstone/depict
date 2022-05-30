@@ -255,7 +255,7 @@ pub mod parser {
                 let ekind = ItemKind::from(&end);
                 match (ikind, ekind, jkind) {
                     (Seq  , Text  | Br | Sq        , Slash | Colon | Seq) | 
-                    (Seq  , Slash | Colon          , Colon              ) |
+                    (Seq  , Slash | Colon | Comma  , Colon              ) |
                     (Colon, Text  | Br | Sq | Comma, Slash | Colon | Seq) => { 
                         // we eat end; i eats us.
                         self.left().insert(0, end);

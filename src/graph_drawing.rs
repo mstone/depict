@@ -234,12 +234,12 @@ pub mod error {
         }
     }
 
+    /// A trait to use to annotate `&mut` [Option] references values with rich error information.
     pub trait OrErrMutExt {
         type Item;
         fn or_err_mut(&mut self) -> Result<&mut Self::Item, Error>;
     }
-
-    /// A trait to use to annotate `&mut` [Option] references values with rich error information.
+    
     impl<V> OrErrMutExt for Option<V> {
         type Item = V;
         fn or_err_mut(&mut self) -> Result<&mut V, Error> {
@@ -598,6 +598,7 @@ pub mod layout {
         l.iter().filter_map(|i| {
             match i {
                 Item::Text(s) => Some(s.clone()),
+                Item::Seq(s) => Some(helper_path(s).as_slice().join(" ").into()),
                 _ => None
             }
         }).collect::<Vec<_>>()
@@ -666,8 +667,12 @@ pub mod layout {
                     helper(vs, &l[0]);
                 } else {
                     helper_labels(&mut labels, r);
+                    let path = match &l[..] {
+                        [Item::Comma(ls)] => helper_path(ls),
+                        _ => helper_path(l)
+                    };
                     let lvl = Fact{
-                        path: helper_path(l),
+                        path,
                         labels_by_level: labels,
                     };
                     vs.push(lvl);
@@ -676,6 +681,9 @@ pub mod layout {
             Item::Seq(ls) => {
                 vs.push(Fact{path: helper_path(ls), labels_by_level: vec![]})
             },
+            Item::Comma(ls) => {
+                vs.push(Fact{path: helper_path(ls), labels_by_level: vec![]})
+            }
             Item::Text(s) => {
                 vs.push(Fact{path: vec![s.clone()], labels_by_level: vec![]})
             }
