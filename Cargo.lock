@@ -692,6 +692,7 @@ dependencies = [
  "logos",
  "ndarray",
  "osqp",
+ "osqp-rust",
  "petgraph",
  "pomelo",
  "proptest",
@@ -2259,6 +2260,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e075624701220e1d09157ce82af4dc1592429ce7ee300b404a5d4f27ef4271e"
 dependencies = [
  "osqp-sys",
+]
+
+[[package]]
+name = "osqp-rust"
+version = "0.6.2"
+source = "git+https://github.com/mstone/osqp.rs#540ae63b26b6ff87edf7dd00ae6c258e3eca0915"
+dependencies = [
+ "libc",
+ "osqp-rust-sys",
+]
+
+[[package]]
+name = "osqp-rust-sys"
+version = "0.6.2"
+source = "git+https://github.com/mstone/osqp.rs#540ae63b26b6ff87edf7dd00ae6c258e3eca0915"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

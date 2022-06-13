@@ -10,7 +10,7 @@ repository = "https://github.com/mstone/depict"
 
 [dependencies]
 color-spantrace = "0.2"
-depict = { path = "..", version = "0.2", default-features = false, features = [ "desktop", "highs", "minion", "osqp" ] }
+depict = { path = "..", version = "0.2", default-features = false, features = [ "desktop", "highs", "minion", "osqp-rust" ] }
 dioxus = { version = "0.2", features = ["desktop"] }
 futures = "0.3"
 indoc = "1.0"

@@ -133,6 +133,10 @@ pub mod error {
     use petgraph::algo::NegativeCycle;
     use tracing_error::{TracedError, ExtractSpanTrace, SpanTrace, InstrumentError};
 
+    #[cfg(all(feature="osqp", not(feature="osqp-rust")))]
+    use osqp;
+    #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
+    use osqp_rust as osqp;
 
     #[non_exhaustive]
     #[derive(Debug, thiserror::Error)]
@@ -161,7 +165,7 @@ pub mod error {
         #[error("utf8 error")]
         Utf8Error{#[from] source: std::str::Utf8Error},
     }
-    
+
     #[non_exhaustive]
     #[derive(Debug, thiserror::Error)]
     pub enum LayoutError {
@@ -433,7 +437,11 @@ pub mod osqp {
     //! in terms of constrained variables.
     use std::{borrow::Cow, collections::{HashMap, BTreeMap}, fmt::{Debug, Display}, hash::Hash};
 
-    use osqp::{self, CscMatrix};
+    #[cfg(all(feature="osqp", not(feature="osqp-rust")))]
+    use osqp;
+    #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
+    use osqp_rust as osqp;
+
     use rand::Rng;
     use tracing::instrument;
     use tracing_error::InstrumentError;
@@ -631,7 +639,7 @@ pub mod osqp {
     impl<S: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd> Sol for S {}
 
     /// Convert `rows` into an `osqp::CscMatrix` in "compressed sparse column" format.
-    fn as_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial<S>]]) -> CscMatrix<'s> {
+    fn as_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial<S>]]) -> osqp::CscMatrix<'s> {
         let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
         let mut indptr = vec![];
         let mut indices = vec![];
@@ -665,7 +673,7 @@ pub mod osqp {
         for _ in cur_col..=ncols {
             indptr.push(data.len());
         }
-        CscMatrix{
+        osqp::CscMatrix{
             nrows,
             ncols,
             indptr: Cow::Owned(indptr),
@@ -675,7 +683,7 @@ pub mod osqp {
     }
 
     /// Convert `rows` into a *diagonal* `osqp::CscMatrix` in "compressed sparse column" format.
-    pub fn as_diag_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial<S>]) -> CscMatrix<'s> {
+    pub fn as_diag_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial<S>]) -> osqp::CscMatrix<'s> {
         let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
         let mut indptr = vec![];
         let mut indices = vec![];
@@ -707,7 +715,7 @@ pub mod osqp {
         for _ in cur_col..=ncols {
             indptr.push(data.len());
         }
-        CscMatrix{
+        osqp::CscMatrix{
             nrows,
             ncols,
             indptr: Cow::Owned(indptr),
@@ -716,7 +724,7 @@ pub mod osqp {
         }
     }
 
-    impl<'s, S: Sol> From<Constraints<S>> for CscMatrix<'s> {
+    impl<'s, S: Sol> From<Constraints<S>> for osqp::CscMatrix<'s> {
         fn from(c: Constraints<S>) -> Self {
             let a = &c.constrs
                 .iter()
@@ -792,12 +800,12 @@ pub mod osqp {
         }
     }
 
-    /// A debug print helper for dumping `CscMatrix`s
-    pub fn print_tuples(name: &str, m: &CscMatrix) {
+    /// A debug print helper for dumping `osqp::CscMatrix`s
+    pub fn print_tuples(name: &str, m: &osqp::CscMatrix) {
         // conceptually, we walk over the columns, then the rows,
         // recording each non-zero value + its row index, and
         // as we finish each column, the current data length.
-        // let P = CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
+        // let P = osqp::CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
         eprintln!("{name}: {:?}", m);
         let mut n = 0;
         let mut col = 0;
@@ -889,7 +897,7 @@ pub mod osqp {
             // eprintln!("V[{}]: {vars}", vars.len());
             // eprintln!("C[{}]: {csp}", &csp.len());
 
-            let a2: CscMatrix = csp.clone().into();
+            let a2: osqp::CscMatrix = csp.clone().into();
 
             // eprintln!("P2[{},{}]: {P2:?}", P2.nrows, P2.ncols);
             // eprintln!("Q2[{}]: {Q2:?}", Q2.len());
@@ -2809,9 +2817,11 @@ pub mod geometry {
     //! 
     //! 1. the input data need to be organized (here, via [`calculate_sols()`]) so that constraints can be generated and so that the optimization objective can be formed.
     //! 2. then, once constraints and the objective are generated, they need to be formatted as an [osqp::CscMatrix] and associated `&[f64]` slices, passed to [osqp::Problem], and solved.
-    //! 3. then, the resulting [osqp::Solution] needs to be destructured so that the resulting solution values can be returned to [`position_sols()`]'s caller as a [GeometrySolution].
+    //! 3. then, the resulting [osqp_rust::Solution] needs to be destructured so that the resulting solution values can be returned to [`position_sols()`]'s caller as a [GeometrySolution].
 
-    use osqp::CscMatrix;
+    #[cfg(feature="osqp-rust")]
+    use osqp_rust as osqp;
+
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::visit::EdgeRef;
     use sorted_vec::SortedVec;
@@ -3382,7 +3392,6 @@ pub mod geometry {
             }
         }
 
-        use osqp::{Problem};
 
         let n = v.len();
         // eprintln!("VARS: {V:#?}");
@@ -3391,7 +3400,7 @@ pub mod geometry {
         // conceptually, we walk over the columns, then the rows, 
         // recording each non-zero value + its row index, and 
         // as we finish each column, the current data length.
-        // let P = CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
+        // let P = osqp::CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
 
         let sparse_pd = &pd[..];
         eprintln!("sparsePd: {sparse_pd:?}");
@@ -3414,7 +3423,7 @@ pub mod geometry {
         eprintln!("V[{}]: {v}", v.len());
         eprintln!("C[{}]: {c}", &c.len());
 
-        let a2: CscMatrix = c.into();
+        let a2: osqp::CscMatrix = c.into();
 
         eprintln!("P2[{},{}]: {p2:?}", p2.nrows, p2.ncols);
         eprintln!("Q2[{}]: {q2:?}", q2.len());
@@ -3444,7 +3453,7 @@ pub mod geometry {
             .verbose(true);
 
         // let mut prob = Problem::new(P, q, A, l, u, &settings)
-        let mut prob = Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], &settings)
+        let mut prob = osqp::Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], &settings)
             .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
         
         let result = prob.solve();
