@@ -422,6 +422,342 @@ pub mod index {
 
 }
 
+pub mod osqp {
+    use std::{borrow::Cow, collections::{HashMap, BTreeMap}, fmt::Display};
+
+    use osqp::{self, CscMatrix};
+
+    use super::index::{LocSol, HopSol};
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub enum AnySol {
+        L(LocSol),
+        R(LocSol),
+        S(HopSol),
+        T(usize)
+    }
+
+    #[derive(Debug)]
+    pub struct Vars {
+        vars: HashMap<AnySol, Var>
+    }
+
+    impl Display for Vars {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let vs = self.vars.iter().map(|(a, b)| (b, a)).collect::<BTreeMap<_, _>>();
+            write!(f, "Vars {{")?;
+            for (var, _sol) in vs.iter() {
+                write!(f, "{var}, ")?;
+            }
+            write!(f, "}}")
+        }
+    }
+
+    impl Display for Var {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "v{}({})", self.index, self.sol)
+        }
+    }
+
+    impl Display for Monomial {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self.coeff {
+                x if x == -1. => write!(f, "-{}", self.var),
+                x if x == 1. => write!(f, "{}", self.var),
+                _ => write!(f, "{}{}", self.coeff, self.var)
+            }
+        }
+    }
+
+    impl Display for AnySol {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                AnySol::L(loc) => write!(f, "l{}", loc.0),
+                AnySol::R(loc) => write!(f, "r{}", loc.0),
+                AnySol::S(hop) => write!(f, "s{}", hop.0),
+                AnySol::T(idx) => write!(f, "t{}", idx),
+            }
+        }
+    }
+
+    impl Display for Constraints {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            writeln!(f, "Constraints {{")?;
+            for (l, comb, u) in self.constrs.iter() {
+                write!(f, "    {l} <= ")?;
+                for term in comb.iter() {
+                    write!(f, "{term} ")?;
+                }
+                if *u != f64::INFINITY {
+                    writeln!(f, "<= {u},")?;
+                } else {
+                    writeln!(f, ",")?;
+                }
+            }
+            write!(f, "}}")
+        }
+    }
+
+    impl Vars {
+        pub fn new() -> Self {
+            Self { vars: Default::default() }
+        }
+
+        pub fn len(&self) -> usize {
+            self.vars.len()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.len() == 0
+        }
+
+        pub fn get(&mut self, index: AnySol) -> Monomial {
+            let len = self.vars.len();
+            let var = self.vars
+                .entry(index)
+                .or_insert(Var{index: len, sol: index});
+            From::from(&*var)
+        }
+
+        pub fn iter(&self) -> impl Iterator<Item=(&AnySol, &Var)> {
+            self.vars.iter()
+        }
+    }
+
+    impl Default for Vars {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    pub struct Constraints {
+        constrs: Vec<(f64, Vec<Monomial>, f64)>,
+    }
+
+    impl Constraints {
+        pub fn new() -> Self {
+            Self { constrs: Default::default() }
+        }
+
+        pub fn len(&self) -> usize {
+            self.constrs.len()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.len() == 0
+        }
+
+        pub fn push(&mut self, value: (f64, Vec<Monomial>, f64)) {
+            self.constrs.push(value)
+        }
+
+        pub fn iter(&self) -> impl Iterator<Item=&(f64, Vec<Monomial>, f64)> {
+            self.constrs.iter()
+        }
+
+        // L <= Ax <= U 
+        /// l < r => r - l > 0 => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
+        pub fn leq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
+            if lhs == rhs {
+                return
+            }
+            self.constrs.push((0., vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
+        }
+
+        /// l + c < r => c < r - l => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
+        pub fn leqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+            self.constrs.push((c, vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
+        }
+
+        /// l > r => l - r > 0 => A += [-1(r) ... 1(s) ...], L += 0, U += (FMAX/infty)
+        pub fn geq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
+            if lhs == rhs {
+                return
+            }
+            self.constrs.push((0., vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
+        }
+
+        /// l > r + c => l - r > c => A += [1(r) ... -1(s) ...], L += c, U += (FMAX/infty)
+        pub fn geqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+            self.constrs.push((c, vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
+        }
+
+        pub fn eq(&mut self, lc: &[Monomial]) {
+            self.constrs.push((0., Vec::from(lc), 0.));
+        }
+
+        pub fn sym(&mut self, v: &mut Vars, pd: &mut Vec<Monomial>, lhs: AnySol, rhs: AnySol) {
+            // P[i, j] = 100 => obj += 100 * x_i * x_j
+            // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
+            // x_k = x_i - x_j => x_k - x_i + x_j = 0
+            // then P[k,k] = 100, and [l,A,u] += [0],[1(k), -1(i), 1(j)],[0]
+            // 0 <= k-i+j && k-i+j <= 0    =>    i <= k+j && k+j <= i       => i-j <= k && k <= i-j => k == i-j
+            // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
+            // obj.push(...)
+            let t = v.get(AnySol::T(v.vars.len()));
+            let symmetry_cost = 100.0;
+            pd.push(symmetry_cost * t);
+            self.eq(&[t, -v.get(lhs), v.get(rhs)]);
+        }
+    }
+
+    impl Default for Constraints {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    fn as_csc_matrix<'s>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial]]) -> CscMatrix<'s> {
+        let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
+        let mut indptr = vec![];
+        let mut indices = vec![];
+        let mut data = vec![];
+        let mut cur_col = 0;
+        for (row, comb) in rows.iter().enumerate() {
+            for term in comb.iter() {
+                if term.coeff != 0. {
+                    let old = cols
+                        .entry(term.var.index)
+                        .or_default()
+                        .insert(row, term.coeff);
+                    assert!(old.is_none());
+                }
+            }
+        }
+        let nrows = nrows.unwrap_or(rows.len());
+        let ncols = ncols.unwrap_or(cols.len());
+        // indptr.push(data.len());
+        for (col, rows) in cols.iter() {
+            for _ in cur_col..=*col {
+                indptr.push(data.len());
+            }
+            for (row, coeff) in rows {
+                indices.push(*row);
+                data.push(*coeff);
+            }
+            // indptr.push(data.len());
+            cur_col = *col+1;
+        }
+        for _ in cur_col..=ncols {
+            indptr.push(data.len());
+        }
+        CscMatrix{
+            nrows,
+            ncols,
+            indptr: Cow::Owned(indptr),
+            indices: Cow::Owned(indices),
+            data: Cow::Owned(data),
+        }
+    }
+
+    pub fn as_diag_csc_matrix<'s>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial]) -> CscMatrix<'s> {
+        let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
+        let mut indptr = vec![];
+        let mut indices = vec![];
+        let mut data = vec![];
+        let mut cur_col = 0;
+        for (_, term) in rows.iter().enumerate() {
+            if term.coeff != 0. {
+                let old = cols
+                    .entry(term.var.index)
+                    .or_default()
+                    .insert(term.var.index, term.coeff);
+                assert!(old.is_none());
+            }
+        }
+        let nrows = nrows.unwrap_or(rows.len());
+        let ncols = ncols.unwrap_or(cols.len());
+        // indptr.push(data.len());
+        for (col, rows) in cols.iter() {
+            for _ in cur_col..=*col {
+                indptr.push(data.len());
+            }
+            for (row, coeff) in rows {
+                indices.push(*row);
+                data.push(*coeff);
+            }
+            // indptr.push(data.len());
+            cur_col = *col+1;
+        }
+        for _ in cur_col..=ncols {
+            indptr.push(data.len());
+        }
+        CscMatrix{
+            nrows,
+            ncols,
+            indptr: Cow::Owned(indptr),
+            indices: Cow::Owned(indices),
+            data: Cow::Owned(data),
+        }
+    }
+
+    impl<'s> From<Constraints> for CscMatrix<'s> {
+        fn from(c: Constraints) -> Self {
+            let a = &c.constrs
+                .iter()
+                .map(|(_, comb, _)| &comb[..])
+                .collect::<Vec<_>>();
+            as_csc_matrix(None, None, a)
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+    pub struct Var {
+        pub index: usize,
+        pub sol: AnySol,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct Monomial {
+        pub var: Var,
+        pub coeff: f64,
+    }
+
+    impl std::ops::Neg for Monomial {
+        type Output = Self;
+        fn neg(mut self) -> Self::Output {
+            self.coeff = -self.coeff;
+            self
+        }
+    }
+
+    impl From<&Var> for Monomial {
+        fn from(var: &Var) -> Self {
+            Monomial{ var: *var, coeff: 1. }
+        }
+    }
+
+    impl std::ops::Mul<Monomial> for f64 {
+        type Output = Monomial;
+        fn mul(self, mut rhs: Monomial) -> Self::Output {
+            rhs.coeff *= self;
+            rhs
+        }
+    }
+
+    pub fn print_tuples(name: &str, m: &CscMatrix) {
+        // conceptually, we walk over the columns, then the rows,
+        // recording each non-zero value + its row index, and
+        // as we finish each column, the current data length.
+        // let P = CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
+        eprintln!("{name}: {:?}", m);
+        let mut n = 0;
+        let mut col = 0;
+        let indptr = &m.indptr[..];
+        let indices = &m.indices[..];
+        let data = &m.data[..];
+        while n < data.len() {
+            while indptr[col+1] <= n {
+                col += 1;
+            }
+            let row = indices[n];
+            let val = data[n];
+            n += 1;
+            eprintln!("{name}[{},{}] = {}", row, col, val);
+        }
+    }
+    
+}
 
 pub mod layout {
     //! Choose geometric relations to use to express model relationships
@@ -1256,7 +1592,7 @@ pub mod geometry {
     //! 2. then, once constraints and the objective are generated, they need to be formatted as an [osqp::CscMatrix] and associated `&[f64]` slices, passed to [osqp::Problem], and solved.
     //! 3. then, the resulting [osqp::Solution] needs to be destructured so that the resulting solution values can be returned to [`position_sols()`]'s caller as a [LayoutSolution].
 
-    use osqp::{self, CscMatrix};
+    use osqp::CscMatrix;
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::visit::EdgeRef;
     use sorted_vec::SortedVec;
@@ -1264,13 +1600,15 @@ pub mod geometry {
     use tracing_error::InstrumentError;
     use typed_index_collections::TiVec;
 
-    use crate::graph_drawing::error::{LayoutError, OrErrExt};
+    use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples};
+
+    use super::error::{LayoutError};
+    use super::osqp::{AnySol, Constraints, Monomial, Vars};
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
     use super::layout::{Loc, Hop, Vcg, Placement};
 
-    use std::borrow::{Cow};
     use std::cmp::max;
     use std::collections::{HashMap, BTreeMap, HashSet};
     use std::fmt::{Debug, Display};
@@ -1410,278 +1748,6 @@ pub mod geometry {
         pub ts: TiVec<VerticalRank, f64>,
     }
 
-    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub enum AnySol {
-        L(LocSol),
-        R(LocSol),
-        S(HopSol),
-        T(usize)
-    }
-
-    #[derive(Debug)]
-    pub struct Vars {
-        vars: HashMap<AnySol, Var>
-    }
-
-    impl Display for Vars {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let vs = self.vars.iter().map(|(a, b)| (b, a)).collect::<BTreeMap<_, _>>();
-            write!(f, "Vars {{")?;
-            for (var, _sol) in vs.iter() {
-                write!(f, "{var}, ")?;
-            }
-            write!(f, "}}")
-        }
-    }
-
-    impl Display for Var {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "v{}({})", self.index, self.sol)
-        }
-    }
-
-    impl Display for Monomial {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self.coeff {
-                x if x == -1. => write!(f, "-{}", self.var),
-                x if x == 1. => write!(f, "{}", self.var),
-                _ => write!(f, "{}{}", self.coeff, self.var)
-            }
-        }
-    }
-
-    impl Display for AnySol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                AnySol::L(loc) => write!(f, "l{}", loc.0),
-                AnySol::R(loc) => write!(f, "r{}", loc.0),
-                AnySol::S(hop) => write!(f, "s{}", hop.0),
-                AnySol::T(idx) => write!(f, "t{}", idx),
-            }
-        }
-    }
-
-    impl Display for Constraints {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            writeln!(f, "Constraints {{")?;
-            for (l, comb, u) in self.constrs.iter() {
-                write!(f, "    {l} <= ")?;
-                for term in comb.iter() {
-                    write!(f, "{term} ")?;
-                }
-                if *u != f64::INFINITY {
-                    writeln!(f, "<= {u},")?;
-                } else {
-                    writeln!(f, ",")?;
-                }
-            }
-            write!(f, "}}")
-        }
-    }
-
-    impl Vars {
-        fn new() -> Self {
-            Self { vars: Default::default() }
-        }
-
-        fn get(&mut self, index: AnySol) -> Monomial {
-            let len = self.vars.len();
-            let var = self.vars
-                .entry(index)
-                .or_insert(Var{index: len, sol: index});
-            From::from(&*var)
-        }
-    }
-
-    pub struct Constraints {
-        constrs: Vec<(f64, Vec<Monomial>, f64)>,
-    }
-
-    impl Constraints {
-        pub fn new() -> Self {
-            Self { constrs: Default::default() }
-        }
-
-        // L <= Ax <= U 
-        /// l < r => r - l > 0 => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        pub fn leq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
-            if lhs == rhs {
-                return
-            }
-            self.constrs.push((0., vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
-        }
-
-        /// l + c < r => c < r - l => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        pub fn leqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
-            self.constrs.push((c, vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
-        }
-
-        /// l > r => l - r > 0 => A += [-1(r) ... 1(s) ...], L += 0, U += (FMAX/infty)
-        pub fn geq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
-            if lhs == rhs {
-                return
-            }
-            self.constrs.push((0., vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
-        }
-
-        /// l > r + c => l - r > c => A += [1(r) ... -1(s) ...], L += c, U += (FMAX/infty)
-        pub fn geqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
-            self.constrs.push((c, vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
-        }
-
-        pub fn eq(&mut self, lc: &[Monomial]) {
-            self.constrs.push((0., Vec::from(lc), 0.));
-        }
-
-        pub fn sym(&mut self, v: &mut Vars, pd: &mut Vec<Monomial>, lhs: AnySol, rhs: AnySol) {
-            // P[i, j] = 100 => obj += 100 * x_i * x_j
-            // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
-            // x_k = x_i - x_j => x_k - x_i + x_j = 0
-            // then P[k,k] = 100, and [l,A,u] += [0],[1(k), -1(i), 1(j)],[0]
-            // 0 <= k-i+j && k-i+j <= 0    =>    i <= k+j && k+j <= i       => i-j <= k && k <= i-j => k == i-j
-            // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
-            // obj.push(...)
-            let t = v.get(AnySol::T(v.vars.len()));
-            let symmetry_cost = 100.0;
-            pd.push(symmetry_cost * t);
-            self.eq(&[t, -v.get(lhs), v.get(rhs)]);
-        }
-    }
-
-    impl Default for Constraints {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-
-    fn as_csc_matrix<'s>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial]]) -> CscMatrix<'s> {
-        let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
-        let mut indptr = vec![];
-        let mut indices = vec![];
-        let mut data = vec![];
-        let mut cur_col = 0;
-        for (row, comb) in rows.iter().enumerate() {
-            for term in comb.iter() {
-                if term.coeff != 0. {
-                    let old = cols
-                        .entry(term.var.index)
-                        .or_default()
-                        .insert(row, term.coeff);
-                    assert!(old.is_none());
-                }
-            }
-        }
-        let nrows = nrows.unwrap_or(rows.len());
-        let ncols = ncols.unwrap_or(cols.len());
-        // indptr.push(data.len());
-        for (col, rows) in cols.iter() {
-            for _ in cur_col..=*col {
-                indptr.push(data.len());
-            }
-            for (row, coeff) in rows {
-                indices.push(*row);
-                data.push(*coeff);
-            }
-            // indptr.push(data.len());
-            cur_col = *col+1;
-        }
-        for _ in cur_col..=ncols {
-            indptr.push(data.len());
-        }
-        CscMatrix{
-            nrows,
-            ncols,
-            indptr: Cow::Owned(indptr),
-            indices: Cow::Owned(indices),
-            data: Cow::Owned(data),
-        }
-    }
-
-    fn as_diag_csc_matrix<'s>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial]) -> CscMatrix<'s> {
-        let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
-        let mut indptr = vec![];
-        let mut indices = vec![];
-        let mut data = vec![];
-        let mut cur_col = 0;
-        for (_, term) in rows.iter().enumerate() {
-            if term.coeff != 0. {
-                let old = cols
-                    .entry(term.var.index)
-                    .or_default()
-                    .insert(term.var.index, term.coeff);
-                assert!(old.is_none());
-            }
-        }
-        let nrows = nrows.unwrap_or(rows.len());
-        let ncols = ncols.unwrap_or(cols.len());
-        // indptr.push(data.len());
-        for (col, rows) in cols.iter() {
-            for _ in cur_col..=*col {
-                indptr.push(data.len());
-            }
-            for (row, coeff) in rows {
-                indices.push(*row);
-                data.push(*coeff);
-            }
-            // indptr.push(data.len());
-            cur_col = *col+1;
-        }
-        for _ in cur_col..=ncols {
-            indptr.push(data.len());
-        }
-        CscMatrix{
-            nrows,
-            ncols,
-            indptr: Cow::Owned(indptr),
-            indices: Cow::Owned(indices),
-            data: Cow::Owned(data),
-        }
-    }
-
-    impl<'s> From<Constraints> for CscMatrix<'s> {
-        fn from(c: Constraints) -> Self {
-            let a = &c.constrs
-                .iter()
-                .map(|(_, comb, _)| &comb[..])
-                .collect::<Vec<_>>();
-            as_csc_matrix(None, None, a)
-        }
-    }
-
-    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
-    pub struct Var {
-        index: usize,
-        sol: AnySol,
-    }
-
-    #[derive(Clone, Copy, Debug)]
-    pub struct Monomial {
-        var: Var,
-        coeff: f64,
-    }
-
-    impl std::ops::Neg for Monomial {
-        type Output = Self;
-        fn neg(mut self) -> Self::Output {
-            self.coeff = -self.coeff;
-            self
-        }
-    }
-
-    impl From<&Var> for Monomial {
-        fn from(var: &Var) -> Self {
-            Monomial{ var: *var, coeff: 1. }
-        }
-    }
-
-    impl std::ops::Mul<Monomial> for f64 {
-        type Output = Monomial;
-        fn mul(self, mut rhs: Monomial) -> Self::Output {
-            rhs.coeff *= self;
-            rhs
-        }
-    }
-    
     pub fn position_sols<'s, V, E>(
         vcg: &'s Vcg<V, E>,
         placement: &'s Placement<V>,
@@ -2066,15 +2132,15 @@ pub mod geometry {
         }
 
         // add non-negativity constraints for all vars
-        for (sol, var) in V.vars.iter() {
+        for (sol, var) in V.iter() {
             if matches!(sol, AnySol::L(_) | AnySol::R(_) | AnySol::S(_)) {
-                C.constrs.push((0., vec![var.into()], f64::INFINITY));
+                C.push((0., vec![var.into()], f64::INFINITY));
             }
         }
 
         use osqp::{Problem};
 
-        let n = V.vars.len();
+        let n = V.len();
         // eprintln!("VARS: {V:#?}");
         // let nnz = Pd.iter().filter(|v| v.coeff != 0.).count();
         // P, q, A, l, u.
@@ -2097,12 +2163,12 @@ pub mod geometry {
 
         let mut L2 = vec![];
         let mut U2 = vec![];
-        for (l, _, u) in C.constrs.iter() {
+        for (l, _, u) in C.iter() {
             L2.push(*l);
             U2.push(*u);
         }
-        eprintln!("V[{}]: {V}", V.vars.len());
-        eprintln!("C[{}]: {C}", &C.constrs.len());
+        eprintln!("V[{}]: {V}", V.len());
+        eprintln!("C[{}]: {C}", &C.len());
 
         let A2: CscMatrix = C.into();
 
@@ -2149,7 +2215,7 @@ pub mod geometry {
         let x = solution.x();
 
         // eprintln!("{:?}", x);
-        let mut solutions = V.vars.iter().map(|(_sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
+        let mut solutions = V.iter().map(|(_sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
         solutions.sort_by_key(|(a, _)| *a);
         for (var, val) in solutions {
             if !matches!(var.sol, AnySol::T(_)) {
@@ -2161,7 +2227,7 @@ pub mod geometry {
         // eprintln!("R: {:.2?}\n", rv);
         // eprintln!("S: {:.2?}\n", sv);
         let ts = row_height_offsets.values().copied().collect::<TiVec<VerticalRank, _>>();
-        let mut ls = V.vars.iter()
+        let mut ls = V.iter()
             .filter_map(|(sol, var)| {
                 if let AnySol::L(l) = sol { 
                     Some((l, x[var.index]))
@@ -2174,7 +2240,7 @@ pub mod geometry {
         eprintln!("ls: {ls:?}");
         let ls = ls.iter().map(|(_, v)| *v).collect::<TiVec<LocSol, _>>();
 
-        let mut rs = V.vars.iter()
+        let mut rs = V.iter()
             .filter_map(|(sol, var)| {
                 if let AnySol::R(r) = sol { 
                     Some((r, x[var.index]))
@@ -2187,7 +2253,7 @@ pub mod geometry {
         eprintln!("rs: {rs:?}");
         let rs = rs.iter().map(|(_, v)| *v).collect::<TiVec<LocSol, _>>();
 
-        let mut ss = V.vars.iter()
+        let mut ss = V.iter()
             .filter_map(|(sol, var)| {
                 if let AnySol::S(s) = sol { 
                     Some((s, x[var.index]))
@@ -2205,27 +2271,6 @@ pub mod geometry {
         Ok(res)
     }
 
-    fn print_tuples(name: &str, m: &CscMatrix) {
-        // conceptually, we walk over the columns, then the rows,
-        // recording each non-zero value + its row index, and
-        // as we finish each column, the current data length.
-        // let P = CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
-        eprintln!("{name}: {:?}", m);
-        let mut n = 0;
-        let mut col = 0;
-        let indptr = &m.indptr[..];
-        let indices = &m.indices[..];
-        let data = &m.data[..];
-        while n < data.len() {
-            while indptr[col+1] <= n {
-                col += 1;
-            }
-            let row = indices[n];
-            let val = data[n];
-            n += 1;
-            eprintln!("{name}[{},{}] = {}", row, col, val);
-        }
-    }
 }
 
 #[cfg(test)]
