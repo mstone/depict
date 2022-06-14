@@ -433,6 +433,19 @@ fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     console_error_panic_hook::set_once();
 
+    use osqp2;
+    let settings = osqp2::Settings::default()
+        .adaptive_rho(false)
+        // .check_termination(Some(200))
+        // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
+        // .adaptive_rho_interval(Some(25))
+        .eps_abs(1e-1)
+        .eps_rel(1e-1)
+        // .max_iter(16_000)
+        .max_iter(400)
+        // .polish(true)
+        .verbose(true);
+
     dioxus::web::launch_with_props(
         app, 
         AppProps { 

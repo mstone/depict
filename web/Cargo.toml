@@ -16,6 +16,7 @@ dioxus = { version = "0.2", features = ["fermi", "web"] }
 futures = "0.3"
 indoc = "1.0"
 log = "0.4.6"
+osqp2 = { version = "0.6", path = "/Users/mstone/src/osqp.rs" }
 petgraph = { version = "0.6", features = ["serde-1"] }
 reqwasm = "0.5"
 serde = "1"
