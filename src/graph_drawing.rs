@@ -1555,8 +1555,238 @@ pub mod layout {
         }
     }
 
+    /// A placement solver based on the [minion](https://github.com/minion/minion) constraint solver
+    pub mod osqp {
+        use std::collections::{BTreeMap, HashMap};
+        use std::fmt::{Debug, Display};
+        use std::hash::Hash;
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        use ndarray::Array2;
+        use petgraph::Graph;
+        use petgraph::dot::Dot;
+        use tracing::{event, Level};
+        use tracing_error::InstrumentError;
+
+        use crate::graph_drawing::error::{Error, RankingError, OrErrMutExt};
+        use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
+        use crate::graph_drawing::layout::{Hop, Loc, or_insert};
+
+        use super::Placement;
+
+        /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
+        #[allow(clippy::type_complexity)]
+        pub fn minimize_edge_crossing<V>(
+            placement: &Placement<V>
+        ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
+            V: Clone + Debug + Display + Ord + Hash
+        {
+            let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
+            
+            if hops_by_level.is_empty() {
+                return Ok((0, BTreeMap::new()));
+            }
+            #[allow(clippy::unwrap_used)]
+            let max_level = *hops_by_level.keys().max().unwrap();
+            #[allow(clippy::unwrap_used)]
+            let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
+
+            event!(Level::DEBUG, %max_level, %max_width, "max_level, max_width");
+
+            let mut csp = String::new();
+
+            csp.push_str("MINION 3\n");
+            csp.push_str("**VARIABLES**\n");
+            csp.push_str("BOUND csum {0..1000}\n");
+            for (rank, locs) in locs_by_level.iter() {
+                csp.push_str(&format!("BOOL x{}[{},{}]\n", rank, locs.len(), locs.len()));
+            }
+            for rank in 0..locs_by_level.len() - 1 {
+                let rank = VerticalRank(rank);
+                let w1 = locs_by_level[&rank].len();
+                let w2 = locs_by_level[&(rank+1)].len();
+                csp.push_str(&format!("BOOL c{}[{},{},{},{}]\n", rank, w1, w2, w1, w2));
+            }
+            csp.push_str("\n**SEARCH**\n");
+            csp.push_str("MINIMISING csum\n");
+            // csp.push_str("PRINT ALL\n");
+            csp.push_str("PRINT [[csum]]\n");
+            for (rank, _) in locs_by_level.iter() {
+                csp.push_str(&format!("PRINT [[x{}]]\n", rank));
+            }
+            // for rank in 0..max_level {
+            //     csp.push_str(&format!("PRINT [[c{}]]\n", rank));
+            // }
+            csp.push_str("\n**CONSTRAINTS**\n");
+            for (rank, locs) in locs_by_level.iter() {
+                let l = rank;
+                let n = locs.len();
+                // let n = max_width;
+                for a in 0..n {
+                    csp.push_str(&format!("sumleq(x{l}[{a},{a}],0)\n", l=l, a=a));
+                    for b in 0..n {
+                        if a != b {
+                            csp.push_str(&format!("sumleq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                            csp.push_str(&format!("sumgeq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                            for c in 0..(n) {
+                                if b != c && a != c {
+                                    csp.push_str(&format!("sumleq([x{l}[{c},{b}], x{l}[{b},{a}], -1],x{l}[{c},{a}])\n", l=l, a=a, b=b, c=c));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for (k, hops) in hops_by_level.iter() {
+                if *k <= max_level {
+                    for Hop{mhr: u1, nhr: v1, ..} in hops.iter() {
+                        for Hop{mhr: u2, nhr: v2, ..}  in hops.iter() {
+                            // if (u1,v1) != (u2,v2) { // BUG!
+                            if u1 != u2 && v1 != v2 {
+                                csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u2},{u1}],x{j}[{v1},{v2}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=*k+1));
+                                csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u1},{u2}],x{j}[{v2},{v1}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=*k+1));
+                                // csp.push_str(&format!("sumleq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
+                                // csp.push_str(&format!("sumgeq(c{k}[{a},{c},{b},{d}],c{k}[{b},{d},{a},{c}])\n", a=a, b=b, c=c, d=d, k=k));
+                            }
+                        }
+                    }
+                }
+            }
+            csp.push_str("\nsumleq([");
+            for rank in 0..=max_level.0 {
+                if rank > 0 {
+                    csp.push(',');
+                }
+                csp.push_str(&format!("c{}[_,_,_,_]", rank));
+            }
+            csp.push_str("],csum)\n");
+            csp.push_str("sumgeq([");
+            for rank in 0..max_level.0 {
+                if rank > 0 {
+                    csp.push(',');
+                }
+                csp.push_str(&format!("c{}[_,_,_,_]", rank));
+            }
+            csp.push_str("],csum)\n");
+            csp.push_str("\n\n**EOF**");
+
+            event!(Level::DEBUG, %csp, "CSP");
+
+
+            // std::process::exit(0);
+
+            let mut minion = Command::new("minion");
+            minion
+                .arg("-printsolsonly")
+                .arg("-printonlyoptimal")
+                // .arg("-timelimit")
+                // .arg("30")
+                .arg("--")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped());
+            let mut child = minion.spawn().map_err(|e| Error::from(RankingError::from(e).in_current_span()))?;
+            let stdin = child.stdin.or_err_mut()?;
+            stdin.write_all(csp.as_bytes()).map_err(|e| Error::from(RankingError::from(e).in_current_span()))?;
+
+            let output = child
+                .wait_with_output()
+                .map_err(|e| Error::from(RankingError::from(e).in_current_span()))?;
+
+            let outs = std::str::from_utf8(&output.stdout[..]).map_err(|e| Error::from(RankingError::from(e).in_current_span()))?;
+
+            event!(Level::DEBUG, %outs, "CSP OUT");
+
+            // std::process::exit(0);
+
+            let lines = outs.split('\n').collect::<Vec<_>>();
+            let cn_line = lines[2];
+            event!(Level::DEBUG, %cn_line, "cn line");
+            
+            let crossing_number = cn_line
+                .trim()
+                .parse::<usize>()
+                .expect("unable to parse crossing number");
+
+            // std::process::exit(0);
+            
+            let solns = &lines[3..lines.len()];
+            
+            event!(Level::DEBUG, ?lines, ?solns, ?crossing_number, "LINES, SOLNS, CN");
+
+            let mut perm = Vec::<Array2<i32>>::new();
+            for (rank, locs) in locs_by_level.iter() {
+                let mut arr = Array2::<i32>::zeros((locs.len(), locs.len()));
+                let parsed_solns = solns[rank.0]
+                    .split(' ')
+                    .filter_map(|s| {
+                        s
+                            .trim()
+                            .parse::<i32>()
+                            .ok()
+                    })
+                    .collect::<Vec<_>>();
+                for (n, ix) in arr.iter_mut().enumerate() {
+                    *ix = parsed_solns[n];
+                }
+                perm.push(arr);
+            }
+            // let perm = perm.into_iter().map(|p| p.permuted_axes([1, 0])).collect::<Vec<_>>();
+            event!(Level::TRACE, ?perm, "PERM");
+            // for (n, p) in perm.iter().enumerate() {
+            //     event!(Level::TRACE, %n, ?p, "PERM2");
+            // };
+
+            let mut solved_locs = BTreeMap::new();
+            for (n, p) in perm.iter().enumerate() {
+                let n = VerticalRank(n);
+                let mut sums = p.rows().into_iter().enumerate().map(|(i, r)| (OriginalHorizontalRank(i), r.sum() as usize)).collect::<Vec<_>>();
+                sums.sort_by_key(|(_i,s)| *s);
+                // eprintln!("row sums: {:?}", sums);
+                event!(Level::TRACE, %n, ?p, ?sums, "PERM2");
+                for (shr, (i,_s)) in sums.into_iter().enumerate() {
+                    let shr = SolvedHorizontalRank(shr);
+                    solved_locs.entry(n).or_insert_with(BTreeMap::new).insert(i, shr);
+                }
+            }
+            event!(Level::DEBUG, ?solved_locs, "SOLVED_LOCS");
+
+            let mut layout_debug = Graph::<String, String>::new();
+            let mut layout_debug_vxmap = HashMap::new();
+            for ((vl, wl), hops) in hops_by_edge.iter() {
+                // if *vl == "root" { continue; }
+                let vn = node_to_loc[&Loc::Node(vl.clone())];
+                let wn = node_to_loc[&Loc::Node(wl.clone())];
+                let vshr = solved_locs[&vn.0][&vn.1];
+                let wshr = solved_locs[&wn.0][&wn.1];
+
+                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
+                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
+
+                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
+                    let shr = solved_locs[lvl][mhr];
+                    let shrd = solved_locs[&(*lvl+1)][nhr];
+                    let lvl1 = *lvl+1;
+                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
+                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
+                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
+                    if n == 0 {
+                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
+                    }
+                    if n == hops.len()-1 {
+                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
+                    }
+                }
+            }
+            let layout_debug_dot = Dot::new(&layout_debug);
+            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
+
+            Ok((crossing_number, solved_locs))
+        }
+    }
+
     /// Solve for horizontal ranks that minimize edge crossing
-    pub use minion::minimize_edge_crossing;
+    pub use self::osqp::minimize_edge_crossing;
 }
 
 pub mod geometry {
