@@ -423,26 +423,16 @@ pub mod index {
 }
 
 pub mod osqp {
-    use std::{borrow::Cow, collections::{HashMap, BTreeMap}, fmt::Display};
+    use std::{borrow::Cow, collections::{HashMap, BTreeMap}, fmt::{Debug, Display}, hash::Hash};
 
     use osqp::{self, CscMatrix};
 
-    use super::index::{LocSol, HopSol};
-
-    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub enum AnySol {
-        L(LocSol),
-        R(LocSol),
-        S(HopSol),
-        T(usize)
-    }
-
     #[derive(Debug)]
-    pub struct Vars {
-        vars: HashMap<AnySol, Var>
+    pub struct Vars<S: Sol> {
+        vars: HashMap<S, Var<S>>
     }
 
-    impl Display for Vars {
+    impl<S: Sol> Display for Vars<S> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let vs = self.vars.iter().map(|(a, b)| (b, a)).collect::<BTreeMap<_, _>>();
             write!(f, "Vars {{")?;
@@ -453,13 +443,13 @@ pub mod osqp {
         }
     }
 
-    impl Display for Var {
+    impl<S: Sol> Display for Var<S> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "v{}({})", self.index, self.sol)
         }
     }
 
-    impl Display for Monomial {
+    impl<S: Sol> Display for Monomial<S> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self.coeff {
                 x if x == -1. => write!(f, "-{}", self.var),
@@ -469,18 +459,7 @@ pub mod osqp {
         }
     }
 
-    impl Display for AnySol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                AnySol::L(loc) => write!(f, "l{}", loc.0),
-                AnySol::R(loc) => write!(f, "r{}", loc.0),
-                AnySol::S(hop) => write!(f, "s{}", hop.0),
-                AnySol::T(idx) => write!(f, "t{}", idx),
-            }
-        }
-    }
-
-    impl Display for Constraints {
+    impl<S: Sol> Display for Constraints<S> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             writeln!(f, "Constraints {{")?;
             for (l, comb, u) in self.constrs.iter() {
@@ -498,7 +477,7 @@ pub mod osqp {
         }
     }
 
-    impl Vars {
+    impl<S: Sol> Vars<S> {
         pub fn new() -> Self {
             Self { vars: Default::default() }
         }
@@ -511,7 +490,7 @@ pub mod osqp {
             self.len() == 0
         }
 
-        pub fn get(&mut self, index: AnySol) -> Monomial {
+        pub fn get(&mut self, index: S) -> Monomial<S> {
             let len = self.vars.len();
             let var = self.vars
                 .entry(index)
@@ -519,22 +498,22 @@ pub mod osqp {
             From::from(&*var)
         }
 
-        pub fn iter(&self) -> impl Iterator<Item=(&AnySol, &Var)> {
+        pub fn iter(&self) -> impl Iterator<Item=(&S, &Var<S>)> {
             self.vars.iter()
         }
     }
 
-    impl Default for Vars {
+    impl<S: Sol> Default for Vars<S> {
         fn default() -> Self {
             Self::new()
         }
     }
 
-    pub struct Constraints {
-        constrs: Vec<(f64, Vec<Monomial>, f64)>,
+    pub struct Constraints<S: Sol> {
+        constrs: Vec<(f64, Vec<Monomial<S>>, f64)>,
     }
 
-    impl Constraints {
+    impl<S: Sol> Constraints<S> {
         pub fn new() -> Self {
             Self { constrs: Default::default() }
         }
@@ -547,17 +526,17 @@ pub mod osqp {
             self.len() == 0
         }
 
-        pub fn push(&mut self, value: (f64, Vec<Monomial>, f64)) {
+        pub fn push(&mut self, value: (f64, Vec<Monomial<S>>, f64)) {
             self.constrs.push(value)
         }
 
-        pub fn iter(&self) -> impl Iterator<Item=&(f64, Vec<Monomial>, f64)> {
+        pub fn iter(&self) -> impl Iterator<Item=&(f64, Vec<Monomial<S>>, f64)> {
             self.constrs.iter()
         }
 
         // L <= Ax <= U 
         /// l < r => r - l > 0 => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        pub fn leq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
+        pub fn leq(&mut self, v: &mut Vars<S>, lhs: S, rhs: S) {
             if lhs == rhs {
                 return
             }
@@ -565,12 +544,12 @@ pub mod osqp {
         }
 
         /// l + c < r => c < r - l => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        pub fn leqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+        pub fn leqc(&mut self, v: &mut Vars<S>, lhs: S, rhs: S, c: f64) {
             self.constrs.push((c, vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
         }
 
         /// l > r => l - r > 0 => A += [-1(r) ... 1(s) ...], L += 0, U += (FMAX/infty)
-        pub fn geq(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol) {
+        pub fn geq(&mut self, v: &mut Vars<S>, lhs: S, rhs: S) {
             if lhs == rhs {
                 return
             }
@@ -578,15 +557,15 @@ pub mod osqp {
         }
 
         /// l > r + c => l - r > c => A += [1(r) ... -1(s) ...], L += c, U += (FMAX/infty)
-        pub fn geqc(&mut self, v: &mut Vars, lhs: AnySol, rhs: AnySol, c: f64) {
+        pub fn geqc(&mut self, v: &mut Vars<S>, lhs: S, rhs: S, c: f64) {
             self.constrs.push((c, vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
         }
 
-        pub fn eq(&mut self, lc: &[Monomial]) {
+        pub fn eq(&mut self, lc: &[Monomial<S>]) {
             self.constrs.push((0., Vec::from(lc), 0.));
         }
 
-        pub fn sym(&mut self, v: &mut Vars, pd: &mut Vec<Monomial>, lhs: AnySol, rhs: AnySol) {
+        pub fn sym(&mut self, v: &mut Vars<S>, pd: &mut Vec<Monomial<S>>, lhs: S, rhs: S) {
             // P[i, j] = 100 => obj += 100 * x_i * x_j
             // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
             // x_k = x_i - x_j => x_k - x_i + x_j = 0
@@ -594,20 +573,28 @@ pub mod osqp {
             // 0 <= k-i+j && k-i+j <= 0    =>    i <= k+j && k+j <= i       => i-j <= k && k <= i-j => k == i-j
             // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
             // obj.push(...)
-            let t = v.get(AnySol::T(v.vars.len()));
+            let t = v.get(S::fresh(v.vars.len()));
             let symmetry_cost = 100.0;
             pd.push(symmetry_cost * t);
             self.eq(&[t, -v.get(lhs), v.get(rhs)]);
         }
     }
 
-    impl Default for Constraints {
+    impl<S: Sol> Default for Constraints<S> {
         fn default() -> Self {
             Self::new()
         }
     }
 
-    fn as_csc_matrix<'s>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial]]) -> CscMatrix<'s> {
+    pub trait Fresh {
+        fn fresh(index: usize) -> Self;
+    }
+
+    pub trait Sol: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd {}
+
+    impl<S: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd> Sol for S {}
+
+    fn as_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial<S>]]) -> CscMatrix<'s> {
         let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
         let mut indptr = vec![];
         let mut indices = vec![];
@@ -650,7 +637,7 @@ pub mod osqp {
         }
     }
 
-    pub fn as_diag_csc_matrix<'s>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial]) -> CscMatrix<'s> {
+    pub fn as_diag_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial<S>]) -> CscMatrix<'s> {
         let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
         let mut indptr = vec![];
         let mut indices = vec![];
@@ -691,8 +678,8 @@ pub mod osqp {
         }
     }
 
-    impl<'s> From<Constraints> for CscMatrix<'s> {
-        fn from(c: Constraints) -> Self {
+    impl<'s, S: Sol> From<Constraints<S>> for CscMatrix<'s> {
+        fn from(c: Constraints<S>) -> Self {
             let a = &c.constrs
                 .iter()
                 .map(|(_, comb, _)| &comb[..])
@@ -702,18 +689,18 @@ pub mod osqp {
     }
 
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
-    pub struct Var {
+    pub struct Var<S: Sol> {
         pub index: usize,
-        pub sol: AnySol,
+        pub sol: S,
     }
 
     #[derive(Clone, Copy, Debug)]
-    pub struct Monomial {
-        pub var: Var,
+    pub struct Monomial<S: Sol> {
+        pub var: Var<S>,
         pub coeff: f64,
     }
 
-    impl std::ops::Neg for Monomial {
+    impl<S: Sol> std::ops::Neg for Monomial<S> {
         type Output = Self;
         fn neg(mut self) -> Self::Output {
             self.coeff = -self.coeff;
@@ -721,15 +708,15 @@ pub mod osqp {
         }
     }
 
-    impl From<&Var> for Monomial {
-        fn from(var: &Var) -> Self {
+    impl<S: Sol> From<&Var<S>> for Monomial<S> {
+        fn from(var: &Var<S>) -> Self {
             Monomial{ var: *var, coeff: 1. }
         }
     }
 
-    impl std::ops::Mul<Monomial> for f64 {
-        type Output = Monomial;
-        fn mul(self, mut rhs: Monomial) -> Self::Output {
+    impl<S: Sol> std::ops::Mul<Monomial<S>> for f64 {
+        type Output = Monomial<S>;
+        fn mul(self, mut rhs: Monomial<S>) -> Self::Output {
             rhs.coeff *= self;
             rhs
         }
@@ -1833,7 +1820,7 @@ pub mod geometry {
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples};
 
     use super::error::{LayoutError};
-    use super::osqp::{AnySol, Constraints, Monomial, Vars};
+    use super::osqp::{Constraints, Monomial, Vars, Fresh};
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
@@ -1843,6 +1830,31 @@ pub mod geometry {
     use std::collections::{HashMap, BTreeMap, HashSet};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub enum AnySol {
+        L(LocSol),
+        R(LocSol),
+        S(HopSol),
+        T(usize)
+    }
+
+    impl Fresh for AnySol {
+        fn fresh(index: usize) -> Self {
+            Self::T(index)
+        }
+    }
+
+    impl Display for AnySol {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                AnySol::L(loc) => write!(f, "l{}", loc.0),
+                AnySol::R(loc) => write!(f, "r{}", loc.0),
+                AnySol::S(hop) => write!(f, "s{}", hop.0),
+                AnySol::T(idx) => write!(f, "t{}", idx),
+            }
+        }
+    }
 
     #[derive(Clone, Debug)]
     pub struct LocRow<V: Clone + Debug + Display + Ord + Hash> {
@@ -2016,10 +2028,10 @@ pub mod geometry {
     
         let sep = 20.0;
 
-        let mut V: Vars = Vars::new();
-        let mut C: Constraints = Constraints::new();
-        let mut Pd: Vec<Monomial> = vec![];
-        let mut Q: Vec<Monomial> = vec![];
+        let mut V: Vars<AnySol> = Vars::new();
+        let mut C: Constraints<AnySol> = Constraints::new();
+        let mut Pd: Vec<Monomial<AnySol>> = vec![];
+        let mut Q: Vec<Monomial<AnySol>> = vec![];
 
         let L = AnySol::L;
         let R = AnySol::R;
