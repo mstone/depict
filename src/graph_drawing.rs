@@ -426,6 +426,7 @@ pub mod osqp {
     use std::{borrow::Cow, collections::{HashMap, BTreeMap}, fmt::{Debug, Display}, hash::Hash};
 
     use osqp::{self, CscMatrix};
+    use tracing::instrument;
     use tracing_error::InstrumentError;
 
     use crate::graph_drawing::error::LayoutError;
@@ -732,6 +733,21 @@ pub mod osqp {
         }
     }
 
+    pub struct Printer<'s, S: Sol>(&'s Vec<Monomial<S>>);
+
+    impl<'s, S: Sol> Display for Printer<'s, S> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "[")?;
+            for (n, m) in self.0.iter().enumerate() {
+                write!(f, "{m}")?;
+                if n < self.0.len()-1 {
+                    write!(f, " ")?;
+                }
+            }
+            write!(f, "]")
+        }
+    }
+
     pub fn print_tuples(name: &str, m: &CscMatrix) {
         // conceptually, we walk over the columns, then the rows,
         // recording each non-zero value + its row index, and
@@ -754,23 +770,18 @@ pub mod osqp {
         }
     }
 
+    #[derive(Clone, Debug)]
     pub struct ILPInstance<S: Sol> {
         pub vars: Vars<S>,
         pub csp: Constraints<S>,
+        pub obj: Vec<Monomial<S>>,
     }
 
     impl<S: Sol> ILPInstance<S> {
         pub fn solve(&mut self) -> Result<ILPStatus<S>, Error> {
+            let eps_abs_infeas = 0.01;
+
             let (bound, xs) = self.solve_relaxation()?;
-
-            let infeasible_idx = self.csp.iter().position(|(l, a, u)| {
-                let asum = a.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
-                *l > asum || asum > *u
-            });
-
-            if let Some(infeasible_idx) = infeasible_idx {
-                return Ok(ILPStatus::IntegerInfeasible(infeasible_idx))
-            }
 
             let eps_abs = 0.001;
             let fractional_idx = xs.iter().position(|x| (x.round() - x).abs() >= eps_abs);
@@ -782,17 +793,24 @@ pub mod osqp {
                 return Ok(ILPStatus::NotIntegral(*fractional_var));
             }
 
+            let infeasible_idx = self.csp.iter().position(|(l, a, u)| {
+                let asum = a.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+                *l - eps_abs_infeas > asum || asum > *u + eps_abs_infeas
+            });
+
+            if let Some(infeasible_idx) = infeasible_idx {
+                let (l, a, u) = &self.csp.constrs[infeasible_idx];
+                let asum = a.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+                let a = Printer(a);
+                eprintln!("ILP INSTANCE: INTEGER INFEASIBLE in constraint {infeasible_idx}, {l} <= {a} <= {u}, A.x = {asum}");
+                return Ok(ILPStatus::IntegerInfeasible(infeasible_idx))
+            }
+
             Ok(ILPStatus::Solved(bound, xs))
         }
 
         pub fn solve_relaxation(&mut self) -> Result<(f64, Vec<f64>), Error> {
-            let ILPInstance{vars, csp, ..} = self;
-            let mut Q: Vec<Monomial<S>> = vec![];
-            // add 0-1 constraints for all variables, and add all 
-            // crossing-number variables to the objective
-            for (ix, var) in vars.iter() {
-                csp.push((0., vec![var.into()], 1.));
-            }
+            let ILPInstance{vars, csp, obj, ..} = self;
 
             // event!(Level::DEBUG, %csp, "CSP");
             use osqp::{Problem};
@@ -803,7 +821,7 @@ pub mod osqp {
 
             let mut Q2 = Vec::with_capacity(n);
             Q2.resize(n, 0.);
-            for q in Q.iter() {
+            for q in obj.iter() {
                 Q2[q.var.index] += q.coeff; 
             }
             // std::process::exit(0);
@@ -857,14 +875,17 @@ pub mod osqp {
         }
     }
 
+    #[derive(Clone, Debug)]
     pub struct ILP<S: Sol> {
         pub vars: Vars<S>, 
         pub csp: Constraints<S>,
+        pub obj: Vec<Monomial<S>>,
         pub integral: Vec<S>,
         pub fractional: Vec<S>,
         pub eps_abs: f64,
     }
 
+    #[derive(Clone, Debug)]
     pub enum ILPStatus<S: Sol> {
         NotIntegral(Var<S>),
         IntegerInfeasible(usize),
@@ -872,26 +893,29 @@ pub mod osqp {
     }
 
     impl<S: Sol> ILP<S> {
-        pub fn new(vars: Vars<S>, csp: Constraints<S>) -> Self {
+        pub fn new(vars: Vars<S>, csp: Constraints<S>, obj: Vec<Monomial<S>>) -> Self {
             Self {
                 vars,
                 csp,
+                obj,
                 integral: vec![],
                 fractional: vec![],
                 eps_abs: 1.0e-3_f64,
             }
         }
 
+        #[instrument]
         pub fn solve(&mut self) -> Result<ILPStatus<S>, Error> {
-            let mut queue = vec![ILPInstance{vars: self.vars.clone(), csp: self.csp.clone()}];
+            let mut queue = vec![ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()}];
             let mut global_bound = None;
             let mut global_xs = None;
             while let Some(mut instance) = queue.pop() {
                 let status = instance.solve();
+                eprintln!("ILP INSTANCE STATUS: {status:?}");
                 match status {
                     Ok(ILPStatus::NotIntegral(split)) => {
-                        let mut floor = ILPInstance{vars: self.vars.clone(), csp: self.csp.clone()};
-                        let mut ceil =  ILPInstance{vars: self.vars.clone(), csp: self.csp.clone()};
+                        let mut floor = ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()};
+                        let mut ceil =  ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()};
                         floor.csp.push((0., vec![Monomial{ var: split, coeff: 1. }], 0.));
                         ceil.csp.push((1., vec![Monomial{ var: split, coeff: 1. }], 1.));
                         queue.push(floor);
@@ -1846,7 +1870,7 @@ pub mod layout {
 
             event!(Level::DEBUG, %csp, "CSP");
             
-            let mut ilp = ILP::new(vars.clone(), csp);
+            let mut ilp = ILP::new(vars.clone(), csp, Q);
             let status = ilp.solve()?;
             let (crossing_number, x) = match status {
                 ILPStatus::Solved(bound, xs) => (bound, xs),
