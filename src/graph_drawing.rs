@@ -778,10 +778,14 @@ pub mod osqp {
     }
 
     impl<S: Sol> ILPInstance<S> {
-        pub fn solve(&mut self) -> Result<ILPStatus<S>, Error> {
+        pub fn solve(&mut self, best_alternative: f64) -> Result<ILPStatus<S>, Error> {
             let eps_abs_infeas = 0.01;
 
             let (bound, xs) = self.solve_relaxation()?;
+            if bound >= best_alternative {
+                eprintln!("ILP INSTANCE: NOT AS GOOD bound: {bound} >= best alternative: {best_alternative}");
+                return Ok(ILPStatus::NotAsGood)
+            }
 
             let eps_abs = 0.001;
             let fractional_idx = xs.iter().position(|x| (x.round() - x).abs() >= eps_abs);
@@ -790,6 +794,7 @@ pub mod osqp {
                 let fractional_var = self.vars.vars.values()
                     .find(|v| v.index == fractional_idx)
                     .or_err(LayoutError::OsqpError{error: "missing fractional idx".into()})?;
+                eprintln!("ILP INSTANCE: FRACTIONAL index: {fractional_idx} var: {fractional_var}");
                 return Ok(ILPStatus::NotIntegral(*fractional_var));
             }
 
@@ -806,6 +811,7 @@ pub mod osqp {
                 return Ok(ILPStatus::IntegerInfeasible(infeasible_idx))
             }
 
+            eprintln!("ILP INSTANCE: SOLVED bound: {bound} xs: {xs:?}");
             Ok(ILPStatus::Solved(bound, xs))
         }
 
@@ -848,8 +854,8 @@ pub mod osqp {
                 // .check_termination(Some(200))
                 // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
                 // .adaptive_rho_interval(Some(25))
-                .eps_abs(1e-1)
-                .eps_rel(1e-1)
+                // .eps_abs(1e-1)
+                // .eps_rel(1e-1)
                 // .max_iter(16_000)
                 .max_iter(400)
                 // .polish(true)
@@ -887,6 +893,7 @@ pub mod osqp {
 
     #[derive(Clone, Debug)]
     pub enum ILPStatus<S: Sol> {
+        NotAsGood,
         NotIntegral(Var<S>),
         IntegerInfeasible(usize),
         Solved(f64, Vec<f64>)
@@ -907,27 +914,26 @@ pub mod osqp {
         #[instrument]
         pub fn solve(&mut self) -> Result<ILPStatus<S>, Error> {
             let mut queue = vec![ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()}];
-            let mut global_bound = None;
+            let mut global_bound = f64::INFINITY;
             let mut global_xs = None;
             while let Some(mut instance) = queue.pop() {
-                let status = instance.solve();
+                let status = instance.solve(global_bound);
                 eprintln!("ILP INSTANCE STATUS: {status:?}");
                 match status {
                     Ok(ILPStatus::NotIntegral(split)) => {
-                        let mut floor = ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()};
-                        let mut ceil =  ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()};
+                        let mut floor = ILPInstance{vars: instance.vars.clone(), csp: instance.csp.clone(), obj: instance.obj.clone()};
+                        let mut ceil =  ILPInstance{vars: instance.vars.clone(), csp: instance.csp.clone(), obj: instance.obj.clone()};
                         floor.csp.push((0., vec![Monomial{ var: split, coeff: 1. }], 0.));
                         ceil.csp.push((1., vec![Monomial{ var: split, coeff: 1. }], 1.));
                         queue.push(floor);
                         queue.push(ceil);
                     },
-                    Ok(ILPStatus::IntegerInfeasible(_)) => {
+                    Ok(ILPStatus::IntegerInfeasible(_)) | Ok(ILPStatus::NotAsGood) => {
                         continue
                     },
                     Ok(ILPStatus::Solved(bound, xs)) => {
-                        let gb = global_bound.unwrap_or(f64::INFINITY);
-                        if bound < gb {
-                            global_bound = Some(bound);
+                        if bound < global_bound {
+                            global_bound = bound;
                             global_xs = Some(xs);
                         }
                     },
@@ -937,7 +943,7 @@ pub mod osqp {
                 }
             }
             
-            if let (Some(bound), Some(xs)) = (global_bound, global_xs) {
+            if let (bound, Some(xs)) = (global_bound, global_xs) {
                 Ok(ILPStatus::Solved(bound, xs))
             } else {
                 Err(LayoutError::OsqpError{error: "infeasible".into()}.in_current_span().into())
