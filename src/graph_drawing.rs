@@ -779,7 +779,7 @@ pub mod osqp {
 
     impl<S: Sol> ILPInstance<S> {
         pub fn solve(&mut self, best_alternative: f64) -> Result<ILPStatus<S>, Error> {
-            let eps_abs_infeas = 0.01;
+            let eps_abs_infeas = 0.1;
 
             let (bound, xs) = self.solve_relaxation()?;
             if bound >= best_alternative {
@@ -787,7 +787,7 @@ pub mod osqp {
                 return Ok(ILPStatus::NotAsGood)
             }
 
-            let eps_abs = 0.001;
+            let eps_abs = 0.1;
             let fractional_idx = xs.iter().position(|x| (x.round() - x).abs() >= eps_abs);
 
             if let Some(fractional_idx) = fractional_idx {
@@ -850,16 +850,17 @@ pub mod osqp {
             eprintln!("A2[{},{}]: {A2:?}", A2.nrows, A2.ncols);
 
             let settings = osqp::Settings::default()
-                .adaptive_rho(false)
+                // .adaptive_rho(false)
                 // .check_termination(Some(200))
                 // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
                 // .adaptive_rho_interval(Some(25))
                 // .eps_abs(1e-1)
                 // .eps_rel(1e-1)
                 // .max_iter(16_000)
-                .max_iter(400)
+                // .max_iter(400)
                 // .polish(true)
-                .verbose(true);
+                // .verbose(true);
+                .verbose(false);
 
             // let mut prob = Problem::new(P, q, A, l, u, &settings)
             let mut prob = Problem::new(P2, &Q2[..], A2, &L2[..], &U2[..], &settings)
