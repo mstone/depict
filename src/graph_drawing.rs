@@ -811,8 +811,10 @@ pub mod osqp {
                 return Ok(ILPStatus::IntegerInfeasible(infeasible_idx))
             }
 
-            eprintln!("ILP INSTANCE: SOLVED bound: {bound} xs: {xs:?}");
-            Ok(ILPStatus::Solved(bound, xs))
+            let actual_bound = self.obj.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+
+            eprintln!("ILP INSTANCE: SOLVED relaxed bound: {bound}, actual bound: {actual_bound}, xs: {xs:?}");
+            Ok(ILPStatus::Solved(actual_bound, xs))
         }
 
         pub fn solve_relaxation(&mut self) -> Result<(f64, Vec<f64>), Error> {
