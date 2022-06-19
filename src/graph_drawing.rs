@@ -426,6 +426,7 @@ pub mod osqp {
     use std::{borrow::Cow, collections::{HashMap, BTreeMap}, fmt::{Debug, Display}, hash::Hash};
 
     use osqp::{self, CscMatrix};
+    use rand::Rng;
     use tracing::instrument;
     use tracing_error::InstrumentError;
 
@@ -919,9 +920,22 @@ pub mod osqp {
             let mut queue = vec![ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()}];
             let mut global_bound = f64::INFINITY;
             let mut global_xs = None;
-            while let Some(mut instance) = queue.pop() {
+            let mut rng = rand::thread_rng();
+            let mut n = 0;
+            
+            while !queue.is_empty() {
+                if global_bound == 0.0 {
+                    break
+                }
+                
+                let queue_len = queue.len();
+                let random_index = rng.gen_range(0..queue.len());
+                queue.swap(queue_len-1, random_index);
+                #[allow(clippy::unwrap_used)]
+                let mut instance = queue.pop().unwrap();
+
                 let status = instance.solve(global_bound);
-                eprintln!("ILP INSTANCE STATUS: {status:?}");
+                eprintln!("ILP INSTANCE STATUS: n: {n}, global bound: {global_bound}, instance status: {status:?}");
                 match status {
                     Ok(ILPStatus::NotIntegral(split)) => {
                         let mut floor = ILPInstance{vars: instance.vars.clone(), csp: instance.csp.clone(), obj: instance.obj.clone()};
@@ -944,6 +958,7 @@ pub mod osqp {
                         continue
                     },
                 }
+                n += 1;
             }
             
             if let (bound, Some(xs)) = (global_bound, global_xs) {

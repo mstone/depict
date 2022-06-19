@@ -385,7 +385,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
         .collect::<Vec<_>>();
 
     event!(Level::TRACE, %root_width, ?nodes, "NODES");
-    println!("NODES: {nodes:#?}");
+    // println!("NODES: {nodes:#?}");
 
     Ok(Drawing{
         crossing_number: Some(crossing_number), 

@@ -623,6 +623,7 @@ dependencies = [
  "petgraph",
  "pomelo",
  "proptest",
+ "rand",
  "serde",
  "serde_json",
  "sorted-vec",
