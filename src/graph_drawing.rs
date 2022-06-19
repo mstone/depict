@@ -1821,6 +1821,15 @@ pub mod layout {
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
             }
+            if hops_by_level.iter().all(|(_lvl, hops)| hops.iter().count() <= 1) {
+                let mut solved_locs = BTreeMap::new();
+                for (lvl, locs) in locs_by_level.iter() {
+                    for (n, _) in locs.iter().enumerate() {
+                        solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
+                    }
+                }
+                return Ok((0, solved_locs))
+            }
             #[allow(clippy::unwrap_used)]
             let max_level = *hops_by_level.keys().max().unwrap();
             #[allow(clippy::unwrap_used)]
@@ -1896,12 +1905,12 @@ pub mod layout {
             
             let mut ilp = ILP::new(vars.clone(), csp, Q);
             let status = ilp.solve()?;
-            let (crossing_number, x) = match status {
+            let (_crossing_number, x) = match status {
                 ILPStatus::Solved(bound, xs) => (bound, xs),
                 _ => panic!("ilp not solved"),
             };
 
-            let mut solutions = vars.iter().map(|(_sol, var)| (var.sol, x[var.index])).collect::<BTreeMap<_, _>>();
+            let solutions = vars.iter().map(|(_sol, var)| (var.sol, x[var.index].round())).collect::<BTreeMap<_, _>>();
 
             // std::process::exit(0);
             
@@ -1917,11 +1926,13 @@ pub mod layout {
             for (lvl, locs) in solved_locs.iter_mut() {
                 for a in 0..locs.len() {
                     for b in 0..locs.len() {
-                        if a < b && solutions[&X(lvl.0, a, b)].round() != 1. {
+                        if let Some(order) = solutions.get(&X(lvl.0, a, b)) {
                             let shra = locs[&OriginalHorizontalRank(a)];
                             let shrb = locs[&OriginalHorizontalRank(b)];
-                            locs.entry(OriginalHorizontalRank(a)).and_modify(|e| { *e = shrb; });
-                            locs.entry(OriginalHorizontalRank(b)).and_modify(|e| { *e = shra; });
+                            if (*order == 1. && shra < shrb) || (*order == 0. && shra > shrb) {
+                                locs.entry(OriginalHorizontalRank(a)).and_modify(|e| { *e = shrb; });
+                                locs.entry(OriginalHorizontalRank(b)).and_modify(|e| { *e = shra; });
+                            }
                         }
                     }
                 }
