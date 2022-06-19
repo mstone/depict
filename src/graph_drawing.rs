@@ -1967,6 +1967,7 @@ pub mod layout {
             }
             let layout_debug_dot = Dot::new(&layout_debug);
             event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
+            eprintln!("LAYOUT GRAPH\n{layout_debug_dot:?}");
 
             // Ok((crossing_number, solved_locs))
             Ok((0, solved_locs))
