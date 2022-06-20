@@ -1917,24 +1917,19 @@ pub mod layout {
 
             let mut solved_locs = BTreeMap::new();
             for (lvl, locs) in locs_by_level.iter() {
-                for (n, _) in locs.iter().enumerate() {
-                    solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
+                let mut ohrs = vec![];
+                for n in 0..locs.len() {
+                    ohrs.push(n);
                 }
-            }
-
-            // XXX: more or less...
-            for (lvl, locs) in solved_locs.iter_mut() {
-                for a in 0..locs.len() {
-                    for b in 0..locs.len() {
-                        if let Some(order) = solutions.get(&X(lvl.0, a, b)) {
-                            let shra = locs[&OriginalHorizontalRank(a)];
-                            let shrb = locs[&OriginalHorizontalRank(b)];
-                            if (*order == 1. && shra < shrb) || (*order == 0. && shra > shrb) {
-                                locs.entry(OriginalHorizontalRank(a)).and_modify(|e| { *e = shrb; });
-                                locs.entry(OriginalHorizontalRank(b)).and_modify(|e| { *e = shra; });
-                            }
-                        }
+                ohrs.sort_unstable_by(|a, b| {
+                    match solutions.get(&X(lvl.0, *a, *b)) {
+                        Some(x) if *x == 1. => std::cmp::Ordering::Less,
+                        Some(x) if *x == 0. => std::cmp::Ordering::Greater,
+                        _ => std::cmp::Ordering::Equal,
                     }
+                });
+                for (shr, n) in ohrs.iter().enumerate() {
+                    solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(*n), SolvedHorizontalRank(shr));
                 }
             }
 
