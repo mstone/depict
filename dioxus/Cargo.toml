@@ -28,4 +28,9 @@ tracing-error = { version = "0.2", features = [ "traced-error" ] }
 tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
 
 [profile.release]
+#debug = 1
 debug = true
+split-debuginfo = "packed"
+#split-debuginfo = "unpacked"
+#incremental = true
+strip = "none"

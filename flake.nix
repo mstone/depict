@@ -33,9 +33,13 @@
       inherit self nixpkgs;
       name = "depict";
       systems = flake-utils.lib.allSystems;
-      preOverlays = [ rust-overlay.overlay ];
+      preOverlays = [ 
+        rust-overlay.overlay
+      ];
       overlay = final: prev: {
         depict = rec {
+
+          depictVersion = "0.2";
           depict = lib.depict { isShell = false; };
           devShell = lib.depict { isShell = true; };
           defaultPackage = depict;
@@ -62,7 +66,7 @@
             serverBin = (lib.depict { isShell = false; subpkg = subpkg; subdir = "server"; });
           in stdenv.mkDerivation { 
             pname = "${subpkg}";
-            version = "0.1";
+            version = depictVersion;
             buildInputs = [ makeWrapper ];
             phases = [ "installPhase" ];
             installPhase = ''
@@ -91,7 +95,7 @@
             '';
           in stdenv.mkDerivation { 
             pname = "${subpkg}";
-            version = "0.1";
+            version = depictVersion;
             phases = [ "buildPhase" "installPhase" ];
             buildInputs = [
               wasm-bindgen-cli 
@@ -113,7 +117,7 @@
             pkg = (lib.depict { isShell = false; subpkg = subpkg; subdir = "dioxus"; });
           in stdenv.mkDerivation { 
             pname = subpkg;
-            version = "0.1";
+            version = depictVersion;
             buildInputs = [ makeWrapper ];
             phases = [ "installPhase" ];
             installPhase = ''
@@ -124,16 +128,53 @@
             '';
           };
 
+          bintools = prev.bintools.overrideAttrs (old: {
+            postFixup = 
+              if prev.stdenv.isDarwin then 
+                builtins.replaceStrings ["-no_uuid"] [""] old.postFixup
+              else 
+                old.postFixup;
+          });
+
+          cc = prev.stdenv.cc.overrideAttrs (old: {
+            inherit bintools;
+          });
+
+          stdenv = prev.overrideCC prev.stdenv cc;
+
+          # rust from rust-overlay adds stdenv.cc to propagatedBuildInputs 
+          # and depsHostHostPropagated; therefore, to ensure that the correct
+          # cc is present in downstream consumers, we need to override both these 
+          # attrs.
+          rust = with final; with pkgs; 
+            #(rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
+            #(rust-bin.nightly.latest.minimal.override { extensions = [ "rustfmt" ]; targets = [ "wasm32-unknown-unknown" ]; })
+            (rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal.override {
+              extensions = [ "rustfmt" ];
+              targets = [ "wasm32-unknown-unknown" ];
+            })).overrideAttrs (old: {
+              inherit stdenv;
+              propagatedBuildInputs = [ stdenv.cc ];
+              depsHostHostPropagated = [ stdenv.cc ];
+            });
+
+          # crane provides a buildPackage helper that calls stdenv.mkDerivation
+          # which provides a default builder that sources a "setup" file defined
+          # by the stdenv itself (passed as the environment variable "stdenv" that 
+          # in turn defines a defaultNativeBuildInputs variable that gets added to 
+          # PATH via the genericBuild initialization code. Therefore, we override
+          # crane's stdenv to use our modified cc-wrapper.
+          cranelib = crane.lib.${final.system}.overrideScope' (final: prev: {
+            inherit stdenv;
+          });
+
+          tex = with final; with pkgs; texlive.combined.scheme-full;
+
           lib.depict = { isShell, isWasm ? false, subpkg ? "depict", subdir ? "." }: 
             let 
               buildInputs = with final; with pkgs; [
-                #(rust-bin.stable.latest.minimal.override { targets = [ "wasm32-unknown-unknown" ]; })
-                #(rust-bin.nightly.latest.minimal.override { extensions = [ "rustfmt" ]; targets = [ "wasm32-unknown-unknown" ]; })
-                (rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal.override {
-                  extensions = [ "rustfmt" ];
-                  targets = [ "wasm32-unknown-unknown" ];
-                }))
-                #texlive.combined.scheme-full
+                rust
+                # tex
                 cmake
               ] ++ final.lib.optionals isShell [
                 entr
@@ -164,17 +205,17 @@
                 libayatana-appindicator-gtk3
                 libappindicator-gtk3
               ]);
-            in with final; with pkgs; crane.lib.${final.system}.buildPackage {
+            in with final; with pkgs; cranelib.buildPackage {
             pname = "${subpkg}";
-            version = "0.1";
+            version = depictVersion;
 
             src = self;
 
-            cargoArtifacts = crane.lib.${final.system}.buildDepsOnly { 
+            cargoArtifacts = cranelib.buildDepsOnly { 
               src = self;
 
               inherit buildInputs;
-	      dontUseCmakeConfigure = true;
+              dontUseCmakeConfigure = true;
 
               cargoCheckCommand = if isWasm then "" else 
                 if final.lib.hasSuffix "darwin" final.system then ''

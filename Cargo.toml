@@ -59,4 +59,9 @@ members = [
 ]
 
 [profile.release]
+#debug = 1
 debug = true
+split-debuginfo = "packed"
+#split-debuginfo = "unpacked"
+#incremental = true
+strip = "none"
