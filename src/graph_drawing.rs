@@ -826,7 +826,7 @@ pub mod osqp {
 
             let n = vars.len();
             let P2 = as_diag_csc_matrix::<S>(Some(n), Some(n), &[]);
-            print_tuples("P2", &P2);
+            // print_tuples("P2", &P2);
 
             let mut Q2 = Vec::with_capacity(n);
             Q2.resize(n, 0.);
@@ -841,16 +841,16 @@ pub mod osqp {
                 L2.push(*l);
                 U2.push(*u);
             }
-            eprintln!("V[{}]: {vars}", vars.len());
-            eprintln!("C[{}]: {csp}", &csp.len());
+            // eprintln!("V[{}]: {vars}", vars.len());
+            // eprintln!("C[{}]: {csp}", &csp.len());
 
             let A2: CscMatrix = csp.clone().into();
 
-            eprintln!("P2[{},{}]: {P2:?}", P2.nrows, P2.ncols);
-            eprintln!("Q2[{}]: {Q2:?}", Q2.len());
-            eprintln!("L2[{}]: {L2:?}", L2.len());
-            eprintln!("U2[{}]: {U2:?}", U2.len());
-            eprintln!("A2[{},{}]: {A2:?}", A2.nrows, A2.ncols);
+            // eprintln!("P2[{},{}]: {P2:?}", P2.nrows, P2.ncols);
+            // eprintln!("Q2[{}]: {Q2:?}", Q2.len());
+            // eprintln!("L2[{}]: {L2:?}", L2.len());
+            // eprintln!("U2[{}]: {U2:?}", U2.len());
+            // eprintln!("A2[{},{}]: {A2:?}", A2.nrows, A2.ncols);
 
             let settings = osqp::Settings::default()
                 // .adaptive_rho(false)
@@ -870,7 +870,7 @@ pub mod osqp {
                 .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
             
             let result = prob.solve();
-            eprintln!("CSP OUT {:?}", result);
+            // eprintln!("CSP OUT {:?}", result);
 
             let solution = match result {
                 osqp::Status::Solved(solution) => Ok(solution),
