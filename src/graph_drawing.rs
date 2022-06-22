@@ -971,125 +971,68 @@ pub mod osqp {
 }
 
 pub mod backtrack {
-    use osqp::CscMatrix;
     use rand::Rng;
     use tracing::instrument;
     use tracing_error::InstrumentError;
+    use bitvec::prelude::*;
 
-    use super::osqp::{Sol, Vars, Constraints, Monomial, Printer, Var};
-    use crate::graph_drawing::{error::{Error, LayoutError, OrErrExt}, osqp::as_diag_csc_matrix};
+    use super::osqp::{Sol, Vars, Constraints, Monomial, Printer};
+    use crate::graph_drawing::{error::{Error, LayoutError}};
+
 
     #[derive(Clone, Debug)]
-    pub struct ILPInstance<S: Sol> {
-        pub vars: Vars<S>,
-        pub csp: Constraints<S>,
-        pub obj: Vec<Monomial<S>>,
+    pub enum ILPStatus {
+        NotAsGood,
+        Branch(ILPInstance, ILPInstance),
+        IntegerInfeasible(usize),
+        Solved(f64, BitVec<u32>)
     }
 
-    impl<S: Sol> ILPInstance<S> {
-        pub fn solve(&mut self, best_alternative: f64) -> Result<ILPStatus<S>, Error> {
-            let eps_abs_infeas = 0.1;
+    #[derive(Clone, Debug)]
+    pub struct ILPInstance {
+        pub alloc: BitVec<u32>,
+        pub value: BitVec<u32>,
+    }
 
-            let (bound, xs) = self.solve_relaxation()?;
-            if bound >= best_alternative {
-                eprintln!("ILP INSTANCE: NOT AS GOOD bound: {bound} >= best alternative: {best_alternative}");
-                return Ok(ILPStatus::<S>::NotAsGood)
+    impl ILPInstance {
+
+        pub fn new(n: usize) -> Self {
+            Self {
+                alloc: bitvec!(u32, Lsb0; 0; n),
+                value: bitvec!(u32, Lsb0; 0; n),
+            }
+        }
+
+        pub fn solve<S: Sol>(&mut self, ilp: &ILP<S>, best_alternative: f64) -> Result<ILPStatus, Error> {
+            let eps_abs_infeas = 1.0e-1_f64;
+            let unassigned_idx = self.alloc.first_zero();
+
+            if let Some(unassigned_idx) = unassigned_idx {
+                let mut left = self.clone();
+                let mut right = self.clone();
+                left.alloc.set(unassigned_idx, true);
+                right.alloc.set(unassigned_idx, true);
+                right.value.set(unassigned_idx, true);
+                return Ok(ILPStatus::Branch(left, right));
             }
 
-            let eps_abs = 0.1;
-            let fractional_idx = xs.iter().position(|x| (x.round() - x).abs() >= eps_abs);
-
-            if let Some(fractional_idx) = fractional_idx {
-                let fractional_var = self.vars.vars.values()
-                    .find(|v| v.index == fractional_idx)
-                    .or_err(LayoutError::OsqpError{error: "missing fractional idx".into()})?;
-                eprintln!("ILP INSTANCE: FRACTIONAL index: {fractional_idx} var: {fractional_var}");
-                return Ok(ILPStatus::<S>::NotIntegral(*fractional_var));
-            }
-
-            let infeasible_idx = self.csp.iter().position(|(l, a, u)| {
-                let asum = a.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+            let infeasible_idx = ilp.csp.iter().position(|(l, a, u)| {
+                let asum = a.iter().map(|m| m.coeff * if unsafe { *self.value.get_unchecked(m.var.index) } { 1. } else { 0. }).sum::<f64>();
                 *l - eps_abs_infeas > asum || asum > *u + eps_abs_infeas
             });
 
             if let Some(infeasible_idx) = infeasible_idx {
-                let (l, a, u) = &self.csp.constrs[infeasible_idx];
-                let asum = a.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+                let (l, a, u) = &ilp.csp.constrs[infeasible_idx];
+                let asum = a.iter().map(|m| m.coeff * if unsafe { *self.value.get_unchecked(m.var.index) } { 1. } else { 0. }).sum::<f64>();
                 let a = Printer(a);
-                eprintln!("ILP INSTANCE: INTEGER INFEASIBLE in constraint {infeasible_idx}, {l} <= {a} <= {u}, A.x = {asum}");
-                return Ok(ILPStatus::<S>::IntegerInfeasible(infeasible_idx))
+                // eprintln!("BACKTRACK INSTANCE: INFEASIBLE in constraint {infeasible_idx}, {l} <= {a} <= {u}, A.x = {asum}");
+                return Ok(ILPStatus::IntegerInfeasible(infeasible_idx))
             }
 
-            let actual_bound = self.obj.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+            let actual_bound = ilp.obj.iter().map(|m| m.coeff * if unsafe { *self.value.get_unchecked(m.var.index) } { 1. } else { 0. }).sum::<f64>();
 
-            eprintln!("ILP INSTANCE: SOLVED relaxed bound: {bound}, actual bound: {actual_bound}, xs: {xs:?}");
-            Ok(ILPStatus::<S>::Solved(actual_bound, xs))
-        }
-
-        pub fn solve_relaxation(&mut self) -> Result<(f64, Vec<f64>), Error> {
-            let ILPInstance{vars, csp, obj, ..} = self;
-
-            // event!(Level::DEBUG, %csp, "CSP");
-            use osqp::{Problem};
-
-            let n = vars.len();
-            let P2 = as_diag_csc_matrix::<S>(Some(n), Some(n), &[]);
-            // print_tuples("P2", &P2);
-
-            let mut Q2 = Vec::with_capacity(n);
-            Q2.resize(n, 0.);
-            for q in obj.iter() {
-                Q2[q.var.index] += q.coeff; 
-            }
-            // std::process::exit(0);
-
-            let mut L2 = vec![];
-            let mut U2 = vec![];
-            for (l, _, u) in csp.iter() {
-                L2.push(*l);
-                U2.push(*u);
-            }
-            // eprintln!("V[{}]: {vars}", vars.len());
-            // eprintln!("C[{}]: {csp}", &csp.len());
-
-            let A2: CscMatrix = csp.clone().into();
-
-            // eprintln!("P2[{},{}]: {P2:?}", P2.nrows, P2.ncols);
-            // eprintln!("Q2[{}]: {Q2:?}", Q2.len());
-            // eprintln!("L2[{}]: {L2:?}", L2.len());
-            // eprintln!("U2[{}]: {U2:?}", U2.len());
-            // eprintln!("A2[{},{}]: {A2:?}", A2.nrows, A2.ncols);
-
-            let settings = osqp::Settings::default()
-                // .adaptive_rho(false)
-                // .check_termination(Some(200))
-                // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
-                // .adaptive_rho_interval(Some(25))
-                // .eps_abs(1e-1)
-                // .eps_rel(1e-1)
-                // .max_iter(16_000)
-                // .max_iter(400)
-                // .polish(true)
-                // .verbose(true);
-                .verbose(false);
-
-            // let mut prob = Problem::new(P, q, A, l, u, &settings)
-            let mut prob = Problem::new(P2, &Q2[..], A2, &L2[..], &U2[..], &settings)
-                .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
-            
-            let result = prob.solve();
-            // eprintln!("CSP OUT {:?}", result);
-
-            let solution = match result {
-                osqp::Status::Solved(solution) => Ok(solution),
-                osqp::Status::SolvedInaccurate(solution) => Ok(solution),
-                osqp::Status::MaxIterationsReached(solution) => Ok(solution),
-                osqp::Status::TimeLimitReached(solution) => Ok(solution),
-                _ => Err(LayoutError::OsqpError{error: "failed to solve problem".into(),}.in_current_span()),
-            }?;
-            let x = solution.x().to_vec();
-            let bound = solution.obj_val();
-            Ok((bound, x))
+            eprintln!("BACKTRACK INSTANCE: SOLVED, actual bound: {actual_bound}, xs: {}", self.value);
+            Ok(ILPStatus::Solved(actual_bound, self.value.clone()))
         }
     }
 
@@ -1098,17 +1041,6 @@ pub mod backtrack {
         pub vars: Vars<S>, 
         pub csp: Constraints<S>,
         pub obj: Vec<Monomial<S>>,
-        pub integral: Vec<S>,
-        pub fractional: Vec<S>,
-        pub eps_abs: f64,
-    }
-
-    #[derive(Clone, Debug)]
-    pub enum ILPStatus<S: Sol> {
-        NotAsGood,
-        NotIntegral(Var<S>),
-        IntegerInfeasible(usize),
-        Solved(f64, Vec<f64>)
     }
 
     impl<S: Sol> ILP<S> {
@@ -1117,15 +1049,13 @@ pub mod backtrack {
                 vars,
                 csp,
                 obj,
-                integral: vec![],
-                fractional: vec![],
-                eps_abs: 1.0e-3_f64,
             }
         }
 
         #[instrument]
-        pub fn solve(&mut self) -> Result<ILPStatus<S>, Error> {
-            let mut queue = vec![ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()}];
+        pub fn solve(&mut self) -> Result<ILPStatus, Error> {
+            let n_vars = self.vars.len();
+            let mut queue = vec![ILPInstance::new(n_vars)];
             let mut global_bound = f64::INFINITY;
             let mut global_xs = None;
             let mut rng = rand::thread_rng();
@@ -1136,20 +1066,18 @@ pub mod backtrack {
                     break
                 }
                 
-                let queue_len = queue.len();
-                let random_index = rng.gen_range(0..queue.len());
-                queue.swap(queue_len-1, random_index);
+                // let queue_len = queue.len();
+                // let random_index = rng.gen_range(0..queue.len());
+                // queue.swap(queue_len-1, random_index);
                 #[allow(clippy::unwrap_used)]
                 let mut instance = queue.pop().unwrap();
 
-                let status = instance.solve(global_bound);
-                eprintln!("ILP INSTANCE STATUS: n: {n}, global bound: {global_bound}, instance status: {status:?}");
+                let status = instance.solve(self, global_bound);
+                if n % 10000 == 0 {
+                    eprintln!("BACKTRACK INSTANCE STATUS: n: {n}, global bound: {global_bound}, instance status: {status:?}");
+                }
                 match status {
-                    Ok(ILPStatus::NotIntegral(split)) => {
-                        let mut floor = ILPInstance{vars: instance.vars.clone(), csp: instance.csp.clone(), obj: instance.obj.clone()};
-                        let mut ceil =  ILPInstance{vars: instance.vars.clone(), csp: instance.csp.clone(), obj: instance.obj.clone()};
-                        floor.csp.push((0., vec![Monomial{ var: split, coeff: 1. }], 0.));
-                        ceil.csp.push((1., vec![Monomial{ var: split, coeff: 1. }], 1.));
+                    Ok(ILPStatus::Branch(floor, ceil)) => {
                         queue.push(floor);
                         queue.push(ceil);
                     },
@@ -2190,6 +2118,7 @@ pub mod layout {
         use std::collections::{BTreeMap, HashMap};
         use std::fmt::{Debug, Display};
         use std::hash::Hash;
+        use std::ops::Deref;
 
         use petgraph::Graph;
         use petgraph::dot::Dot;
@@ -2327,7 +2256,7 @@ pub mod layout {
                 _ => panic!("ilp not solved"),
             };
 
-            let solutions = vars.iter().map(|(_sol, var)| (var.sol, x[var.index].round())).collect::<BTreeMap<_, _>>();
+            let solutions = vars.iter().map(|(_sol, var)| (var.sol, unsafe { x.get_unchecked(var.index) })).collect::<BTreeMap<_, _>>();
 
             // std::process::exit(0);
             
@@ -2340,8 +2269,8 @@ pub mod layout {
                 }
                 ohrs.sort_unstable_by(|a, b| {
                     match solutions.get(&X(lvl.0, *a, *b)) {
-                        Some(x) if *x == 1. => std::cmp::Ordering::Less,
-                        Some(x) if *x == 0. => std::cmp::Ordering::Greater,
+                        Some(x) if *x.deref() => std::cmp::Ordering::Less,
+                        Some(x) if *x.deref() => std::cmp::Ordering::Greater,
                         _ => std::cmp::Ordering::Equal,
                     }
                 });
