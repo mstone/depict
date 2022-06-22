@@ -436,7 +436,7 @@ pub mod osqp {
 
     #[derive(Clone, Debug)]
     pub struct Vars<S: Sol> {
-        vars: HashMap<S, Var<S>>
+        pub vars: HashMap<S, Var<S>>
     }
 
     impl<S: Sol> Display for Vars<S> {
@@ -518,7 +518,7 @@ pub mod osqp {
 
     #[derive(Debug, Clone)]
     pub struct Constraints<S: Sol> {
-        constrs: Vec<(f64, Vec<Monomial<S>>, f64)>,
+        pub constrs: Vec<(f64, Vec<Monomial<S>>, f64)>,
     }
 
     impl<S: Sol> Constraints<S> {
@@ -734,7 +734,7 @@ pub mod osqp {
         }
     }
 
-    pub struct Printer<'s, S: Sol>(&'s Vec<Monomial<S>>);
+    pub struct Printer<'s, S: Sol>(pub &'s Vec<Monomial<S>>);
 
     impl<'s, S: Sol> Display for Printer<'s, S> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -816,6 +816,214 @@ pub mod osqp {
 
             eprintln!("ILP INSTANCE: SOLVED relaxed bound: {bound}, actual bound: {actual_bound}, xs: {xs:?}");
             Ok(ILPStatus::Solved(actual_bound, xs))
+        }
+
+        pub fn solve_relaxation(&mut self) -> Result<(f64, Vec<f64>), Error> {
+            let ILPInstance{vars, csp, obj, ..} = self;
+
+            // event!(Level::DEBUG, %csp, "CSP");
+            use osqp::{Problem};
+
+            let n = vars.len();
+            let P2 = as_diag_csc_matrix::<S>(Some(n), Some(n), &[]);
+            // print_tuples("P2", &P2);
+
+            let mut Q2 = Vec::with_capacity(n);
+            Q2.resize(n, 0.);
+            for q in obj.iter() {
+                Q2[q.var.index] += q.coeff; 
+            }
+            // std::process::exit(0);
+
+            let mut L2 = vec![];
+            let mut U2 = vec![];
+            for (l, _, u) in csp.iter() {
+                L2.push(*l);
+                U2.push(*u);
+            }
+            // eprintln!("V[{}]: {vars}", vars.len());
+            // eprintln!("C[{}]: {csp}", &csp.len());
+
+            let A2: CscMatrix = csp.clone().into();
+
+            // eprintln!("P2[{},{}]: {P2:?}", P2.nrows, P2.ncols);
+            // eprintln!("Q2[{}]: {Q2:?}", Q2.len());
+            // eprintln!("L2[{}]: {L2:?}", L2.len());
+            // eprintln!("U2[{}]: {U2:?}", U2.len());
+            // eprintln!("A2[{},{}]: {A2:?}", A2.nrows, A2.ncols);
+
+            let settings = osqp::Settings::default()
+                // .adaptive_rho(false)
+                // .check_termination(Some(200))
+                // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
+                // .adaptive_rho_interval(Some(25))
+                // .eps_abs(1e-1)
+                // .eps_rel(1e-1)
+                // .max_iter(16_000)
+                // .max_iter(400)
+                // .polish(true)
+                // .verbose(true);
+                .verbose(false);
+
+            // let mut prob = Problem::new(P, q, A, l, u, &settings)
+            let mut prob = Problem::new(P2, &Q2[..], A2, &L2[..], &U2[..], &settings)
+                .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
+            
+            let result = prob.solve();
+            // eprintln!("CSP OUT {:?}", result);
+
+            let solution = match result {
+                osqp::Status::Solved(solution) => Ok(solution),
+                osqp::Status::SolvedInaccurate(solution) => Ok(solution),
+                osqp::Status::MaxIterationsReached(solution) => Ok(solution),
+                osqp::Status::TimeLimitReached(solution) => Ok(solution),
+                _ => Err(LayoutError::OsqpError{error: "failed to solve problem".into(),}.in_current_span()),
+            }?;
+            let x = solution.x().to_vec();
+            let bound = solution.obj_val();
+            Ok((bound, x))
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct ILP<S: Sol> {
+        pub vars: Vars<S>, 
+        pub csp: Constraints<S>,
+        pub obj: Vec<Monomial<S>>,
+        pub integral: Vec<S>,
+        pub fractional: Vec<S>,
+        pub eps_abs: f64,
+    }
+
+    #[derive(Clone, Debug)]
+    pub enum ILPStatus<S: Sol> {
+        NotAsGood,
+        NotIntegral(Var<S>),
+        IntegerInfeasible(usize),
+        Solved(f64, Vec<f64>)
+    }
+
+    impl<S: Sol> ILP<S> {
+        pub fn new(vars: Vars<S>, csp: Constraints<S>, obj: Vec<Monomial<S>>) -> Self {
+            Self {
+                vars,
+                csp,
+                obj,
+                integral: vec![],
+                fractional: vec![],
+                eps_abs: 1.0e-3_f64,
+            }
+        }
+
+        #[instrument]
+        pub fn solve(&mut self) -> Result<ILPStatus<S>, Error> {
+            let mut queue = vec![ILPInstance{vars: self.vars.clone(), csp: self.csp.clone(), obj: self.obj.clone()}];
+            let mut global_bound = f64::INFINITY;
+            let mut global_xs = None;
+            let mut rng = rand::thread_rng();
+            let mut n = 0;
+            
+            while !queue.is_empty() {
+                if global_bound == 0.0 {
+                    break
+                }
+                
+                let queue_len = queue.len();
+                let random_index = rng.gen_range(0..queue.len());
+                queue.swap(queue_len-1, random_index);
+                #[allow(clippy::unwrap_used)]
+                let mut instance = queue.pop().unwrap();
+
+                let status = instance.solve(global_bound);
+                eprintln!("ILP INSTANCE STATUS: n: {n}, global bound: {global_bound}, instance status: {status:?}");
+                match status {
+                    Ok(ILPStatus::NotIntegral(split)) => {
+                        let mut floor = ILPInstance{vars: instance.vars.clone(), csp: instance.csp.clone(), obj: instance.obj.clone()};
+                        let mut ceil =  ILPInstance{vars: instance.vars.clone(), csp: instance.csp.clone(), obj: instance.obj.clone()};
+                        floor.csp.push((0., vec![Monomial{ var: split, coeff: 1. }], 0.));
+                        ceil.csp.push((1., vec![Monomial{ var: split, coeff: 1. }], 1.));
+                        queue.push(floor);
+                        queue.push(ceil);
+                    },
+                    Ok(ILPStatus::IntegerInfeasible(_)) | Ok(ILPStatus::NotAsGood) => {
+                        continue
+                    },
+                    Ok(ILPStatus::Solved(bound, xs)) => {
+                        if bound < global_bound {
+                            global_bound = bound;
+                            global_xs = Some(xs);
+                        }
+                    },
+                    Err(_e) => {
+                        continue
+                    },
+                }
+                n += 1;
+            }
+            
+            if let (bound, Some(xs)) = (global_bound, global_xs) {
+                Ok(ILPStatus::Solved(bound, xs))
+            } else {
+                Err(LayoutError::OsqpError{error: "infeasible".into()}.in_current_span().into())
+            }
+        }
+    }
+}
+
+pub mod backtrack {
+    use osqp::CscMatrix;
+    use rand::Rng;
+    use tracing::instrument;
+    use tracing_error::InstrumentError;
+
+    use super::osqp::{Sol, Vars, Constraints, Monomial, Printer, Var};
+    use crate::graph_drawing::{error::{Error, LayoutError, OrErrExt}, osqp::as_diag_csc_matrix};
+
+    #[derive(Clone, Debug)]
+    pub struct ILPInstance<S: Sol> {
+        pub vars: Vars<S>,
+        pub csp: Constraints<S>,
+        pub obj: Vec<Monomial<S>>,
+    }
+
+    impl<S: Sol> ILPInstance<S> {
+        pub fn solve(&mut self, best_alternative: f64) -> Result<ILPStatus<S>, Error> {
+            let eps_abs_infeas = 0.1;
+
+            let (bound, xs) = self.solve_relaxation()?;
+            if bound >= best_alternative {
+                eprintln!("ILP INSTANCE: NOT AS GOOD bound: {bound} >= best alternative: {best_alternative}");
+                return Ok(ILPStatus::<S>::NotAsGood)
+            }
+
+            let eps_abs = 0.1;
+            let fractional_idx = xs.iter().position(|x| (x.round() - x).abs() >= eps_abs);
+
+            if let Some(fractional_idx) = fractional_idx {
+                let fractional_var = self.vars.vars.values()
+                    .find(|v| v.index == fractional_idx)
+                    .or_err(LayoutError::OsqpError{error: "missing fractional idx".into()})?;
+                eprintln!("ILP INSTANCE: FRACTIONAL index: {fractional_idx} var: {fractional_var}");
+                return Ok(ILPStatus::<S>::NotIntegral(*fractional_var));
+            }
+
+            let infeasible_idx = self.csp.iter().position(|(l, a, u)| {
+                let asum = a.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+                *l - eps_abs_infeas > asum || asum > *u + eps_abs_infeas
+            });
+
+            if let Some(infeasible_idx) = infeasible_idx {
+                let (l, a, u) = &self.csp.constrs[infeasible_idx];
+                let asum = a.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+                let a = Printer(a);
+                eprintln!("ILP INSTANCE: INTEGER INFEASIBLE in constraint {infeasible_idx}, {l} <= {a} <= {u}, A.x = {asum}");
+                return Ok(ILPStatus::<S>::IntegerInfeasible(infeasible_idx))
+            }
+
+            let actual_bound = self.obj.iter().map(|m| m.coeff * xs[m.var.index].round()).sum::<f64>();
+
+            eprintln!("ILP INSTANCE: SOLVED relaxed bound: {bound}, actual bound: {actual_bound}, xs: {xs:?}");
+            Ok(ILPStatus::<S>::Solved(actual_bound, xs))
         }
 
         pub fn solve_relaxation(&mut self) -> Result<(f64, Vec<f64>), Error> {
@@ -1536,6 +1744,36 @@ pub mod layout {
         Ok(Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc})
     }
 
+    pub mod sol {
+        use std::fmt::Display;
+
+        use crate::graph_drawing::osqp::Fresh;
+
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub enum AnySol {
+            X(usize, usize, usize),
+            C(usize, usize, usize, usize, usize),
+            T(usize)
+        }
+
+        impl Fresh for AnySol {
+            fn fresh(index: usize) -> Self {
+                Self::T(index)
+            }
+        }
+
+        impl Display for AnySol {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    AnySol::X(l, a, b) => write!(f, "x{},{},{}", l, a, b),
+                    AnySol::C(l, u1, v1, u2, v2) => write!(f, "c{},{},{},{},{}", l, u1, v1, u2, v2),
+                    AnySol::T(idx) => write!(f, "t{}", idx),
+                }
+            }
+        }
+    }
+
+
     /// A placement solver based on the [minion](https://github.com/minion/minion) constraint solver
     pub mod minion {
         use std::collections::{BTreeMap, HashMap};
@@ -1781,33 +2019,11 @@ pub mod layout {
 
         use crate::graph_drawing::error::{Error, LayoutError};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
+        use crate::graph_drawing::layout::sol::AnySol;
         use crate::graph_drawing::layout::{Hop, Loc, or_insert};
         use crate::graph_drawing::osqp::{Fresh, Vars, Constraints, Monomial, as_diag_csc_matrix, print_tuples, ILP, ILPStatus};
 
         use super::Placement;
-
-        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub enum AnySol {
-            X(usize, usize, usize),
-            C(usize, usize, usize, usize, usize),
-            T(usize)
-        }
-
-        impl Fresh for AnySol {
-            fn fresh(index: usize) -> Self {
-                Self::T(index)
-            }
-        }
-
-        impl Display for AnySol {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self {
-                    AnySol::X(l, a, b) => write!(f, "x{},{},{}", l, a, b),
-                    AnySol::C(l, u1, v1, u2, v2) => write!(f, "c{},{},{},{},{}", l, u1, v1, u2, v2),
-                    AnySol::T(idx) => write!(f, "t{}", idx),
-                }
-            }
-        }
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
@@ -1969,8 +2185,209 @@ pub mod layout {
         }
     }
 
+    /// A placement solver based on efficient backtracking, inspired by [minion]
+    pub mod backtrack {
+        use std::collections::{BTreeMap, HashMap};
+        use std::fmt::{Debug, Display};
+        use std::hash::Hash;
+
+        use petgraph::Graph;
+        use petgraph::dot::Dot;
+        use tracing::{event, Level};
+
+        use crate::graph_drawing::error::{Error};
+        use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
+        use crate::graph_drawing::layout::{Hop, Loc, or_insert};
+        use crate::graph_drawing::osqp::{Fresh, Vars, Constraints, Monomial};
+        use crate::graph_drawing::backtrack::{ILP, ILPStatus};
+
+        use super::Placement;
+
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub enum AnySol {
+            X(usize, usize, usize),
+            C(usize, usize, usize, usize, usize),
+            T(usize)
+        }
+
+        impl Fresh for AnySol {
+            fn fresh(index: usize) -> Self {
+                Self::T(index)
+            }
+        }
+
+        impl Display for AnySol {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    AnySol::X(l, a, b) => write!(f, "x{},{},{}", l, a, b),
+                    AnySol::C(l, u1, v1, u2, v2) => write!(f, "c{},{},{},{},{}", l, u1, v1, u2, v2),
+                    AnySol::T(idx) => write!(f, "t{}", idx),
+                }
+            }
+        }
+
+        /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
+        #[allow(clippy::type_complexity)]
+        pub fn minimize_edge_crossing<V>(
+            placement: &Placement<V>
+        ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
+            V: Clone + Debug + Display + Ord + Hash
+        {
+            let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
+            
+            if hops_by_level.is_empty() {
+                return Ok((0, BTreeMap::new()));
+            }
+            if hops_by_level.iter().all(|(_lvl, hops)| hops.iter().count() <= 1) {
+                let mut solved_locs = BTreeMap::new();
+                for (lvl, locs) in locs_by_level.iter() {
+                    for (n, _) in locs.iter().enumerate() {
+                        solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
+                    }
+                }
+                return Ok((0, solved_locs))
+            }
+            #[allow(clippy::unwrap_used)]
+            let max_level = *hops_by_level.keys().max().unwrap();
+            #[allow(clippy::unwrap_used)]
+            let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
+
+            event!(Level::DEBUG, %max_level, %max_width, "max_level, max_width");
+
+            let mut vars: Vars<AnySol> = Vars::new();
+            let mut csp: Constraints<AnySol> = Constraints::new();
+            
+            // let mut csp = String::new();
+            use AnySol::{X,C};
+
+            for (rank, locs) in locs_by_level.iter() {
+                let l = rank.0;
+                let n = locs.len();
+                // let n = max_width;
+                for a in 0..n {
+                    // let xaa = vars.get(X(l, a, a));
+                    // csp.eqc(&[xaa], 0.);
+                    // csp.push_str(&format!("sumleq(x{l}[{a},{a}],0)\n", l=l, a=a));
+                    for b in 0..n {
+                        if a != b {
+                            let xab = vars.get(X(l, a, b));
+                            let xba = vars.get(X(l, b, a));
+                            csp.eqc(&[xab, xba], 1.);
+                            // csp.push_str(&format!("sumleq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                            // csp.push_str(&format!("sumgeq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                            for c in 0..(n) {
+                                if b != c && a != c {
+                                    let xca = vars.get(X(l, c, a));
+                                    let xcb = vars.get(X(l, c, b));
+                                    // TODO: check this adaption of leqc.
+                                    csp.push((-1., vec![-xcb, -xba, xca], f64::INFINITY));
+                                    // csp.push_str(&format!("sumleq([x{l}[{c},{b}], x{l}[{b},{a}], -1],x{l}[{c},{a}])\n", l=l, a=a, b=b, c=c));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for (k, hops) in hops_by_level.iter() {
+                if *k <= max_level {
+                    for Hop{mhr: u1, nhr: v1, ..} in hops.iter() {
+                        for Hop{mhr: u2, nhr: v2, ..}  in hops.iter() {
+                            // if (u1,v1) != (u2,v2) { // BUG!
+                            if u1 != u2 && v1 != v2 {
+                                let c = vars.get(C(k.0, u1.0, v1.0, u2.0, v2.0));
+                                let xu21 = vars.get(X(k.0, u2.0, u1.0));
+                                let xv12 = vars.get(X(k.0+1, v1.0, v2.0));
+                                let xu12 = vars.get(X(k.0, u1.0, u2.0));
+                                let xv21 = vars.get(X(k.0+1, v2.0, v1.0));
+                                csp.push((1., vec![c, xu21, xv12], f64::INFINITY));
+                                csp.push((1., vec![c, xu12, xv21], f64::INFINITY));
+                                // csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u2},{u1}],x{j}[{v1},{v2}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=*k+1));
+                                // csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u1},{u2}],x{j}[{v2},{v1}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=*k+1));
+                            }
+                        }
+                    }
+                }
+            }
+            let mut Q: Vec<Monomial<AnySol>> = vec![];
+            // add 0-1 constraints for all variables, and add all 
+            // crossing-number variables to the objective
+            for (ix, var) in vars.iter() {
+                if matches!(ix, AnySol::C(..)) {
+                    Q.push(var.into());
+                }
+                csp.push((0., vec![var.into()], 1.));
+            }
+
+            event!(Level::DEBUG, %csp, "CSP");
+            
+            let mut ilp = crate::graph_drawing::backtrack::ILP::new(vars.clone(), csp, Q);
+            let status = ilp.solve()?;
+            let (_crossing_number, x) = match status {
+                ILPStatus::Solved(bound, xs) => (bound, xs),
+                _ => panic!("ilp not solved"),
+            };
+
+            let solutions = vars.iter().map(|(_sol, var)| (var.sol, x[var.index].round())).collect::<BTreeMap<_, _>>();
+
+            // std::process::exit(0);
+            
+
+            let mut solved_locs = BTreeMap::new();
+            for (lvl, locs) in locs_by_level.iter() {
+                let mut ohrs = vec![];
+                for n in 0..locs.len() {
+                    ohrs.push(n);
+                }
+                ohrs.sort_unstable_by(|a, b| {
+                    match solutions.get(&X(lvl.0, *a, *b)) {
+                        Some(x) if *x == 1. => std::cmp::Ordering::Less,
+                        Some(x) if *x == 0. => std::cmp::Ordering::Greater,
+                        _ => std::cmp::Ordering::Equal,
+                    }
+                });
+                for (shr, n) in ohrs.iter().enumerate() {
+                    solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(*n), SolvedHorizontalRank(shr));
+                }
+            }
+
+            let mut layout_debug = Graph::<String, String>::new();
+            let mut layout_debug_vxmap = HashMap::new();
+            for ((vl, wl), hops) in hops_by_edge.iter() {
+                // if *vl == "root" { continue; }
+                let vn = node_to_loc[&Loc::Node(vl.clone())];
+                let wn = node_to_loc[&Loc::Node(wl.clone())];
+                let vshr = solved_locs[&vn.0][&vn.1];
+                let wshr = solved_locs[&wn.0][&wn.1];
+
+                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
+                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
+
+                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
+                    let shr = solved_locs[lvl][mhr];
+                    let shrd = solved_locs[&(*lvl+1)][nhr];
+                    let lvl1 = *lvl+1;
+                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
+                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
+                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
+                    if n == 0 {
+                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
+                    }
+                    if n == hops.len()-1 {
+                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
+                    }
+                }
+            }
+            let layout_debug_dot = Dot::new(&layout_debug);
+            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
+            eprintln!("LAYOUT GRAPH\n{layout_debug_dot:?}");
+
+            // Ok((crossing_number, solved_locs))
+            Ok((0, solved_locs))
+        }
+    }
+
     /// Solve for horizontal ranks that minimize edge crossing
-    pub use miosqp::minimize_edge_crossing;
+    pub use backtrack::minimize_edge_crossing;
 }
 
 pub mod geometry {
