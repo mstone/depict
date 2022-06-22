@@ -2614,6 +2614,166 @@ pub mod layout {
         }
     }
 
+    /// A layout problem solver based on the [highs](https://highs.dev) optimization library
+    pub mod highs {
+        use std::collections::{BTreeMap, HashMap};
+        use std::fmt::{Debug, Display};
+        use std::hash::Hash;
+
+        use tracing::{event, Level};
+
+        use crate::graph_drawing::error::{Error};
+        use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
+        use crate::graph_drawing::layout::debug::debug;
+        use crate::graph_drawing::layout::sol::AnySol;
+        use crate::graph_drawing::layout::{Hop};
+        use crate::graph_drawing::osqp::{Vars, Constraints};
+
+        use super::LayoutProblem;
+
+        /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
+        #[allow(clippy::type_complexity)]
+        pub fn minimize_edge_crossing<V>(
+            layout_problem: &LayoutProblem<V>
+        ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
+            V: Clone + Debug + Display + Ord + Hash
+        {
+            let LayoutProblem{locs_by_level, hops_by_level, ..} = layout_problem;
+            
+            if hops_by_level.is_empty() {
+                return Ok((0, BTreeMap::new()));
+            }
+            if hops_by_level.iter().all(|(_lvl, hops)| hops.iter().count() <= 1) {
+                let mut solved_locs = BTreeMap::new();
+                for (lvl, locs) in locs_by_level.iter() {
+                    for (n, _) in locs.iter().enumerate() {
+                        solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
+                    }
+                }
+                return Ok((0, solved_locs))
+            }
+            #[allow(clippy::unwrap_used)]
+            let max_level = *hops_by_level.keys().max().unwrap();
+            #[allow(clippy::unwrap_used)]
+            let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
+
+            event!(Level::DEBUG, %max_level, %max_width, "max_level, max_width");
+
+            let mut vars: Vars<AnySol> = Vars::new();
+            let mut csp: Constraints<AnySol> = Constraints::new();
+            
+            // let mut csp = String::new();
+            use AnySol::{X,C};
+
+            for (rank, locs) in locs_by_level.iter() {
+                let l = rank.0;
+                let n = locs.len();
+                // let n = max_width;
+                for a in 0..n {
+                    // let xaa = vars.get(X(l, a, a));
+                    // csp.eqc(&[xaa], 0.);
+                    // csp.push_str(&format!("sumleq(x{l}[{a},{a}],0)\n", l=l, a=a));
+                    for b in 0..n {
+                        if a != b {
+                            let xab = vars.get(X(l, a, b));
+                            let xba = vars.get(X(l, b, a));
+                            csp.eqc(&[xab, xba], 1.);
+                            // csp.push_str(&format!("sumleq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                            // csp.push_str(&format!("sumgeq([x{l}[{a},{b}], x{l}[{b},{a}]],1)\n", l=l, a=a, b=b));
+                            for c in 0..(n) {
+                                if b != c && a != c {
+                                    let xca = vars.get(X(l, c, a));
+                                    let xcb = vars.get(X(l, c, b));
+                                    // TODO: check this adaption of leqc.
+                                    csp.push((-1., vec![-xcb, -xba, xca], f64::INFINITY));
+                                    // csp.push_str(&format!("sumleq([x{l}[{c},{b}], x{l}[{b},{a}], -1],x{l}[{c},{a}])\n", l=l, a=a, b=b, c=c));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for (k, hops) in hops_by_level.iter() {
+                if *k <= max_level {
+                    for Hop{mhr: u1, nhr: v1, ..} in hops.iter() {
+                        for Hop{mhr: u2, nhr: v2, ..}  in hops.iter() {
+                            // if (u1,v1) != (u2,v2) { // BUG!
+                            if u1 != u2 && v1 != v2 {
+                                let c = vars.get(C(k.0, u1.0, v1.0, u2.0, v2.0));
+                                let xu21 = vars.get(X(k.0, u2.0, u1.0));
+                                let xv12 = vars.get(X(k.0+1, v1.0, v2.0));
+                                let xu12 = vars.get(X(k.0, u1.0, u2.0));
+                                let xv21 = vars.get(X(k.0+1, v2.0, v1.0));
+                                csp.push((1., vec![c, xu21, xv12], f64::INFINITY));
+                                csp.push((1., vec![c, xu12, xv21], f64::INFINITY));
+                                // csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u2},{u1}],x{j}[{v1},{v2}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=*k+1));
+                                // csp.push_str(&format!("sumgeq([c{k}[{u1},{v1},{u2},{v2}],x{k}[{u1},{u2}],x{j}[{v2},{v1}]],1)\n", u1=u1, u2=u2, v1=v1, v2=v2, k=k, j=*k+1));
+                            }
+                        }
+                    }
+                }
+            }
+
+            use ::highs::{Sense, RowProblem};
+            let mut pb = RowProblem::default();
+            let mut highs_vars = HashMap::new();
+
+            // add 0-1 constraints for all variables, and add all 
+            // crossing-number variables to the objective
+            for (ix, var) in vars.iter() {
+                match ix {
+                    AnySol::X(..) => {
+                        highs_vars.insert(var.index, pb.add_integer_column(0., 0..=1));
+                    },
+                    AnySol::C(..) => {
+                        highs_vars.insert(var.index, pb.add_integer_column(1., 0..=1));
+                    }
+                }
+            }
+            for (l, a, u) in csp.iter() {
+                let terms = a.iter().map(|m| (highs_vars[&m.var.index], m.coeff)).collect::<Vec<_>>();
+                pb.add_row((*l)..=(*u), &terms[..]);
+            }
+
+            event!(Level::DEBUG, %csp, "CSP");
+
+            let solved = pb.optimise(Sense::Maximise).solve();
+            let status = solved.status();
+            eprintln!("HIGHS STATUS: {status:?}");
+            let solution = solved.get_solution();
+            let columns = solution.columns();
+
+            let solutions = vars.iter().enumerate().map(|(n, (_sol, var))| (var.sol, columns[n].round())).collect::<BTreeMap<_, _>>();
+
+            // std::process::exit(0);
+            
+
+            let mut solved_locs = BTreeMap::new();
+            for (lvl, locs) in locs_by_level.iter() {
+                let mut ohrs = vec![];
+                for n in 0..locs.len() {
+                    ohrs.push(n);
+                }
+                ohrs.sort_by(|a, b| {
+                    match solutions.get(&X(lvl.0, *a, *b)) {
+                        Some(x) if *x == 1. => std::cmp::Ordering::Less,
+                        Some(x) if *x == 0. => std::cmp::Ordering::Greater,
+                        _ => std::cmp::Ordering::Equal,
+                    }
+                });
+                for (shr, n) in ohrs.iter().enumerate() {
+                    solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(*n), SolvedHorizontalRank(shr));
+                }
+            }
+
+            debug(layout_problem, &solved_locs);
+
+            // Ok((crossing_number, solved_locs))
+            Ok((0, solved_locs))
+        }
+    }
+
+
     /// Solve for horizontal ranks that minimize edge crossing
     pub use heaps::minimize_edge_crossing;
 }

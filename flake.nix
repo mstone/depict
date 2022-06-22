@@ -176,6 +176,7 @@
                 rust
                 # tex
                 cmake
+                llvmPackages.openmp
               ] ++ final.lib.optionals isShell [
                 entr
                 trunk
