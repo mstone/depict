@@ -827,26 +827,26 @@ pub mod osqp {
             use osqp::{Problem};
 
             let n = vars.len();
-            let P2 = as_diag_csc_matrix::<S>(Some(n), Some(n), &[]);
+            let p2 = as_diag_csc_matrix::<S>(Some(n), Some(n), &[]);
             // print_tuples("P2", &P2);
 
-            let mut Q2 = Vec::with_capacity(n);
-            Q2.resize(n, 0.);
+            let mut q2 = Vec::with_capacity(n);
+            q2.resize(n, 0.);
             for q in obj.iter() {
-                Q2[q.var.index] += q.coeff; 
+                q2[q.var.index] += q.coeff; 
             }
             // std::process::exit(0);
 
-            let mut L2 = vec![];
-            let mut U2 = vec![];
+            let mut l2 = vec![];
+            let mut u2 = vec![];
             for (l, _, u) in csp.iter() {
-                L2.push(*l);
-                U2.push(*u);
+                l2.push(*l);
+                u2.push(*u);
             }
             // eprintln!("V[{}]: {vars}", vars.len());
             // eprintln!("C[{}]: {csp}", &csp.len());
 
-            let A2: CscMatrix = csp.clone().into();
+            let a2: CscMatrix = csp.clone().into();
 
             // eprintln!("P2[{},{}]: {P2:?}", P2.nrows, P2.ncols);
             // eprintln!("Q2[{}]: {Q2:?}", Q2.len());
@@ -868,7 +868,7 @@ pub mod osqp {
                 .verbose(false);
 
             // let mut prob = Problem::new(P, q, A, l, u, &settings)
-            let mut prob = Problem::new(P2, &Q2[..], A2, &L2[..], &U2[..], &settings)
+            let mut prob = Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], &settings)
                 .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
             
             let result = prob.solve();
@@ -1016,7 +1016,7 @@ pub mod backtrack {
             })
         }
 
-        pub fn solve<S: Sol>(&mut self, ilp: &ILP<S>, best_alternative: f64) -> Result<ILPStatus, Error> {
+        pub fn solve<S: Sol>(&mut self, ilp: &ILP<S>) -> Result<ILPStatus, Error> {
             let eps_abs_infeas = 1.0e-1_f64;
             let unassigned_idx = self.alloc.first_zero();
 
@@ -1086,7 +1086,7 @@ pub mod backtrack {
                 #[allow(clippy::unwrap_used)]
                 let mut instance = queue.pop().unwrap();
 
-                let status = instance.solve(self, global_bound);
+                let status = instance.solve(self);
                 if n % 10000 == 0 {
                     eprintln!("BACKTRACK INSTANCE STATUS: n: {n}, global bound: {global_bound}, instance status: {status:?}");
                 }
@@ -1305,6 +1305,7 @@ pub mod layout {
         }).collect::<Vec<_>>()
     }
 
+    #[allow(clippy::type_complexity)] 
     #[instrument()]
     fn helper_labels<'s>(labels: &mut Vec<(Labels<Cow<'s, str>>, Labels<Cow<'s, str>>)>, r: &'s [Item<'s>]) {
         eprint!("HELPER_LABELS, r: {r:#?} ");
@@ -2067,19 +2068,19 @@ pub mod layout {
                     }
                 }
             }
-            let mut Q: Vec<Monomial<AnySol>> = vec![];
+            let mut q: Vec<Monomial<AnySol>> = vec![];
             // add 0-1 constraints for all variables, and add all 
             // crossing-number variables to the objective
             for (ix, var) in vars.iter() {
                 if matches!(ix, AnySol::C(..)) {
-                    Q.push(var.into());
+                    q.push(var.into());
                 }
                 csp.push((0., vec![var.into()], 1.));
             }
 
             event!(Level::DEBUG, %csp, "CSP");
             
-            let mut ilp = ILP::new(vars.clone(), csp, Q);
+            let mut ilp = ILP::new(vars.clone(), csp, q);
             let status = ilp.solve()?;
             let (_crossing_number, x) = match status {
                 ILPStatus::Solved(bound, xs) => (bound, xs),
@@ -2374,7 +2375,7 @@ pub mod layout {
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
             V: Display + Graphic
         {
-            let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
+            let Placement{locs_by_level, hops_by_level, ..} = placement;
             
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
@@ -2449,19 +2450,19 @@ pub mod layout {
                     }
                 }
             }
-            let mut Q: Vec<Monomial<AnySol>> = vec![];
+            let mut q: Vec<Monomial<AnySol>> = vec![];
             // add 0-1 constraints for all variables, and add all 
             // crossing-number variables to the objective
             for (ix, var) in vars.iter() {
                 if matches!(ix, AnySol::C(..)) {
-                    Q.push(var.into());
+                    q.push(var.into());
                 }
                 csp.push((0., vec![var.into()], 1.));
             }
 
             event!(Level::DEBUG, %csp, "CSP");
             
-            let mut ilp = crate::graph_drawing::backtrack::ILP::new(vars.clone(), csp, Q);
+            let mut ilp = crate::graph_drawing::backtrack::ILP::new(vars.clone(), csp, q);
             let status = ilp.solve()?;
             let (_crossing_number, x) = match status {
                 ILPStatus::Solved(bound, xs) => (bound, xs),
@@ -2754,19 +2755,19 @@ pub mod geometry {
     
         let sep = 20.0;
 
-        let mut V: Vars<AnySol> = Vars::new();
-        let mut C: Constraints<AnySol> = Constraints::new();
-        let mut Pd: Vec<Monomial<AnySol>> = vec![];
-        let mut Q: Vec<Monomial<AnySol>> = vec![];
+        let mut v: Vars<AnySol> = Vars::new();
+        let mut c: Constraints<AnySol> = Constraints::new();
+        let mut pd: Vec<Monomial<AnySol>> = vec![];
+        let mut q: Vec<Monomial<AnySol>> = vec![];
 
-        let L = AnySol::L;
-        let R = AnySol::R;
-        let S = AnySol::S;
+        let l = AnySol::L;
+        let r = AnySol::R;
+        let s = AnySol::S;
         
         let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
         // q[r[root_n]] = 1  <-- obj += r[root_n]
         // obj = add(obj, r.get(root_n)?)?;
-        Q.push(V.get(R(root_n)));
+        q.push(v.get(r(root_n)));
 
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
         enum Loc2<V> {
@@ -2908,16 +2909,16 @@ pub mod geometry {
             if let Loc::Hop(_lvl, vl, wl) = loc {
                 let ns = sol_by_hop[&(ovr, ohr, vl.clone(), wl.clone())];
                 
-                C.leq(&mut V, L(n), S(ns));
-                C.leq(&mut V, S(ns), R(n));
+                c.leq(&mut v, l(n), s(ns));
+                c.leq(&mut v, s(ns), r(n));
                 event!(Level::TRACE, ?loc, %n, %min_width, "X3: l{n} <= s{ns} <= r{n}");
             }
         
-            C.leq(&mut V, L(root_n), L(n));
-            C.leq(&mut V, R(n), R(root_n));
+            c.leq(&mut v, l(root_n), l(n));
+            c.leq(&mut v, r(n), r(root_n));
 
             event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
-            C.leqc(&mut V, L(n), R(n), min_width as f64);
+            c.leqc(&mut v, l(n), r(n), min_width as f64);
 
             // WIDTH
             // BUG! WHY DOES THIS MATTER???????
@@ -2927,7 +2928,7 @@ pub mod geometry {
                 let ohrp = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap());
                 let np = sol_by_loc[&(ovr, ohrp)];
                 let shrp = locs[&ohrp];
-                C.leqc(&mut V, R(np), L(n), sep);
+                c.leqc(&mut v, r(np), l(n), sep);
                 event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, "X1: l{n} >= r{np} + ε")
             }
             if shr < SolvedHorizontalRank(locs.len()-1) {
@@ -2935,7 +2936,7 @@ pub mod geometry {
                 let ohrn = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap());
                 let nn = sol_by_loc[&(ovr,ohrn)];
                 let shrn = locs[&(ohrn)];
-                C.leqc(&mut V, R(n), L(nn), sep);
+                c.leqc(&mut v, r(n), l(nn), sep);
                 event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, "X2: r{n} <= l{nn} - ε")
             }
         }
@@ -2966,12 +2967,12 @@ pub mod geometry {
             let action_width = *action_width;
             let percept_width = *percept_width;
 
-            C.leqc(&mut V, L(root_n), S(n), action_width);
-            C.leqc(&mut V, S(n), R(root_n), percept_width);
+            c.leqc(&mut v, l(root_n), s(n), action_width);
+            c.leqc(&mut v, s(n), r(root_n), percept_width);
 
             if !terminal {
                 let nd = sol_by_hop[&((*lvl+1), *nhr, (*vl).clone(), (*wl).clone())];
-                C.sym(&mut V, &mut Pd, S(n), S(nd));
+                c.sym(&mut v, &mut pd, s(n), s(nd));
             }
 
             event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
@@ -2980,8 +2981,8 @@ pub mod geometry {
                 // Lnd + sep + aw <= Sn
                 // Lnd <= Sn-sep-aw
                 eprintln!("XXXX POS HOP CONSTR L{nd} <= S{n} <= R{nd}");
-                C.geqc(&mut V, S(n), L(*nd), sep + action_width);
-                C.leqc(&mut V, S(n), R(*nd), sep + percept_width);
+                c.geqc(&mut v, s(n), l(*nd), sep + action_width);
+                c.leqc(&mut v, s(n), r(*nd), sep + percept_width);
 
                 if terminal {
                     let mut terminal_hops = all_objects
@@ -3004,7 +3005,7 @@ pub mod geometry {
                             let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
-                                C.leqc(&mut V, S(*onl), S(*on), sep + owidth_l.1 + owidth.0);
+                                c.leqc(&mut v, s(*onl), s(*on), sep + owidth_l.1 + owidth.0);
                                 // C.sym(&mut V, &mut Pd, S(*on), S(*onl));
                             }
                             else {
@@ -3012,7 +3013,7 @@ pub mod geometry {
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
-                                C.leqc(&mut V, S(*on), S(*onr), sep + owidth_r.0 + owidth.1);
+                                c.leqc(&mut v, s(*on), s(*onr), sep + owidth_r.0 + owidth.1);
                                 // C.sym(&mut V, &mut Pd, S(*onr), S(*on));
                             }
                             else {
@@ -3044,14 +3045,14 @@ pub mod geometry {
                             let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
-                                C.leqc(&mut V, S(*onl), S(*on), sep + owidth_l.1 + owidth.0);
+                                c.leqc(&mut v, s(*onl), s(*on), sep + owidth_l.1 + owidth.0);
                                 // C.sym(&mut V, &mut Pd, S(*on), S(*onl));
                             } else {
                                 // C.sym(&mut V, &mut Pd, L(*nd), S(*on));
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
-                                C.leqc(&mut V, S(*on), S(*onr), sep + owidth_r.0 + owidth.1);
+                                c.leqc(&mut v, s(*on), s(*onr), sep + owidth_r.0 + owidth.1);
                                 // C.sym(&mut V, &mut Pd, S(*onr), S(*on));
                             }
                             else {
@@ -3070,11 +3071,11 @@ pub mod geometry {
                     event!(Level::TRACE, ?lo, "POS LEFT OBJECT");
                     match lo {
                         Loc2::Node{sol: ln, ..} => {
-                            C.geqc(&mut V, S(n), L(*ln), sep + action_width);
+                            c.geqc(&mut v, s(n), l(*ln), sep + action_width);
                         },
                         Loc2::Hop{vl: lvl, wl: lwl, loc: (lvr, lhr), sol: ln, ..} => {
                             let (_action_width_l, percept_width_l) = width_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).unwrap_or(&default_hop_width);
-                            C.geqc(&mut V, S(n), S(*ln), (2.*sep) + percept_width_l + action_width);
+                            c.geqc(&mut v, s(n), s(*ln), (2.*sep) + percept_width_l + action_width);
                         },
                     }
                 }
@@ -3086,11 +3087,11 @@ pub mod geometry {
                     event!(Level::TRACE, ?ro, "POS RIGHT OBJECT");
                     match ro {
                         Loc2::Node{sol: rn, ..} => {
-                            C.leqc(&mut V, S(n), L(*rn), sep + action_width);
+                            c.leqc(&mut v, s(n), l(*rn), sep + action_width);
                         },
                         Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
                             let (action_width_r, _percept_width_r) = width_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_width);
-                            C.leqc(&mut V, S(n), S(*rn), (2.*sep) + action_width_r + percept_width);
+                            c.leqc(&mut v, s(n), s(*rn), (2.*sep) + action_width_r + percept_width);
                         },
                     }
                 }
@@ -3100,15 +3101,15 @@ pub mod geometry {
         }
 
         // add non-negativity constraints for all vars
-        for (sol, var) in V.iter() {
+        for (sol, var) in v.iter() {
             if matches!(sol, AnySol::L(_) | AnySol::R(_) | AnySol::S(_)) {
-                C.push((0., vec![var.into()], f64::INFINITY));
+                c.push((0., vec![var.into()], f64::INFINITY));
             }
         }
 
         use osqp::{Problem};
 
-        let n = V.len();
+        let n = v.len();
         // eprintln!("VARS: {V:#?}");
         // let nnz = Pd.iter().filter(|v| v.coeff != 0.).count();
         // P, q, A, l, u.
@@ -3117,34 +3118,34 @@ pub mod geometry {
         // as we finish each column, the current data length.
         // let P = CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
 
-        let sparsePd = &Pd[..];
-        eprintln!("sparsePd: {sparsePd:?}");
-        let P2 = as_diag_csc_matrix(Some(n), Some(n), sparsePd);
-        print_tuples("P2", &P2);
+        let sparse_pd = &pd[..];
+        eprintln!("sparsePd: {sparse_pd:?}");
+        let p2 = as_diag_csc_matrix(Some(n), Some(n), sparse_pd);
+        print_tuples("P2", &p2);
 
-        let mut Q2 = Vec::with_capacity(n);
-        Q2.resize(n, 0.);
-        for q in Q.iter() {
-            Q2[q.var.index] += q.coeff; 
+        let mut q2 = Vec::with_capacity(n);
+        q2.resize(n, 0.);
+        for q in q.iter() {
+            q2[q.var.index] += q.coeff; 
         }
         
 
-        let mut L2 = vec![];
-        let mut U2 = vec![];
-        for (l, _, u) in C.iter() {
-            L2.push(*l);
-            U2.push(*u);
+        let mut l2 = vec![];
+        let mut u2 = vec![];
+        for (l, _, u) in c.iter() {
+            l2.push(*l);
+            u2.push(*u);
         }
-        eprintln!("V[{}]: {V}", V.len());
-        eprintln!("C[{}]: {C}", &C.len());
+        eprintln!("V[{}]: {v}", v.len());
+        eprintln!("C[{}]: {c}", &c.len());
 
-        let A2: CscMatrix = C.into();
+        let a2: CscMatrix = c.into();
 
-        eprintln!("P2[{},{}]: {P2:?}", P2.nrows, P2.ncols);
-        eprintln!("Q2[{}]: {Q2:?}", Q2.len());
-        eprintln!("L2[{}]: {L2:?}", L2.len());
-        eprintln!("U2[{}]: {U2:?}", U2.len());
-        eprintln!("A2[{},{}]: {A2:?}", A2.nrows, A2.ncols);
+        eprintln!("P2[{},{}]: {p2:?}", p2.nrows, p2.ncols);
+        eprintln!("Q2[{}]: {q2:?}", q2.len());
+        eprintln!("L2[{}]: {l2:?}", l2.len());
+        eprintln!("U2[{}]: {u2:?}", u2.len());
+        eprintln!("A2[{},{}]: {a2:?}", a2.nrows, a2.ncols);
         
         // let q = &[1., 1.];
         // let A = &[
@@ -3168,7 +3169,7 @@ pub mod geometry {
             .verbose(true);
 
         // let mut prob = Problem::new(P, q, A, l, u, &settings)
-        let mut prob = Problem::new(P2, &Q2[..], A2, &L2[..], &U2[..], &settings)
+        let mut prob = Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], &settings)
             .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
         
         let result = prob.solve();
@@ -3183,7 +3184,7 @@ pub mod geometry {
         let x = solution.x();
 
         // eprintln!("{:?}", x);
-        let mut solutions = V.iter().map(|(_sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
+        let mut solutions = v.iter().map(|(_sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
         solutions.sort_by_key(|(a, _)| *a);
         for (var, val) in solutions {
             if !matches!(var.sol, AnySol::T(_)) {
@@ -3195,7 +3196,7 @@ pub mod geometry {
         // eprintln!("R: {:.2?}\n", rv);
         // eprintln!("S: {:.2?}\n", sv);
         let ts = row_height_offsets.values().copied().collect::<TiVec<VerticalRank, _>>();
-        let mut ls = V.iter()
+        let mut ls = v.iter()
             .filter_map(|(sol, var)| {
                 if let AnySol::L(l) = sol { 
                     Some((l, x[var.index]))
@@ -3208,7 +3209,7 @@ pub mod geometry {
         eprintln!("ls: {ls:?}");
         let ls = ls.iter().map(|(_, v)| *v).collect::<TiVec<LocSol, _>>();
 
-        let mut rs = V.iter()
+        let mut rs = v.iter()
             .filter_map(|(sol, var)| {
                 if let AnySol::R(r) = sol { 
                     Some((r, x[var.index]))
@@ -3221,7 +3222,7 @@ pub mod geometry {
         eprintln!("rs: {rs:?}");
         let rs = rs.iter().map(|(_, v)| *v).collect::<TiVec<LocSol, _>>();
 
-        let mut ss = V.iter()
+        let mut ss = v.iter()
             .filter_map(|(sol, var)| {
                 if let AnySol::S(s) = sol { 
                     Some((s, x[var.index]))
