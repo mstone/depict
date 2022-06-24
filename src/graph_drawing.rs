@@ -973,12 +973,11 @@ pub mod osqp {
 }
 
 pub mod backtrack {
-    use rand::Rng;
     use tracing::instrument;
     use tracing_error::InstrumentError;
     use bitvec::prelude::*;
 
-    use super::osqp::{Sol, Vars, Constraints, Monomial, Printer};
+    use super::osqp::{Sol, Vars, Constraints, Monomial};
     use crate::graph_drawing::{error::{Error, LayoutError}};
 
 
@@ -1074,7 +1073,6 @@ pub mod backtrack {
             let mut queue = vec![ILPInstance::new(n_vars)];
             let mut global_bound = f64::INFINITY;
             let mut global_xs = None;
-            let mut rng = rand::thread_rng();
             let mut n = 0;
             
             while !queue.is_empty() {
@@ -1553,6 +1551,10 @@ pub mod layout {
 
     use crate::graph_drawing::index::{OriginalHorizontalRank, VerticalRank};
 
+    pub trait Graphic: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd {}
+
+    impl <T: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd> Graphic for T {}
+
     /// A graphical object to be positioned relative to other objects
     #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone)]
     pub enum Loc<V,E> {
@@ -1563,7 +1565,7 @@ pub mod layout {
     }
 
     #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-    pub struct Hop<V: Clone + Debug + Display + Ord + Hash> {
+    pub struct Hop<V: Graphic> {
         pub mhr: OriginalHorizontalRank,
         pub nhr: OriginalHorizontalRank,
         pub vl: V,
@@ -1572,7 +1574,7 @@ pub mod layout {
     }
     
     #[derive(Clone, Debug)]
-    pub struct Placement<V: Clone + Debug + Display + Ord + Hash> {
+    pub struct Placement<V: Graphic> {
         pub locs_by_level: BTreeMap<VerticalRank, TiVec<OriginalHorizontalRank, OriginalHorizontalRank>>, 
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
@@ -1588,8 +1590,8 @@ pub mod layout {
         paths_by_rank: &'s RankedPaths<V>
     ) -> Result<Placement<V>, Error>
             where 
-        V: Clone + Debug + Display + Ord + Hash, 
-        E: Clone + Debug + Ord 
+        V: Display + Graphic, 
+        E: Graphic
     {
         // Rank vertices by the length of the longest path reaching them.
         let mut vx_rank = HashMap::new();
@@ -1721,35 +1723,78 @@ pub mod layout {
         }
     }
 
+    pub mod debug {
+        use std::{collections::{HashMap, BTreeMap}, fmt::Display};
+
+        use petgraph::{Graph, dot::Dot};
+        use tracing::{event, Level};
+
+        use crate::graph_drawing::{layout::{Placement, Loc, or_insert}, index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank}};
+
+        use super::Graphic;
+        
+        pub fn debug<V: Display + Graphic>(placement: &Placement<V>, solved_locs: &BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>) {
+            let Placement{node_to_loc, hops_by_edge, ..} = placement;
+            let mut layout_debug = Graph::<String, String>::new();
+            let mut layout_debug_vxmap = HashMap::new();
+            for ((vl, wl), hops) in hops_by_edge.iter() {
+                // if *vl == "root" { continue; }
+                let vn = node_to_loc[&Loc::Node(vl.clone())];
+                let wn = node_to_loc[&Loc::Node(wl.clone())];
+                let vshr = solved_locs[&vn.0][&vn.1];
+                let wshr = solved_locs[&wn.0][&wn.1];
+
+                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
+                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
+
+                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
+                    let shr = solved_locs[lvl][mhr];
+                    let shrd = solved_locs[&(*lvl+1)][nhr];
+                    let lvl1 = *lvl+1;
+                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
+                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
+                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
+                    if n == 0 {
+                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
+                    }
+                    if n == hops.len()-1 {
+                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
+                    }
+                }
+            }
+            let layout_debug_dot = Dot::new(&layout_debug);
+            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
+            eprintln!("LAYOUT GRAPH\n{layout_debug_dot:?}");
+        }
+    }
+
 
     /// A placement solver based on the [minion](https://github.com/minion/minion) constraint solver
     pub mod minion {
-        use std::collections::{BTreeMap, HashMap};
-        use std::fmt::{Debug, Display};
-        use std::hash::Hash;
+        use std::collections::{BTreeMap};
+        use std::fmt::{Display};
         use std::io::Write;
         use std::process::{Command, Stdio};
 
         use ndarray::Array2;
-        use petgraph::Graph;
-        use petgraph::dot::Dot;
         use tracing::{event, Level};
         use tracing_error::InstrumentError;
 
         use crate::graph_drawing::error::{Error, RankingError, OrErrMutExt};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
-        use crate::graph_drawing::layout::{Hop, Loc, or_insert};
+        use crate::graph_drawing::layout::debug::debug;
+        use crate::graph_drawing::layout::{Hop};
 
-        use super::Placement;
+        use super::{Placement, Graphic};
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
             placement: &Placement<V>
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
-            V: Clone + Debug + Display + Ord + Hash
+            V: Display + Graphic
         {
-            let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
+            let Placement{locs_by_level, hops_by_level, ..} = placement;
             
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
@@ -1918,35 +1963,7 @@ pub mod layout {
             }
             event!(Level::DEBUG, ?solved_locs, "SOLVED_LOCS");
 
-            let mut layout_debug = Graph::<String, String>::new();
-            let mut layout_debug_vxmap = HashMap::new();
-            for ((vl, wl), hops) in hops_by_edge.iter() {
-                // if *vl == "root" { continue; }
-                let vn = node_to_loc[&Loc::Node(vl.clone())];
-                let wn = node_to_loc[&Loc::Node(wl.clone())];
-                let vshr = solved_locs[&vn.0][&vn.1];
-                let wshr = solved_locs[&wn.0][&wn.1];
-
-                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
-                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
-
-                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                    let shr = solved_locs[lvl][mhr];
-                    let shrd = solved_locs[&(*lvl+1)][nhr];
-                    let lvl1 = *lvl+1;
-                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
-                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
-                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
-                    if n == 0 {
-                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
-                    }
-                    if n == hops.len()-1 {
-                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
-                    }
-                }
-            }
-            let layout_debug_dot = Dot::new(&layout_debug);
-            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
+            debug(placement, &solved_locs);
 
             Ok((crossing_number, solved_locs))
         }
@@ -1954,33 +1971,28 @@ pub mod layout {
 
     /// A placement solver based on the [osqp](https://github.com/osqp/osqp) optimization library
     pub mod miosqp {
-        use std::collections::{BTreeMap, HashMap};
-        use std::fmt::{Debug, Display};
-        use std::hash::Hash;
+        use std::collections::{BTreeMap};
+        use std::fmt::{Display};
 
-        use ndarray::Array2;
-        use osqp::CscMatrix;
-        use petgraph::Graph;
-        use petgraph::dot::Dot;
         use tracing::{event, Level};
-        use tracing_error::InstrumentError;
 
-        use crate::graph_drawing::error::{Error, LayoutError};
+        use crate::graph_drawing::error::{Error};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
+        use crate::graph_drawing::layout::debug::debug;
         use crate::graph_drawing::layout::sol::AnySol;
-        use crate::graph_drawing::layout::{Hop, Loc, or_insert};
-        use crate::graph_drawing::osqp::{Fresh, Vars, Constraints, Monomial, as_diag_csc_matrix, print_tuples, ILP, ILPStatus};
+        use crate::graph_drawing::layout::{Hop};
+        use crate::graph_drawing::osqp::{Vars, Constraints, Monomial, ILP, ILPStatus};
 
-        use super::Placement;
+        use super::{Placement, Graphic};
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
             placement: &Placement<V>
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
-            V: Clone + Debug + Display + Ord + Hash
+            V: Display + Graphic
         {
-            let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
+            let Placement{locs_by_level, hops_by_level, ..} = placement;
             
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
@@ -2097,36 +2109,7 @@ pub mod layout {
                 }
             }
 
-            let mut layout_debug = Graph::<String, String>::new();
-            let mut layout_debug_vxmap = HashMap::new();
-            for ((vl, wl), hops) in hops_by_edge.iter() {
-                // if *vl == "root" { continue; }
-                let vn = node_to_loc[&Loc::Node(vl.clone())];
-                let wn = node_to_loc[&Loc::Node(wl.clone())];
-                let vshr = solved_locs[&vn.0][&vn.1];
-                let wshr = solved_locs[&wn.0][&wn.1];
-
-                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
-                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
-
-                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                    let shr = solved_locs[lvl][mhr];
-                    let shrd = solved_locs[&(*lvl+1)][nhr];
-                    let lvl1 = *lvl+1;
-                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
-                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
-                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
-                    if n == 0 {
-                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
-                    }
-                    if n == hops.len()-1 {
-                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
-                    }
-                }
-            }
-            let layout_debug_dot = Dot::new(&layout_debug);
-            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
-            eprintln!("LAYOUT GRAPH\n{layout_debug_dot:?}");
+            debug(placement, &solved_locs);
 
             // Ok((crossing_number, solved_locs))
             Ok((0, solved_locs))
@@ -2134,46 +2117,17 @@ pub mod layout {
     }
 
     pub mod heaps {
-        use std::collections::{BTreeMap, HashMap};
-        use std::fmt::{Debug, Display};
-        use std::hash::Hash;
-        use std::ops::Deref;
+        use std::collections::{BTreeMap};
+        use std::fmt::{Display};
 
-        use petgraph::Graph;
-        use petgraph::dot::Dot;
         use tracing::{event, Level};
-        use tracing_error::InstrumentError;
 
         use crate::graph_drawing::error::{Error, LayoutError, OrErrExt};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
-        use crate::graph_drawing::layout::{Hop, Loc, or_insert};
-        use crate::graph_drawing::osqp::{Fresh, Vars, Constraints, Monomial};
-        use crate::graph_drawing::backtrack::{ILP, ILPStatus};
-
-        use super::Placement;
-
-        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub enum AnySol {
-            X(usize, usize, usize),
-            C(usize, usize, usize, usize, usize),
-            T(usize)
-        }
-
-        impl Fresh for AnySol {
-            fn fresh(index: usize) -> Self {
-                Self::T(index)
-            }
-        }
-
-        impl Display for AnySol {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self {
-                    AnySol::X(l, a, b) => write!(f, "x{},{},{}", l, a, b),
-                    AnySol::C(l, u1, v1, u2, v2) => write!(f, "c{},{},{},{},{}", l, u1, v1, u2, v2),
-                    AnySol::T(idx) => write!(f, "t{}", idx),
-                }
-            }
-        }
+        use crate::graph_drawing::layout::debug::debug;
+        use crate::graph_drawing::layout::{Hop};
+        
+        use super::{Placement, Graphic};
 
         #[inline]
         pub fn is_odd(x: usize) -> bool {
@@ -2237,7 +2191,7 @@ pub mod layout {
             }
         }
 
-        fn crosses<V: Clone + Debug + Display + Eq + Hash + Ord + PartialOrd + PartialEq>(h1: &Hop<V>, h2: &Hop<V>, p1: &[usize], p2: &[usize]) -> usize {
+        fn crosses<V: Graphic>(h1: &Hop<V>, h2: &Hop<V>, p1: &[usize], p2: &[usize]) -> usize {
             // imagine we have permutations p1, p2 of horizontal ranks for levels l1 and l2
             // and a set of hops spanning l1-l2.
             // we want to know how many of these hops cross.
@@ -2264,9 +2218,9 @@ pub mod layout {
         pub fn minimize_edge_crossing<V>(
             placement: &Placement<V>
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
-            V: Clone + Debug + Display + Ord + Hash
+            V: Display + Graphic
         {
-            let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
+            let Placement{locs_by_level, hops_by_level, ..} = placement;
             
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
@@ -2289,7 +2243,7 @@ pub mod layout {
 
 
             let mut shrs = vec![];
-            for (rank, locs) in locs_by_level.iter() {
+            for (_rank, locs) in locs_by_level.iter() {
                 let n = locs.len();
                 let shrs_lvl = (0..n).collect::<Vec<_>>();
                 shrs.push(shrs_lvl);
@@ -2339,36 +2293,7 @@ pub mod layout {
             //     }
             // }
 
-            let mut layout_debug = Graph::<String, String>::new();
-            let mut layout_debug_vxmap = HashMap::new();
-            for ((vl, wl), hops) in hops_by_edge.iter() {
-                // if *vl == "root" { continue; }
-                let vn = node_to_loc[&Loc::Node(vl.clone())];
-                let wn = node_to_loc[&Loc::Node(wl.clone())];
-                let vshr = solved_locs[&vn.0][&vn.1];
-                let wshr = solved_locs[&wn.0][&wn.1];
-
-                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
-                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
-
-                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                    let shr = solved_locs[lvl][mhr];
-                    let shrd = solved_locs[&(*lvl+1)][nhr];
-                    let lvl1 = *lvl+1;
-                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
-                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
-                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
-                    if n == 0 {
-                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
-                    }
-                    if n == hops.len()-1 {
-                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
-                    }
-                }
-            }
-            let layout_debug_dot = Dot::new(&layout_debug);
-            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
-            eprintln!("LAYOUT GRAPH\n{layout_debug_dot:?}");
+            debug(placement, &solved_locs);
 
             // Ok((crossing_number, solved_locs))
             Ok((0, solved_locs))
@@ -2394,7 +2319,7 @@ pub mod layout {
                     let mut v = (0..size).collect::<Vec<_>>();
                     let mut ps = vec![];
                     search(&mut v, |p| ps.push(p.to_vec()));
-                    assert_eq!(ps.len(), (1..=v.len()).product());
+                    assert_eq!(ps.len(), (1..=v.len()).product::<usize>());
                     assert_eq!(ps.len(), ps.iter().unique().count());
                 }
             }
@@ -2426,52 +2351,28 @@ pub mod layout {
 
     /// A placement solver based on efficient backtracking, inspired by [minion]
     pub mod backtrack {
-        use std::collections::{BTreeMap, HashMap};
-        use std::fmt::{Debug, Display};
-        use std::hash::Hash;
+        use std::collections::{BTreeMap};
+        use std::fmt::{Display};
         use std::ops::Deref;
 
-        use petgraph::Graph;
-        use petgraph::dot::Dot;
         use tracing::{event, Level};
 
         use crate::graph_drawing::error::{Error};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
-        use crate::graph_drawing::layout::{Hop, Loc, or_insert};
-        use crate::graph_drawing::osqp::{Fresh, Vars, Constraints, Monomial};
-        use crate::graph_drawing::backtrack::{ILP, ILPStatus};
+        use crate::graph_drawing::layout::debug::debug;
+        use crate::graph_drawing::layout::sol::AnySol;
+        use crate::graph_drawing::layout::{Hop};
+        use crate::graph_drawing::osqp::{Vars, Constraints, Monomial};
+        use crate::graph_drawing::backtrack::{ILPStatus};
 
-        use super::Placement;
-
-        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub enum AnySol {
-            X(usize, usize, usize),
-            C(usize, usize, usize, usize, usize),
-            T(usize)
-        }
-
-        impl Fresh for AnySol {
-            fn fresh(index: usize) -> Self {
-                Self::T(index)
-            }
-        }
-
-        impl Display for AnySol {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self {
-                    AnySol::X(l, a, b) => write!(f, "x{},{},{}", l, a, b),
-                    AnySol::C(l, u1, v1, u2, v2) => write!(f, "c{},{},{},{},{}", l, u1, v1, u2, v2),
-                    AnySol::T(idx) => write!(f, "t{}", idx),
-                }
-            }
-        }
+        use super::{Placement, Graphic};
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
             placement: &Placement<V>
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
-            V: Clone + Debug + Display + Ord + Hash
+            V: Display + Graphic
         {
             let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
             
@@ -2590,36 +2491,7 @@ pub mod layout {
                 }
             }
 
-            let mut layout_debug = Graph::<String, String>::new();
-            let mut layout_debug_vxmap = HashMap::new();
-            for ((vl, wl), hops) in hops_by_edge.iter() {
-                // if *vl == "root" { continue; }
-                let vn = node_to_loc[&Loc::Node(vl.clone())];
-                let wn = node_to_loc[&Loc::Node(wl.clone())];
-                let vshr = solved_locs[&vn.0][&vn.1];
-                let wshr = solved_locs[&wn.0][&wn.1];
-
-                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
-                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
-
-                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                    let shr = solved_locs[lvl][mhr];
-                    let shrd = solved_locs[&(*lvl+1)][nhr];
-                    let lvl1 = *lvl+1;
-                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
-                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
-                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
-                    if n == 0 {
-                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
-                    }
-                    if n == hops.len()-1 {
-                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
-                    }
-                }
-            }
-            let layout_debug_dot = Dot::new(&layout_debug);
-            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
-            eprintln!("LAYOUT GRAPH\n{layout_debug_dot:?}");
+            debug(placement, &solved_locs);
 
             // Ok((crossing_number, solved_locs))
             Ok((0, solved_locs))
@@ -2678,7 +2550,7 @@ pub mod geometry {
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Loc, Hop, Vcg, Placement};
+    use super::layout::{Loc, Hop, Vcg, Placement, Graphic};
 
     use std::cmp::max;
     use std::collections::{HashMap, BTreeMap, HashSet};
@@ -2755,7 +2627,7 @@ pub mod geometry {
         hops_by_level: &'s BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         hops_by_edge: &'s BTreeMap<(V, V), HopMap>,
     ) -> LayoutProblem<V> where
-        V: Clone + Debug + Display + Ord + Hash
+        V: Display + Graphic
     {
         let all_locs = solved_locs
             .iter()
@@ -2850,8 +2722,8 @@ pub mod geometry {
         solved_locs: &'s BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
         layout_problem: &'s LayoutProblem<V>,
     ) -> Result<LayoutSolution, Error> where 
-        V: Clone + Debug + Display + Hash + Ord + PartialEq,
-        E: Clone + Debug
+        V: Display + Graphic,
+        E: Graphic
     {
         let Vcg{vert: dag, vert_vxmap: dag_map, vert_node_labels: _, vert_edge_labels: dag_edge_labels, ..} = vcg;
         let Placement{hops_by_edge, node_to_loc, ..} = placement;
