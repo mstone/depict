@@ -68,8 +68,8 @@ impl Default for Drawing {
 fn estimate_widths<I>(
     vcg: &Vcg<I, I>, 
     cvcg: &Cvcg<I, I>,
-    placement: &Placement<I>,
-    layout_problem: &mut LayoutProblem<I>
+    layout_problem: &LayoutProblem<I>,
+    geometry_problem: &mut GeometryProblem<I>
 ) -> Result<(), Error> where
     I: Clone + std::fmt::Debug + Ord + std::hash::Hash + std::fmt::Display + Len + PartialEq<&'static str>,
 {
@@ -79,10 +79,10 @@ fn estimate_widths<I>(
     
     let vert_node_labels = &vcg.vert_node_labels;
     let vert_edge_labels = &vcg.vert_edge_labels;
-    let width_by_loc = &mut layout_problem.width_by_loc;
-    let width_by_hop = &mut layout_problem.width_by_hop;
-    let hops_by_edge = &placement.hops_by_edge;
-    let loc_to_node = &placement.loc_to_node;
+    let width_by_loc = &mut geometry_problem.width_by_loc;
+    let width_by_hop = &mut geometry_problem.width_by_hop;
+    let hops_by_edge = &layout_problem.hops_by_edge;
+    let loc_to_node = &layout_problem.loc_to_node;
     let condensed = &cvcg.condensed;
     let condensed_vxmap = &cvcg.condensed_vxmap;
     
@@ -185,18 +185,18 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
     let paths_by_rank = rank(condensed, &roots)?;
 
-    let placement = calculate_locs_and_hops(condensed, &paths_by_rank)?;
-    let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
+    let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank)?;
+    let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
 
-    let (crossing_number, solved_locs) = minimize_edge_crossing(&placement)?;
+    let (crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
 
-    let mut layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+    let mut geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
 
-    estimate_widths(&vcg, &cvcg, &placement, &mut layout_problem)?;
+    estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
 
-    let LayoutSolution{ls, rs, ss, ts} = position_sols(&vcg, &placement, &solved_locs, &layout_problem)?;
+    let GeometrySolution{ls, rs, ss, ts} = position_sols(&vcg, &layout_problem, &solved_locs, &geometry_problem)?;
 
-    let LayoutProblem{sol_by_loc, sol_by_hop, ..} = &layout_problem;
+    let GeometryProblem{sol_by_loc, sol_by_hop, ..} = &geometry_problem;
 
     let mut layout_debug = Graph::<String, String>::new();
     let mut layout_debug_vxmap = HashMap::new();
@@ -258,7 +258,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             // if !label.is_screaming_snake_case() {
             //     label = label.to_title_case();
             // }
-            let estimated_width = layout_problem.width_by_loc[&(*ovr, *ohr)];
+            let estimated_width = geometry_problem.width_by_loc[&(*ovr, *ohr)];
             texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
         }
     }
@@ -321,7 +321,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 hn0.push(hnd);
                 
                 if n == 0 {
-                    estimated_width0 = Some(layout_problem.width_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())]);
+                    estimated_width0 = Some(geometry_problem.width_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())]);
                     let mut vpos = vpos;
                     if *ew == "senses" {
                         vpos += 33.0; // box height + arrow length

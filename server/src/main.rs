@@ -7,8 +7,8 @@ use axum::{http::StatusCode, Json, response::IntoResponse, Router, routing::post
 use depict::graph_drawing::error::Error;
 use depict::graph_drawing::error::Kind;
 use depict::graph_drawing::error::OrErrExt;
-use depict::graph_drawing::geometry::LayoutProblem;
-use depict::graph_drawing::geometry::LayoutSolution;
+use depict::graph_drawing::geometry::GeometryProblem;
+use depict::graph_drawing::geometry::GeometrySolution;
 use depict::graph_drawing::geometry::calculate_sols;
 use depict::graph_drawing::geometry::position_sols;
 use depict::graph_drawing::graph::roots;
@@ -16,7 +16,7 @@ use depict::graph_drawing::index::OriginalHorizontalRank;
 use depict::graph_drawing::index::VerticalRank;
 use depict::graph_drawing::layout::{Cvcg, calculate_vcg2, Len};
 use depict::graph_drawing::layout::Loc;
-use depict::graph_drawing::layout::Placement;
+use depict::graph_drawing::layout::LayoutProblem;
 use depict::graph_drawing::layout::Vcg;
 use depict::graph_drawing::layout::calculate_locs_and_hops;
 use depict::graph_drawing::layout::condense;
@@ -42,8 +42,8 @@ use depict::rest::*;
 fn estimate_widths<I>(
     vcg: &Vcg<I, I>, 
     cvcg: &Cvcg<I, I>,
-    placement: &Placement<I>,
-    layout_problem: &mut LayoutProblem<I>
+    layout_problem: &LayoutProblem<I>,
+    geometry_problem: &mut GeometryProblem<I>
 ) -> Result<(), Error> where
   I: Clone + std::fmt::Debug + Ord + Eq + PartialEq + PartialOrd + std::hash::Hash + std::fmt::Display + Len + PartialEq<&'static str>
 {
@@ -53,10 +53,10 @@ fn estimate_widths<I>(
     
     let vert_node_labels = &vcg.vert_node_labels;
     let vert_edge_labels = &vcg.vert_edge_labels;
-    let width_by_loc = &mut layout_problem.width_by_loc;
-    let width_by_hop = &mut layout_problem.width_by_hop;
-    let hops_by_edge = &placement.hops_by_edge;
-    let loc_to_node = &placement.loc_to_node;
+    let width_by_loc = &mut geometry_problem.width_by_loc;
+    let width_by_hop = &mut geometry_problem.width_by_hop;
+    let hops_by_edge = &layout_problem.hops_by_edge;
+    let loc_to_node = &layout_problem.loc_to_node;
     let condensed = &cvcg.condensed;
     let condensed_vxmap = &cvcg.condensed_vxmap;
     
@@ -192,18 +192,18 @@ async fn draw<'s>(Json(draw_rx): Json<Draw>) -> Result<Json<DrawResp>, DrawError
 
         let paths_by_rank = rank(condensed, &roots)?;
 
-        let placement = calculate_locs_and_hops(condensed, &paths_by_rank)?;
-        let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
+        let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank)?;
+        let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
 
-        let (crossing_number, solved_locs) = minimize_edge_crossing(&placement)?;
+        let (crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
 
-        let mut layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+        let mut geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
 
-        estimate_widths(&vcg, &cvcg, &placement, &mut layout_problem)?;
+        estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
 
-        let LayoutSolution{ls, rs, ss, ts} = position_sols(&vcg, &placement, &solved_locs, &layout_problem)?;
+        let GeometrySolution{ls, rs, ss, ts} = position_sols(&vcg, &layout_problem, &solved_locs, &geometry_problem)?;
         
-        let LayoutProblem{sol_by_loc, sol_by_hop, ..} = &layout_problem;
+        let GeometryProblem{sol_by_loc, sol_by_hop, ..} = &geometry_problem;
 
         let mut layout_debug = Graph::<String, String>::new();
         let mut layout_debug_vxmap = HashMap::new();

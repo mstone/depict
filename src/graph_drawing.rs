@@ -16,7 +16,7 @@
 //! At a high level, the depict backend consists of [layout] and [geometry] modules.
 //! 
 //! `layout` is responsible for producing a coarse-grained map, called a 
-//! [Placement](layout::Placement), that "positions" visual components relative 
+//! [LayoutProblem](layout::LayoutProblem), that "positions" visual components relative 
 //! to one another literally by calculating ordering relations between them.
 //! 
 //! `geometry` is then responsible for calculating positions and dimensions for these
@@ -97,7 +97,7 @@
 //! tells us the possible ranks of each destination node, of which we then pick the
 //! largest.
 //! 
-//! The next step is to create a [Placement](layout::placement), 
+//! The next step is to create a [LayoutProblem](layout::LayoutProblem), 
 //! via [`calculate_locs_and_hops()`](layout::calculate_locs_and_hops).
 //! 
 //! The data of this refinement (and its associated maps of indices) is captured 
@@ -110,8 +110,8 @@
 //! * `node_to_loc` (which records the indices of each kind of (node | intermediate hop))
 //! * `mhrs` (which, at a given level, records the original horizontal ranks of the objects and is used for mhr assignment)
 //! 
-//! Then [`minimize_edge_crossing()`](layout::minimize_edge_crossing) consumes the given Placement 
-//! (PlacementProblem) and produces a PlacementSolution (a crossing number + (lvl, mhr) -> (shr) map) 
+//! Then [`minimize_edge_crossing()`](layout::minimize_edge_crossing) consumes the given LayoutProblem 
+//! (LayoutProblem) and produces a LayoutSolution (a crossing number + (lvl, mhr) -> (shr) map) 
 //! that permutes (nodes and intermediate hops), within levels, to minimize edge crossing, by further 
 //! embedding the layout IR into variables and constraints that model the possible ordering relations between
 //! layout problem objects and their crossing numbers.
@@ -1163,7 +1163,7 @@ pub mod layout {
     //! 1. form a [Vcg], witnessing a partial order on items as a "vertical constraint graph"
     //! 2. [`condense()`] the [Vcg] to a [Cvcg], which is a simple graph, by merging parallel edges into single edges labeled with lists of Vcg edge labels.
     //! 3. [`rank()`] the condensed VCG by finding longest-paths
-    //! 4. [`calculate_locs_and_hops()`] from the ranked paths of the CVCG to form a [Placement] by refining edge bundles (i.e., condensed edges) into hops
+    //! 4. [`calculate_locs_and_hops()`] from the ranked paths of the CVCG to form a [LayoutProblem] by refining edge bundles (i.e., condensed edges) into hops
     //! 5. [`minimize_edge_crossing()`] using the integer program described in <cite>[Optimal Sankey Diagrams Via Integer Programming]</cite> ([author's copy])
     //! implemented via the [minion](https://github.com/minion/minion) constraint
     //! solver, resulting in a `ovr -> ohr -> shr` map.
@@ -1575,7 +1575,7 @@ pub mod layout {
     }
     
     #[derive(Clone, Debug)]
-    pub struct Placement<V: Graphic> {
+    pub struct LayoutProblem<V: Graphic> {
         pub locs_by_level: BTreeMap<VerticalRank, TiVec<OriginalHorizontalRank, OriginalHorizontalRank>>, 
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
@@ -1585,11 +1585,11 @@ pub mod layout {
 
     pub type RankedPaths<V> = BTreeMap<VerticalRank, SortedVec<(V, V)>>;
 
-    /// Set up a [Placement] problem
+    /// Set up a [LayoutProblem] problem
     pub fn calculate_locs_and_hops<'s, V, E>(
         dag: &'s Graph<V, E>, 
         paths_by_rank: &'s RankedPaths<V>
-    ) -> Result<Placement<V>, Error>
+    ) -> Result<LayoutProblem<V>, Error>
             where 
         V: Display + Graphic, 
         E: Graphic
@@ -1692,7 +1692,7 @@ pub mod layout {
         let g_hops_dot = Dot::new(&g_hops);
         event!(Level::DEBUG, ?g_hops_dot, "HOPS GRAPH");
 
-        Ok(Placement{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc})
+        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc})
     }
 
     pub mod sol {
@@ -1730,12 +1730,12 @@ pub mod layout {
         use petgraph::{Graph, dot::Dot};
         use tracing::{event, Level};
 
-        use crate::graph_drawing::{layout::{Placement, Loc, or_insert}, index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank}};
+        use crate::graph_drawing::{layout::{LayoutProblem, Loc, or_insert}, index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank}};
 
         use super::Graphic;
         
-        pub fn debug<V: Display + Graphic>(placement: &Placement<V>, solved_locs: &BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>) {
-            let Placement{node_to_loc, hops_by_edge, ..} = placement;
+        pub fn debug<V: Display + Graphic>(layout_problem: &LayoutProblem<V>, solved_locs: &BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>) {
+            let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
             let mut layout_debug = Graph::<String, String>::new();
             let mut layout_debug_vxmap = HashMap::new();
             for ((vl, wl), hops) in hops_by_edge.iter() {
@@ -1770,7 +1770,7 @@ pub mod layout {
     }
 
 
-    /// A placement solver based on the [minion](https://github.com/minion/minion) constraint solver
+    /// A layout_problem solver based on the [minion](https://github.com/minion/minion) constraint solver
     pub mod minion {
         use std::collections::{BTreeMap};
         use std::fmt::{Display};
@@ -1786,16 +1786,16 @@ pub mod layout {
         use crate::graph_drawing::layout::debug::debug;
         use crate::graph_drawing::layout::{Hop};
 
-        use super::{Placement, Graphic};
+        use super::{LayoutProblem, Graphic};
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
-            placement: &Placement<V>
+            layout_problem: &LayoutProblem<V>
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
             V: Display + Graphic
         {
-            let Placement{locs_by_level, hops_by_level, ..} = placement;
+            let LayoutProblem{locs_by_level, hops_by_level, ..} = layout_problem;
             
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
@@ -1964,13 +1964,13 @@ pub mod layout {
             }
             event!(Level::DEBUG, ?solved_locs, "SOLVED_LOCS");
 
-            debug(placement, &solved_locs);
+            debug(layout_problem, &solved_locs);
 
             Ok((crossing_number, solved_locs))
         }
     }
 
-    /// A placement solver based on the [osqp](https://github.com/osqp/osqp) optimization library
+    /// A layout_problem solver based on the [osqp](https://github.com/osqp/osqp) optimization library
     pub mod miosqp {
         use std::collections::{BTreeMap};
         use std::fmt::{Display};
@@ -1984,16 +1984,16 @@ pub mod layout {
         use crate::graph_drawing::layout::{Hop};
         use crate::graph_drawing::osqp::{Vars, Constraints, Monomial, ILP, ILPStatus};
 
-        use super::{Placement, Graphic};
+        use super::{LayoutProblem, Graphic};
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
-            placement: &Placement<V>
+            layout_problem: &LayoutProblem<V>
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
             V: Display + Graphic
         {
-            let Placement{locs_by_level, hops_by_level, ..} = placement;
+            let LayoutProblem{locs_by_level, hops_by_level, ..} = layout_problem;
             
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
@@ -2110,7 +2110,7 @@ pub mod layout {
                 }
             }
 
-            debug(placement, &solved_locs);
+            debug(layout_problem, &solved_locs);
 
             // Ok((crossing_number, solved_locs))
             Ok((0, solved_locs))
@@ -2128,7 +2128,7 @@ pub mod layout {
         use crate::graph_drawing::layout::debug::debug;
         use crate::graph_drawing::layout::{Hop};
         
-        use super::{Placement, Graphic};
+        use super::{LayoutProblem, Graphic};
 
         #[inline]
         pub fn is_odd(x: usize) -> bool {
@@ -2217,11 +2217,11 @@ pub mod layout {
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
-            placement: &Placement<V>
+            layout_problem: &LayoutProblem<V>
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
             V: Display + Graphic
         {
-            let Placement{locs_by_level, hops_by_level, ..} = placement;
+            let LayoutProblem{locs_by_level, hops_by_level, ..} = layout_problem;
             
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
@@ -2294,7 +2294,7 @@ pub mod layout {
             //     }
             // }
 
-            debug(placement, &solved_locs);
+            debug(layout_problem, &solved_locs);
 
             // Ok((crossing_number, solved_locs))
             Ok((0, solved_locs))
@@ -2350,7 +2350,7 @@ pub mod layout {
         
     }
 
-    /// A placement solver based on efficient backtracking, inspired by [minion]
+    /// A layout_problem solver based on efficient backtracking, inspired by [minion]
     pub mod backtrack {
         use std::collections::{BTreeMap};
         use std::fmt::{Display};
@@ -2366,16 +2366,16 @@ pub mod layout {
         use crate::graph_drawing::osqp::{Vars, Constraints, Monomial};
         use crate::graph_drawing::backtrack::{ILPStatus};
 
-        use super::{Placement, Graphic};
+        use super::{LayoutProblem, Graphic};
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
-            placement: &Placement<V>
+            layout_problem: &LayoutProblem<V>
         ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
             V: Display + Graphic
         {
-            let Placement{locs_by_level, hops_by_level, ..} = placement;
+            let LayoutProblem{locs_by_level, hops_by_level, ..} = layout_problem;
             
             if hops_by_level.is_empty() {
                 return Ok((0, BTreeMap::new()));
@@ -2492,7 +2492,7 @@ pub mod layout {
                 }
             }
 
-            debug(placement, &solved_locs);
+            debug(layout_problem, &solved_locs);
 
             // Ok((crossing_number, solved_locs))
             Ok((0, solved_locs))
@@ -2534,7 +2534,7 @@ pub mod geometry {
     //! 
     //! 1. the input data need to be organized (here, via [`calculate_sols()`]) so that constraints can be generated and so that the optimization objective can be formed.
     //! 2. then, once constraints and the objective are generated, they need to be formatted as an [osqp::CscMatrix] and associated `&[f64]` slices, passed to [osqp::Problem], and solved.
-    //! 3. then, the resulting [osqp::Solution] needs to be destructured so that the resulting solution values can be returned to [`position_sols()`]'s caller as a [LayoutSolution].
+    //! 3. then, the resulting [osqp::Solution] needs to be destructured so that the resulting solution values can be returned to [`position_sols()`]'s caller as a [GeometrySolution].
 
     use osqp::CscMatrix;
     use petgraph::EdgeDirection::{Outgoing, Incoming};
@@ -2551,7 +2551,7 @@ pub mod geometry {
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Loc, Hop, Vcg, Placement, Graphic};
+    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic};
 
     use std::cmp::max;
     use std::collections::{HashMap, BTreeMap, HashSet};
@@ -2603,7 +2603,7 @@ pub mod geometry {
     }
     
     #[derive(Clone, Debug, Default)]
-    pub struct LayoutProblem<V: Clone + Debug + Display + Ord + Hash> {
+    pub struct GeometryProblem<V: Clone + Debug + Display + Ord + Hash> {
         pub all_locs: Vec<LocRow<V>>,
         pub all_hops0: Vec<HopRow<V>>,
         pub all_hops: Vec<HopRow<V>>,
@@ -2627,7 +2627,7 @@ pub mod geometry {
         loc_to_node: &'s HashMap<LocIx, Loc<V, V>>,
         hops_by_level: &'s BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         hops_by_edge: &'s BTreeMap<(V, V), HopMap>,
-    ) -> LayoutProblem<V> where
+    ) -> GeometryProblem<V> where
         V: Display + Graphic
     {
         let all_locs = solved_locs
@@ -2706,11 +2706,11 @@ pub mod geometry {
         let width_by_loc = HashMap::new();
         let width_by_hop = HashMap::new();
     
-        LayoutProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop}
+        GeometryProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop}
     }
     
     #[derive(Debug)]
-    pub struct LayoutSolution {
+    pub struct GeometrySolution {
         pub ls: TiVec<LocSol, f64>,
         pub rs: TiVec<LocSol, f64>,
         pub ss: TiVec<HopSol, f64>,
@@ -2719,16 +2719,16 @@ pub mod geometry {
 
     pub fn position_sols<'s, V, E>(
         vcg: &'s Vcg<V, E>,
-        placement: &'s Placement<V>,
-        solved_locs: &'s BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
         layout_problem: &'s LayoutProblem<V>,
-    ) -> Result<LayoutSolution, Error> where 
+        solved_locs: &'s BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
+        geometry_problem: &'s GeometryProblem<V>,
+    ) -> Result<GeometrySolution, Error> where 
         V: Display + Graphic,
         E: Graphic
     {
         let Vcg{vert: dag, vert_vxmap: dag_map, vert_node_labels: _, vert_edge_labels: dag_edge_labels, ..} = vcg;
-        let Placement{hops_by_edge, node_to_loc, ..} = placement;
-        let LayoutProblem{all_locs, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop, ..} = layout_problem;
+        let LayoutProblem{hops_by_edge, node_to_loc, ..} = layout_problem;
+        let GeometryProblem{all_locs, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop, ..} = geometry_problem;
     
         let mut edge_label_heights = BTreeMap::<VerticalRank, usize>::new();
         for (node, loc) in node_to_loc.iter() {
@@ -3235,7 +3235,7 @@ pub mod geometry {
         eprintln!("ss: {ss:?}");
         let ss = ss.iter().map(|(_, v)| *v).collect::<TiVec<HopSol, _>>();
 
-        let res = LayoutSolution{ls, rs, ss, ts};
+        let res = GeometrySolution{ls, rs, ss, ts};
         event!(Level::DEBUG, ?res, "LAYOUT");
         Ok(res)
     }
@@ -3289,8 +3289,8 @@ mod tests {
         let paths_by_rank = rank(&condensed, &roots)?;
         assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("af")));
 
-        let placement = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
-        let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
+        let layout_problem = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+        let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
         let nv: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("e"));
         let nw: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("af"));
         let np: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("c"));
@@ -3315,7 +3315,7 @@ mod tests {
         assert_eq!(np2, &np);
         assert_eq!(nq2, &nq);
         
-        let (crossing_number, solved_locs) = minimize_edge_crossing(&placement)?;
+        let (crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
         assert_eq!(crossing_number, 0);
         // let sv = solved_locs[&2][&1];
         // let sw = solved_locs[&3][&0];
@@ -3332,8 +3332,8 @@ mod tests {
         assert_eq!(sv, sw); // uncrossing happened
         assert_eq!(sp, sq);
 
-        let layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
-        let all_locs = &layout_problem.all_locs;
+        let geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+        let all_locs = &geometry_problem.all_locs;
         let lrv = all_locs.iter().find(|lr| lr.loc == nv).unwrap();
         let lrw = all_locs.iter().find(|lr| lr.loc == nw).unwrap();
         let lrp = all_locs.iter().find(|lr| lr.loc == np).unwrap();

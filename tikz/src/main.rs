@@ -32,18 +32,18 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
 
     let paths_by_rank = rank(&condensed, &roots)?;
 
-    let placement = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
-    let Placement{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &placement;
+    let layout_problem = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+    let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
 
     // std::process::exit(0);
 
-    let (_crossing_number, solved_locs) = minimize_edge_crossing(&placement)?;
+    let (_crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
     
-    let layout_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+    let geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
 
-    let LayoutSolution{ls, rs, ss, ..} = position_sols(&vcg, &placement, &solved_locs, &layout_problem)?;
+    let GeometrySolution{ls, rs, ss, ..} = position_sols(&vcg, &layout_problem, &solved_locs, &geometry_problem)?;
 
-    let LayoutProblem{all_locs, sol_by_loc, sol_by_hop, ..} = layout_problem;
+    let GeometryProblem{all_locs, sol_by_loc, sol_by_hop, ..} = geometry_problem;
 
     // std::process::exit(0);
 
