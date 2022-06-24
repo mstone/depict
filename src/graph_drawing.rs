@@ -425,6 +425,12 @@ pub mod index {
 }
 
 pub mod osqp {
+    //! Types for optimization problems and conversions to osqp types
+    //! 
+    //! # Summary
+    //! 
+    //! This module helps pose problems to minimize an objective defined 
+    //! in terms of constrained variables.
     use std::{borrow::Cow, collections::{HashMap, BTreeMap}, fmt::{Debug, Display}, hash::Hash};
 
     use osqp::{self, CscMatrix};
@@ -436,6 +442,9 @@ pub mod osqp {
 
     use super::error::{Error, OrErrExt};
 
+    /// A map from Sols to Vars. `get()`ing an not-yet-seen sol 
+    /// allocates a new `Var` for that sol and returns a monomial
+    /// containing that sol with a 1.0 coefficient.
     #[derive(Clone, Debug)]
     pub struct Vars<S: Sol> {
         pub vars: HashMap<S, Var<S>>
@@ -518,6 +527,7 @@ pub mod osqp {
         }
     }
 
+    /// A collection of affine constraints: L <= Ax <= U.
     #[derive(Debug, Clone)]
     pub struct Constraints<S: Sol> {
         pub constrs: Vec<(f64, Vec<Monomial<S>>, f64)>,
@@ -544,7 +554,7 @@ pub mod osqp {
             self.constrs.iter()
         }
 
-        // L <= Ax <= U 
+        /// Constrain `lhs` to be less than `rhs`.
         /// l < r => r - l > 0 => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
         pub fn leq(&mut self, v: &mut Vars<S>, lhs: S, rhs: S) {
             if lhs == rhs {
@@ -553,11 +563,13 @@ pub mod osqp {
             self.constrs.push((0., vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
         }
 
+        /// Constrain `lhs + c` to be less than `rhs`.
         /// l + c < r => c < r - l => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
         pub fn leqc(&mut self, v: &mut Vars<S>, lhs: S, rhs: S, c: f64) {
             self.constrs.push((c, vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
         }
 
+        /// Constrain `lhs` to be greater than `rhs`.
         /// l > r => l - r > 0 => A += [-1(r) ... 1(s) ...], L += 0, U += (FMAX/infty)
         pub fn geq(&mut self, v: &mut Vars<S>, lhs: S, rhs: S) {
             if lhs == rhs {
@@ -566,19 +578,26 @@ pub mod osqp {
             self.constrs.push((0., vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
         }
 
+        /// Constrain `lhs` to be greater than `rhs + c`.
         /// l > r + c => l - r > c => A += [1(r) ... -1(s) ...], L += c, U += (FMAX/infty)
         pub fn geqc(&mut self, v: &mut Vars<S>, lhs: S, rhs: S, c: f64) {
             self.constrs.push((c, vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
         }
 
+        /// Constrain the linear combination `lc` to be equal to 0.
         pub fn eq(&mut self, lc: &[Monomial<S>]) {
             self.constrs.push((0., Vec::from(lc), 0.));
         }
 
+        /// Constrain the linear combination `lc` to be equal to `c`.
         pub fn eqc(&mut self, lc: &[Monomial<S>], c: f64) {
             self.constrs.push((c, Vec::from(lc), c));
         }
 
+        /// Constrain `lhs` to be similar to `rhs` by introducing a fresh variable, 
+        /// `t`, constraining `t` to be equal to `lhs - rhs`, and adding `t` to a 
+        /// collection representing the diagonal of the quadratic form P of the 
+        /// objective `1/2 x'Px + Qx`.
         pub fn sym(&mut self, v: &mut Vars<S>, pd: &mut Vec<Monomial<S>>, lhs: S, rhs: S) {
             // P[i, j] = 100 => obj += 100 * x_i * x_j
             // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
@@ -600,14 +619,18 @@ pub mod osqp {
         }
     }
 
+    /// Used to allocate fresh variables
     pub trait Fresh {
+        /// Construct a fresh sol
         fn fresh(index: usize) -> Self;
     }
 
+    /// Used to define indexed families of variables
     pub trait Sol: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd {}
 
     impl<S: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd> Sol for S {}
 
+    /// Convert `rows` into an `osqp::CscMatrix` in "compressed sparse column" format.
     fn as_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial<S>]]) -> CscMatrix<'s> {
         let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
         let mut indptr = vec![];
@@ -651,6 +674,7 @@ pub mod osqp {
         }
     }
 
+    /// Convert `rows` into a *diagonal* `osqp::CscMatrix` in "compressed sparse column" format.
     pub fn as_diag_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial<S>]) -> CscMatrix<'s> {
         let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
         let mut indptr = vec![];
@@ -702,12 +726,28 @@ pub mod osqp {
         }
     }
 
+    /// An optimization variable
+    /// 
+    /// Vars map indices of business-domain quantities of interest
+    /// represented by `sol` to densely packed optimization-domain 
+    /// indices `index` that can be used as row or column indices 
+    /// in matrix or array formulations of the optimization problem
+    /// to be solved.
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
     pub struct Var<S: Sol> {
         pub index: usize,
         pub sol: S,
     }
 
+    /// A weighted optimization variable
+    /// 
+    /// Most solvers optimize an objective function that is typically 
+    /// defined as, e.g., a weighted linear or quadratic function of
+    /// given optimization variables.
+    /// 
+    /// We use "monomials" to specify the data (weights and variables) 
+    /// of individual terms of these linear or quadratic forms to be 
+    /// optimized via convenient syntax implemented via operator overloading.
     #[derive(Clone, Copy, Debug)]
     pub struct Monomial<S: Sol> {
         pub var: Var<S>,
@@ -736,6 +776,7 @@ pub mod osqp {
         }
     }
 
+    /// A pretty-printer for linear combinations of monomials.
     pub struct Printer<'s, S: Sol>(pub &'s Vec<Monomial<S>>);
 
     impl<'s, S: Sol> Display for Printer<'s, S> {
@@ -751,6 +792,7 @@ pub mod osqp {
         }
     }
 
+    /// A debug print helper for dumping `CscMatrix`s
     pub fn print_tuples(name: &str, m: &CscMatrix) {
         // conceptually, we walk over the columns, then the rows,
         // recording each non-zero value + its row index, and
@@ -773,6 +815,7 @@ pub mod osqp {
         }
     }
 
+    /// An instantiation of variables in an OSQP-based  ILP problem.
     #[derive(Clone, Debug)]
     pub struct ILPInstance<S: Sol> {
         pub vars: Vars<S>,
@@ -887,6 +930,10 @@ pub mod osqp {
         }
     }
 
+    /// A branch-and-bound solver for 0-1 integer linear programs using OSQP.
+    /// 
+    /// OSQP is used to solve LP relaxations of the given problem to 
+    /// obtain bounds to use while branch-and-bounding.
     #[derive(Clone, Debug)]
     pub struct ILP<S: Sol> {
         pub vars: Vars<S>, 
@@ -897,6 +944,7 @@ pub mod osqp {
         pub eps_abs: f64,
     }
 
+    /// Status of the [ILP] solver.
     #[derive(Clone, Debug)]
     pub enum ILPStatus<S: Sol> {
         NotAsGood,
@@ -973,6 +1021,7 @@ pub mod osqp {
 }
 
 pub mod backtrack {
+    //! A backtracking solver for 0-1 integer linear programs (ILP).
     use tracing::instrument;
     use tracing_error::InstrumentError;
     use bitvec::prelude::*;
@@ -989,9 +1038,15 @@ pub mod backtrack {
         Solved(f64, BitVec<u32>)
     }
 
+    /// A partially or fully instantiated set of problem variables.
     #[derive(Clone, Debug)]
     pub struct ILPInstance {
+        /// A bitmap representing which problem variables have been 
+        /// instantiated. Bit k = 1 means that value[k] is defined.
         pub alloc: BitVec<u32>,
+
+        /// A bitmap representing values assigned to problem variables.
+        /// Problem variable value[k] is assigned when alloc[k] is true.
         pub value: BitVec<u32>,
     }
 
@@ -1051,6 +1106,7 @@ pub mod backtrack {
         }
     }
 
+    /// The backtracking 0-1 ILP solver
     #[derive(Clone, Debug)]
     pub struct ILP<S: Sol> {
         pub vars: Vars<S>, 
@@ -1130,7 +1186,7 @@ pub mod layout {
     //! # Summary
     //! 
     //! The purpose of the [layout](self) module is to convert descriptions of 
-    //! model relationships to be drawn into geometric relationships between 
+    //! model relationships to be drawn into order relationships between 
     //! visual "objects". For example, suppose we would like to express that a 
     //! "person" controls a "microwave" via actions named "open", "start", or 
     //! "stop" and via feedback named "beep". One conceptual picture that we 
@@ -1165,11 +1221,33 @@ pub mod layout {
     //! 3. [`rank()`] the condensed VCG by finding longest-paths
     //! 4. [`calculate_locs_and_hops()`] from the ranked paths of the CVCG to form a [LayoutProblem] by refining edge bundles (i.e., condensed edges) into hops
     //! 5. [`minimize_edge_crossing()`] using the integer program described in <cite>[Optimal Sankey Diagrams Via Integer Programming]</cite> ([author's copy])
-    //! implemented via the [minion](https://github.com/minion/minion) constraint
-    //! solver, resulting in a `ovr -> ohr -> shr` map.
+    //! implemented via various constraint solvers, resulting in a `ovr -> ohr -> shr` map.
     //! 
     //! [Optimal Sankey Diagrams Via Integer Programming]: https://doi.org/10.1109/PacificVis.2018.00025
     //! [author's copy]: https://ialab.it.monash.edu/~dwyer/papers/optimal-sankey-diagrams.pdf
+    //! 
+    //! # Reference-level explanation
+    //! 
+    //! Most edge-crossing minimization problems are NP-hard. As a result, heuristics matter
+    //! and there is probably not one solution algorithm or implementation that dominates all others.
+    //! Further, many general solvers are challenging to run in all the situations we care about,
+    //! notably wasm32-unknown-unknown (hence, wasm_bindgen's ABI).
+    //! 
+    //! Consequently, we implement a wide range of solvers including:
+    //! 
+    //! * [minion], a solver based on [https://github.com/minion/minion], which has nice 
+    //!   constraint progagation algorithms.
+    //! 
+    //! * [miosqp], inspired by the python library of that name 
+    //!   [https://github.com/osqp/miosqp], which uses osqp to solve LP relaxations 
+    //!   in a branch-and-bound setup
+    //! 
+    //! * [highs], similar to miosqp but based on the [https://highs.dev] LP solver
+    //! 
+    //! * [heaps], a direct "generate-and-test" solver, based on a version of 
+    //!   [Heap's algorithm](https://en.wikipedia.org/wiki/Heap%27s_algorithm) 
+    //!   for enumerating permutations that has been modified to enumerate 
+    //!   of a [[T]], rather than just permutations of [T] as is conventional.
     
     use std::borrow::Cow;
     use std::collections::BTreeMap;
@@ -1478,11 +1556,14 @@ pub mod layout {
         Ok(vcg)
     }
 
+    /// A "condensed" VCG, in which all parallel edges in the original Vcg 
+    /// have been "condensed" into a single compound edge in the Cvcg.
     pub struct Cvcg<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord> {
         pub condensed: Graph<V, SortedVec<(V, V, E)>>,
         pub condensed_vxmap: HashMap::<V, NodeIndex>
     }
     
+    /// Construct a cvcg from a vcg `vert`.
     pub fn condense<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord>(vert: &Graph<V, E>) -> Result<Cvcg<V,E>, Error> {
         let mut condensed = Graph::<V, SortedVec<(V, V, E)>>::new();
         let mut condensed_vxmap = HashMap::new();
@@ -1505,6 +1586,9 @@ pub mod layout {
         Ok(Cvcg{condensed, condensed_vxmap})
     }
 
+    /// Rank a `dag`, starting from `roots`, by finding longest paths
+    /// from the roots to each node, e.g., using Floyd-Warshall with
+    /// negative weights.
     pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s SortedVec<V>) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
         let paths_fw = floyd_warshall(&dag, |_ex| { -1 })
             .map_err(|cycle| 
@@ -1552,6 +1636,7 @@ pub mod layout {
 
     use crate::graph_drawing::index::{OriginalHorizontalRank, VerticalRank};
 
+    /// Methods for graph vertices and edges.
     pub trait Graphic: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd {}
 
     impl <T: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd> Graphic for T {}
@@ -1565,12 +1650,23 @@ pub mod layout {
         Hop(VerticalRank, E, E),
     }
 
+    /// A numeric representation of a hop.
     #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
     pub struct Hop<V: Graphic> {
+        /// The original horizontal rank of the upper endpoint of the hop
         pub mhr: OriginalHorizontalRank,
+
+        /// The original horizontal rank of the lower endpoint of the hop,
+        /// or `std::usize::MAX - mhr` if this is an extended hop.
         pub nhr: OriginalHorizontalRank,
+
+        /// The upper node of the hop's edge
         pub vl: V,
+
+        /// The lower node of the hop's edge
         pub wl: V,
+
+        /// The vertical rank of the upper endpoint of the hop
         pub lvl: VerticalRank,
     }
     
@@ -1696,20 +1792,34 @@ pub mod layout {
     }
 
     pub mod sol {
+        //! Indices for the edge-crossing-minimization problem domain.
         use std::fmt::Display;
 
         use crate::graph_drawing::osqp::Fresh;
 
+        /// Edge-crossing-minimization variable indices.
         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
         pub enum AnySol {
+            /// X-type variables are indexed by (lvl, ohr1, ohr2) tuples
+            /// Their associated solver-domain variables will be set to 
+            /// true or 1.0 when the solver concludes that the object
+            /// at horizontal rank ohr1 in level `lvl` should be placed
+            /// to the left of the object at horizontal rank `ohr2` in `lvl`.
             X(usize, usize, usize),
+
+            /// C-type variables are indexed by (lvl, u1, u2, v1, v2) tuples.
+            /// Their associated solver-domain variables will be set to
+            /// true or 1.0 when the solver determines that the (u1, u2) and 
+            /// (v1, v2) hops, originating on vertical rank `lvl`, cross 
+            /// given the relative orderings of u1, v1, u2, and v2.
             C(usize, usize, usize, usize, usize),
-            T(usize)
         }
 
+        /// AnySol: Sol requires Fresh but fresh variables are not needed
+        /// for the edge-crossing minimization problem.
         impl Fresh for AnySol {
-            fn fresh(index: usize) -> Self {
-                Self::T(index)
+            fn fresh(_index: usize) -> Self {
+                unreachable!()
             }
         }
 
@@ -1718,13 +1828,13 @@ pub mod layout {
                 match self {
                     AnySol::X(l, a, b) => write!(f, "x{},{},{}", l, a, b),
                     AnySol::C(l, u1, v1, u2, v2) => write!(f, "c{},{},{},{},{}", l, u1, v1, u2, v2),
-                    AnySol::T(idx) => write!(f, "t{}", idx),
                 }
             }
         }
     }
 
     pub mod debug {
+        //! Debug-print helpers for layout problems.
         use std::{collections::{HashMap, BTreeMap}, fmt::Display};
 
         use petgraph::{Graph, dot::Dot};
@@ -1734,6 +1844,8 @@ pub mod layout {
 
         use super::Graphic;
         
+        /// Print a graphviz "dot" representation of the solution `solved_locs` 
+        /// to `layout_problem`
         pub fn debug<V: Display + Graphic>(layout_problem: &LayoutProblem<V>, solved_locs: &BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>) {
             let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
             let mut layout_debug = Graph::<String, String>::new();
@@ -1770,7 +1882,10 @@ pub mod layout {
     }
 
 
-    /// A layout_problem solver based on the [minion](https://github.com/minion/minion) constraint solver
+    /// A [LayoutProblem] solver based on the [minion](https://github.com/minion/minion) constraint solver
+    /// 
+    /// Minion has some helpful constraint propagation algorithms which are, empirically, 
+    /// quite effective at solve the edge-crossing minimization problem.
     pub mod minion {
         use std::collections::{BTreeMap};
         use std::fmt::{Display};
