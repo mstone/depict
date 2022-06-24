@@ -165,6 +165,8 @@ pub mod error {
     #[non_exhaustive]
     #[derive(Debug, thiserror::Error)]
     pub enum LayoutError {
+        #[error("heaps solver error")]
+        HeapsError{error: String},
         #[error("osqp solver error")]
         OsqpError{error: String},
         #[error("osqp setup error")]
@@ -983,7 +985,7 @@ pub mod backtrack {
     #[derive(Clone, Debug)]
     pub enum ILPStatus {
         NotAsGood,
-        Branch(ILPInstance, ILPInstance),
+        Branch(Option<ILPInstance>, Option<ILPInstance>),
         IntegerInfeasible(usize),
         Solved(f64, BitVec<u32>)
     }
@@ -1003,6 +1005,18 @@ pub mod backtrack {
             }
         }
 
+        pub fn is_feasible<S: Sol>(&self, ilp: &ILP<S>, eps_abs_infeas: f64) -> bool {
+            ilp.csp.iter().all(|(l, a, u)| {
+                let all_defined = a.iter().all(|m| unsafe { *self.alloc.get_unchecked(m.var.index) });
+                if all_defined {
+                    let asum = a.iter().map(|m| m.coeff * if unsafe { *self.value.get_unchecked(m.var.index) } { 1. } else { 0. }).sum::<f64>();
+                    *l - eps_abs_infeas < asum && asum < *u + eps_abs_infeas
+                } else {
+                    true
+                }
+            })
+        }
+
         pub fn solve<S: Sol>(&mut self, ilp: &ILP<S>, best_alternative: f64) -> Result<ILPStatus, Error> {
             let eps_abs_infeas = 1.0e-1_f64;
             let unassigned_idx = self.alloc.first_zero();
@@ -1013,6 +1027,8 @@ pub mod backtrack {
                 left.alloc.set(unassigned_idx, true);
                 right.alloc.set(unassigned_idx, true);
                 right.value.set(unassigned_idx, true);
+                let left = if left.is_feasible(ilp, eps_abs_infeas) { Some(left) } else { None };
+                let right = if right.is_feasible(ilp, eps_abs_infeas) { Some(right) } else { None };
                 return Ok(ILPStatus::Branch(left, right));
             }
 
@@ -1022,16 +1038,16 @@ pub mod backtrack {
             });
 
             if let Some(infeasible_idx) = infeasible_idx {
-                let (l, a, u) = &ilp.csp.constrs[infeasible_idx];
-                let asum = a.iter().map(|m| m.coeff * if unsafe { *self.value.get_unchecked(m.var.index) } { 1. } else { 0. }).sum::<f64>();
-                let a = Printer(a);
+                // let (l, a, u) = &ilp.csp.constrs[infeasible_idx];
+                // let asum = a.iter().map(|m| m.coeff * if unsafe { *self.value.get_unchecked(m.var.index) } { 1. } else { 0. }).sum::<f64>();
+                // let a = Printer(a);
                 // eprintln!("BACKTRACK INSTANCE: INFEASIBLE in constraint {infeasible_idx}, {l} <= {a} <= {u}, A.x = {asum}");
                 return Ok(ILPStatus::IntegerInfeasible(infeasible_idx))
             }
 
             let actual_bound = ilp.obj.iter().map(|m| m.coeff * if unsafe { *self.value.get_unchecked(m.var.index) } { 1. } else { 0. }).sum::<f64>();
 
-            eprintln!("BACKTRACK INSTANCE: SOLVED, actual bound: {actual_bound}, xs: {}", self.value);
+            // eprintln!("BACKTRACK INSTANCE: SOLVED, actual bound: {actual_bound}, xs: {}", self.value);
             Ok(ILPStatus::Solved(actual_bound, self.value.clone()))
         }
     }
@@ -1078,8 +1094,12 @@ pub mod backtrack {
                 }
                 match status {
                     Ok(ILPStatus::Branch(floor, ceil)) => {
-                        queue.push(floor);
-                        queue.push(ceil);
+                        if let Some(floor) = floor {
+                            queue.push(floor);
+                        }
+                        if let Some(ceil) = ceil {
+                            queue.push(ceil);
+                        }
                     },
                     Ok(ILPStatus::IntegerInfeasible(_)) | Ok(ILPStatus::NotAsGood) => {
                         continue
@@ -2113,6 +2133,297 @@ pub mod layout {
         }
     }
 
+    pub mod heaps {
+        use std::collections::{BTreeMap, HashMap};
+        use std::fmt::{Debug, Display};
+        use std::hash::Hash;
+        use std::ops::Deref;
+
+        use petgraph::Graph;
+        use petgraph::dot::Dot;
+        use tracing::{event, Level};
+        use tracing_error::InstrumentError;
+
+        use crate::graph_drawing::error::{Error, LayoutError, OrErrExt};
+        use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
+        use crate::graph_drawing::layout::{Hop, Loc, or_insert};
+        use crate::graph_drawing::osqp::{Fresh, Vars, Constraints, Monomial};
+        use crate::graph_drawing::backtrack::{ILP, ILPStatus};
+
+        use super::Placement;
+
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub enum AnySol {
+            X(usize, usize, usize),
+            C(usize, usize, usize, usize, usize),
+            T(usize)
+        }
+
+        impl Fresh for AnySol {
+            fn fresh(index: usize) -> Self {
+                Self::T(index)
+            }
+        }
+
+        impl Display for AnySol {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    AnySol::X(l, a, b) => write!(f, "x{},{},{}", l, a, b),
+                    AnySol::C(l, u1, v1, u2, v2) => write!(f, "c{},{},{},{},{}", l, u1, v1, u2, v2),
+                    AnySol::T(idx) => write!(f, "t{}", idx),
+                }
+            }
+        }
+
+        #[inline]
+        pub fn is_odd(x: usize) -> bool {
+            x & 0b1 == 1
+        }
+
+        // https://sedgewick.io/wp-content/themes/sedgewick/papers/1977Permutation.pdf, Algorithm 2
+        pub fn search<T>(p: &mut [T], mut process: impl FnMut(&mut [T])) {
+            let n = p.len();
+            let mut c = vec![0; n];
+            let mut i = 0; 
+            process(p);
+            while i < n {
+                if c[i] < i {
+                    // let k = if !is_odd(i) { 0 } else { c[i] }
+                    // k & 0b1 == 1 if odd, 0 if even.
+                    // (k & 0b1) * i = 0 if even, i if odd
+                    let k_idx = (i & 0b1_usize) * i;
+                    let k = c[k_idx];
+                    p.swap(i, k);
+                    c[i] += 1;
+                    i = 0;
+                    process(p)
+                } else {
+                    c[i] = 0;
+                    i += 1
+                }
+            }
+        }
+
+        pub fn multisearch<T>(p: &mut [&mut [T]], mut process: impl FnMut(&mut [&mut [T]])) {
+            let m = p.len();
+            let mut n = vec![];
+            let mut c = vec![];
+            for q in p.iter() {
+                n.push(q.len());
+                c.push(vec![0; q.len()]);
+            }
+            let mut j = 0;
+            process(p);
+            while j < m {
+                let mut i = 0;
+                while i < n[j] {
+                    if c[j][i] < i {
+                        // let k = if !is_odd(i) { 0 } else { c[i] }
+                        // k & 0b1 == 1 if odd, 0 if even.
+                        // (k & 0b1) * i = 0 if even, i if odd
+                        let k_idx = (i & 0b1_usize) * i;
+                        let k = c[j][k_idx];
+                        p[j].swap(i, k);
+                        c[j][i] += 1;
+                        i = 0;
+                        j = 0;
+                        process(p)
+                    } else {
+                        c[j][i] = 0;
+                        i += 1
+                    }
+                }
+                j += 1;
+            }
+        }
+
+        fn crosses<V: Clone + Debug + Display + Eq + Hash + Ord + PartialOrd + PartialEq>(h1: &Hop<V>, h2: &Hop<V>, p1: &[usize], p2: &[usize]) -> usize {
+            // imagine we have permutations p1, p2 of horizontal ranks for levels l1 and l2
+            // and a set of hops spanning l1-l2.
+            // we want to know how many of these hops cross.
+            // each hop h1, h2, has endpoints (h11, h12) and (h21, h22) on l1, l2 respectively.
+            // the crossing number c for h1, h2 is
+            let h11 = h1.mhr;
+            let h12 = h1.nhr;
+            let h21 = h2.mhr;
+            let h22 = h2.nhr;
+            let u1 = p1[h11.0];
+            let u2 = p2[h12.0];
+            let v1 = p1[h21.0];
+            let v2 = p2[h22.0];
+            let xu21 = u2 < u1;
+            let xu12 = u1 < u2;
+            let xv21 = v2 < v1;
+            let xv12 = v1 < v2;
+            let c = (xu21 && xv12) || (xu12 && xv21);
+            c as usize
+        }
+
+        /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
+        #[allow(clippy::type_complexity)]
+        pub fn minimize_edge_crossing<V>(
+            placement: &Placement<V>
+        ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
+            V: Clone + Debug + Display + Ord + Hash
+        {
+            let Placement{locs_by_level, hops_by_level, hops_by_edge, node_to_loc, ..} = placement;
+            
+            if hops_by_level.is_empty() {
+                return Ok((0, BTreeMap::new()));
+            }
+            if hops_by_level.iter().all(|(_lvl, hops)| hops.iter().count() <= 1) {
+                let mut solved_locs = BTreeMap::new();
+                for (lvl, locs) in locs_by_level.iter() {
+                    for (n, _) in locs.iter().enumerate() {
+                        solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
+                    }
+                }
+                return Ok((0, solved_locs))
+            }
+            #[allow(clippy::unwrap_used)]
+            let max_level = *hops_by_level.keys().max().unwrap();
+            #[allow(clippy::unwrap_used)]
+            let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
+
+            event!(Level::DEBUG, %max_level, %max_width, "max_level, max_width");
+
+
+            let mut shrs = vec![];
+            for (rank, locs) in locs_by_level.iter() {
+                let n = locs.len();
+                let shrs_lvl = (0..n).collect::<Vec<_>>();
+                shrs.push(shrs_lvl);
+            }
+            let mut shrs_ref = vec![];
+            for shrs_lvl in shrs.iter_mut() {
+                shrs_ref.push(&mut shrs_lvl[..]);
+            }
+
+            let mut crossing_number = usize::MAX;
+            let mut solution: Option<Vec<Vec<usize>>> = None;
+            multisearch(&mut shrs_ref, |p| {
+                let mut cn = 0;
+                for (rank, hops) in hops_by_level.iter() {
+                    for h1 in hops.iter() {
+                        for h2 in hops.iter() {
+                            cn += crosses(h1, h2, p[rank.0], p[rank.0+1]);
+                        }
+                    }
+                }
+                if cn < crossing_number {
+                    crossing_number = cn;
+                    solution = Some(p.iter().map(|q| q.to_vec()).collect());
+                }
+            });
+
+            let solution = solution.or_err(LayoutError::HeapsError{error: "no solution found".into()})?;
+            eprintln!("HEAPS CN: {crossing_number}");
+            eprintln!("HEAPS SOL: ");
+            for (n, s) in solution.iter().enumerate() {
+                eprintln!("{n}: {s:?}");
+            }
+            
+            // std::process::exit(0);
+            
+            let mut solved_locs = BTreeMap::new();
+            for (lvl, shrs) in solution.iter().enumerate() {
+                solved_locs.insert(VerticalRank(lvl), shrs
+                    .iter()
+                    .enumerate()
+                    .map(|(a, b)| (OriginalHorizontalRank(a), SolvedHorizontalRank(*b)))
+                    .collect::<BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>());
+            }
+            // for (lvl, _locs) in locs_by_level.iter() {
+            //     for (shr, n) in solution[lvl.0].iter().enumerate() {
+            //         solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(*n), SolvedHorizontalRank(shr));
+            //     }
+            // }
+
+            let mut layout_debug = Graph::<String, String>::new();
+            let mut layout_debug_vxmap = HashMap::new();
+            for ((vl, wl), hops) in hops_by_edge.iter() {
+                // if *vl == "root" { continue; }
+                let vn = node_to_loc[&Loc::Node(vl.clone())];
+                let wn = node_to_loc[&Loc::Node(wl.clone())];
+                let vshr = solved_locs[&vn.0][&vn.1];
+                let wshr = solved_locs[&wn.0][&wn.1];
+
+                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
+                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
+
+                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
+                    let shr = solved_locs[lvl][mhr];
+                    let shrd = solved_locs[&(*lvl+1)][nhr];
+                    let lvl1 = *lvl+1;
+                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
+                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
+                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
+                    if n == 0 {
+                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
+                    }
+                    if n == hops.len()-1 {
+                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
+                    }
+                }
+            }
+            let layout_debug_dot = Dot::new(&layout_debug);
+            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
+            eprintln!("LAYOUT GRAPH\n{layout_debug_dot:?}");
+
+            // Ok((crossing_number, solved_locs))
+            Ok((0, solved_locs))
+        }
+    
+
+        #[cfg(test)]
+        mod tests {
+            use itertools::Itertools;
+
+            use super::*;
+            #[test]
+            fn test_is_odd() {
+                assert!(!is_odd(0));
+                assert!(is_odd(1));
+                assert!(!is_odd(2));
+                assert!(is_odd(3));
+            }
+
+            #[test]
+            fn test_search() {
+                for size in 1..6 {      
+                    let mut v = (0..size).collect::<Vec<_>>();
+                    let mut ps = vec![];
+                    search(&mut v, |p| ps.push(p.to_vec()));
+                    assert_eq!(ps.len(), (1..=v.len()).product());
+                    assert_eq!(ps.len(), ps.iter().unique().count());
+                }
+            }
+
+            #[test]
+            fn test_multisearch() {
+                for size in 1..5 {  
+                    let mut vs = vec![];
+                    for size2 in 1..=size {
+                        vs.push((0..size2).collect::<Vec<_>>());
+                    }
+                    let mut vs2 = vec![];
+                    for v in vs.iter_mut() {
+                        vs2.push(&mut v[..]);
+                    }
+                    let mut ps = vec![];
+                    multisearch(&mut vs2, |p| ps.push(p.iter().map(|q| q.to_vec()).collect::<Vec<_>>()));
+                    eprintln!("ps.len {}", ps.len());
+                    for (n, p) in ps.iter().enumerate() {
+                        eprintln!("n: {}, p: {:?}", n, p);
+                    }
+                    assert_eq!(ps.len(), vs2.iter().map(|v| (1..=v.len()).product::<usize>()).product());
+                    assert_eq!(ps.len(), ps.iter().unique().count()); 
+                }
+            }
+        }
+        
+    }
+
     /// A placement solver based on efficient backtracking, inspired by [minion]
     pub mod backtrack {
         use std::collections::{BTreeMap, HashMap};
@@ -2316,7 +2627,7 @@ pub mod layout {
     }
 
     /// Solve for horizontal ranks that minimize edge crossing
-    pub use backtrack::minimize_edge_crossing;
+    pub use heaps::minimize_edge_crossing;
 }
 
 pub mod geometry {
