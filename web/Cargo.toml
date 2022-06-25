@@ -11,12 +11,13 @@ repository = "https://github.com/mstone/depict"
 [dependencies]
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
-depict = { path = "..", version = "0.2", default-features = false, features = [ "client" ] }
+depict = { path = "..", version = "0.2", default-features = false, features = [ "client", "osqp-rust" ] }
 dioxus = { version = "0.2", features = ["fermi", "web"] }
 futures = "0.3"
 indoc = "1.0"
 log = "0.4.6"
-osqp2 = { version = "0.6", path = "/Users/mstone/src/osqp.rs" }
+logos = "0.12"
+osqp-rust = { version = "0.6", git = "https://github.com/mstone/osqp.rs" }
 petgraph = { version = "0.6", features = ["serde-1"] }
 reqwasm = "0.5"
 serde = "1"
