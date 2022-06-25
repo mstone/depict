@@ -449,7 +449,7 @@ pub mod parser {
     }
 }
 
-#[cfg(all(feature="minion", any(feature="osqp", feature="osqp-rust")))]
+#[cfg(any(feature="osqp", feature="osqp-rust"))]
 pub mod graph_drawing;
 
 #[cfg(any(feature="client", feature="server"))]

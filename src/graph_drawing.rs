@@ -1894,6 +1894,7 @@ pub mod layout {
     /// 
     /// Minion has some helpful constraint propagation algorithms which are, empirically, 
     /// quite effective at solve the edge-crossing minimization problem.
+    #[cfg(feature="minion")]
     pub mod minion {
         use std::collections::{BTreeMap};
         use std::fmt::{Display};
@@ -2623,6 +2624,7 @@ pub mod layout {
     }
 
     /// A layout problem solver based on the [highs](https://highs.dev) optimization library
+    #[cfg(feature="highs")]
     pub mod highs {
         use std::collections::{BTreeMap, HashMap};
         use std::fmt::{Debug, Display};
