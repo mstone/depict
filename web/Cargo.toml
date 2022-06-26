@@ -18,6 +18,7 @@ indoc = "1.0"
 log = "0.4.6"
 logos = "0.12"
 osqp-rust = { version = "0.6", git = "https://github.com/mstone/osqp.rs" }
+osqp-rust-sys = { version = "0.6", git = "https://github.com/mstone/osqp.rs" }
 petgraph = { version = "0.6", features = ["serde-1"] }
 reqwasm = "0.5"
 serde = "1"

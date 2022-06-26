@@ -1,3 +1,5 @@
+#![feature(c_variadic)]
+
 use std::{default::Default, panic::catch_unwind, collections::HashMap};
 
 use depict::{rest::*, graph_drawing::{error::{Kind, Error, OrErrExt}, layout::{Loc, calculate_vcg2, Vcg, condense, Cvcg, rank, calculate_locs_and_hops, LayoutProblem, minimize_edge_crossing, Len, or_insert, debug::debug}, graph::roots, geometry::{calculate_sols, position_sols, GeometryProblem, GeometrySolution}, index::{LocSol, HopSol, VerticalRank, OriginalHorizontalRank}}, parser::{Parser, Token, Item}};
@@ -12,6 +14,86 @@ use petgraph::Graph;
 use reqwasm::http::{Request, Response};
 
 use tracing::{event, Level, Instrument};
+
+
+#[no_mangle]
+unsafe extern "C" fn malloc(_: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn calloc(_: ::std::os::raw::c_ulong, _: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn realloc(_: *mut ::std::os::raw::c_void, _: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn free(_: *mut ::std::os::raw::c_void) {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn printf(_: *const ::std::os::raw::c_char, _: ...) -> ::std::os::raw::c_int {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn mach_absolute_time() -> ::std::os::raw::c_longlong {
+    todo!()
+}
+
+use osqp_rust_sys::src::src::util::{mach_timebase_info_t, kern_return_t};
+
+#[no_mangle]
+unsafe extern "C" fn mach_timebase_info(info: mach_timebase_info_t) -> kern_return_t {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn dlopen(__path: *const ::std::os::raw::c_char, __mode: ::std::os::raw::c_int) -> *mut ::std::os::raw::c_void {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn dlclose(__handle: *mut ::std::os::raw::c_void) -> ::std::os::raw::c_int {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn dlerror() -> *mut ::std::os::raw::c_char {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C"     fn dlsym(
+    __handle: *mut ::std::os::raw::c_void,
+    __symbol: *const ::std::os::raw::c_char,
+) -> *mut ::std::os::raw::c_void {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn sqrt(x: ::std::os::raw::c_double) -> ::std::os::raw::c_double {
+    x.sqrt()
+}
+
+use osqp_rust_sys::src::lin_sys::lib_handler::__darwin_ct_rune_t;
+
+#[no_mangle]
+unsafe extern "C" fn __tolower(_: __darwin_ct_rune_t) -> __darwin_ct_rune_t {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn __toupper(_: __darwin_ct_rune_t) -> __darwin_ct_rune_t {
+    todo!()
+}
+
+
 
 async fn click(s: String) -> Response {
     let draw_req = serde_json::to_string(&Draw{text: s}).unwrap();

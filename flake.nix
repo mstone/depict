@@ -180,6 +180,8 @@
               ] ++ final.lib.optionals isShell [
                 entr
                 trunk
+                wasm-bindgen-cli
+                wabt
                 deploy-rs.packages.${final.system}.deploy-rs
                 (terraform_1.withPlugins (p: with p; [aws gandi vultr]))
                 nixbom.legacyPackages.${final.system}.nixbom
