@@ -1,8 +1,14 @@
 #![feature(c_variadic)]
 
-use std::{default::Default, panic::catch_unwind, collections::HashMap};
+use std::{default::Default, panic::catch_unwind, io::BufWriter};
 
-use depict::{rest::*, graph_drawing::{error::{Kind, Error, OrErrExt}, layout::{Loc, calculate_vcg2, Vcg, condense, Cvcg, rank, calculate_locs_and_hops, LayoutProblem, minimize_edge_crossing, Len, or_insert, debug::debug}, graph::roots, geometry::{calculate_sols, position_sols, GeometryProblem, GeometrySolution}, index::{LocSol, HopSol, VerticalRank, OriginalHorizontalRank}}, parser::{Parser, Token, Item}};
+use depict::{graph_drawing::{
+    error::{Kind, Error, OrErrExt}, 
+    layout::{Loc, calculate_vcg2, Vcg, condense, Cvcg, rank, calculate_locs_and_hops, LayoutProblem, minimize_edge_crossing, Len, debug::debug}, 
+    graph::roots, 
+    geometry::{calculate_sols, position_sols, GeometryProblem, GeometrySolution}, index::{LocSol, HopSol, VerticalRank, OriginalHorizontalRank}}, 
+    parser::{Parser, Token, Item}
+};
 
 use dioxus::{prelude::*, core::to_owned};
 
@@ -10,47 +16,82 @@ use futures::StreamExt;
 use indoc::indoc;
 
 use logos::Logos;
-use petgraph::Graph;
-use reqwasm::http::{Request, Response};
 
-use tracing::{event, Level, Instrument};
-
+use tracing::{event, Level};
 
 #[no_mangle]
-unsafe extern "C" fn malloc(_: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
-    todo!()
+unsafe extern "C" fn malloc(size: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
+    use std::alloc::{alloc, Layout};
+    let layout = Layout::from_size_align(size as usize + std::mem::size_of::<Layout>(), 16).unwrap();
+    let ptr = alloc(layout);
+    *(ptr as *mut Layout) = layout;
+    (ptr as *mut Layout).offset(1) as *mut ::std::os::raw::c_void
 }
 
 #[no_mangle]
-unsafe extern "C" fn calloc(_: ::std::os::raw::c_ulong, _: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
-    todo!()
+unsafe extern "C" fn calloc(count: ::std::os::raw::c_ulong, size: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
+    use std::alloc::{alloc_zeroed, Layout};
+    let layout = Layout::from_size_align((count * size) as usize + std::mem::size_of::<Layout>(), 16).unwrap();
+    let ptr = alloc_zeroed(layout);
+    *(ptr as *mut Layout) = layout;
+    (ptr as *mut Layout).offset(1) as *mut ::std::os::raw::c_void
 }
 
 #[no_mangle]
-unsafe extern "C" fn realloc(_: *mut ::std::os::raw::c_void, _: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
-    todo!()
+unsafe extern "C" fn realloc(ptr: *mut ::std::os::raw::c_void, size: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void {
+    use std::alloc::{realloc, Layout};
+    let ptr = (ptr as *mut Layout).offset(-1);
+    let layout = *ptr;
+    let ptr = realloc(ptr as *mut u8, layout, size as usize + std::mem::size_of::<Layout>());
+    *(ptr as *mut Layout) = Layout::from_size_align(size as usize + std::mem::size_of::<Layout>(), 16).unwrap();
+    (ptr as *mut Layout).offset(1) as *mut ::std::os::raw::c_void
 }
 
 #[no_mangle]
-unsafe extern "C" fn free(_: *mut ::std::os::raw::c_void) {
-    todo!()
+unsafe extern "C" fn free(ptr: *mut ::std::os::raw::c_void) {
+    use std::alloc::{dealloc, Layout};
+    let ptr = (ptr as *mut Layout).offset(-1);
+    let layout = *ptr;
+    dealloc(ptr as *mut u8, layout);
 }
 
 #[no_mangle]
-unsafe extern "C" fn printf(_: *const ::std::os::raw::c_char, _: ...) -> ::std::os::raw::c_int {
-    todo!()
+unsafe extern "C" fn printf(format: *const ::std::os::raw::c_char, mut args: ...) -> ::std::os::raw::c_int {
+    // use std::ffi::CStr;
+    // let c_str = unsafe { CStr::from_ptr(format_string) };
+    // let c_str = c_str.to_string_lossy();
+    // return c_str.len().try_into().unwrap();
+    let mut s = String::new();
+    let bytes_written = printf_compat::format(
+        format as *const u8, 
+        args.as_va_list(), 
+        printf_compat::output::fmt_write(&mut s)
+    );
+    log::info!("{s}");
+    bytes_written
+}
+
+fn now() -> i64 {
+    let window = web_sys::window().expect("should have a window in this context");
+    let performance = window
+        .performance()
+        .expect("performance should be available");
+    performance.now() as i64
 }
 
 #[no_mangle]
 unsafe extern "C" fn mach_absolute_time() -> ::std::os::raw::c_longlong {
-    todo!()
+    now()
 }
 
 use osqp_rust_sys::src::src::util::{mach_timebase_info_t, kern_return_t};
 
 #[no_mangle]
 unsafe extern "C" fn mach_timebase_info(info: mach_timebase_info_t) -> kern_return_t {
-    todo!()
+    let info = &mut *info;
+    info.numer = 1; // wrong, but may work?
+    info.denom = 1;
+    0 // KERN_SUCCESS
 }
 
 #[no_mangle]
@@ -91,18 +132,6 @@ unsafe extern "C" fn __tolower(_: __darwin_ct_rune_t) -> __darwin_ct_rune_t {
 #[no_mangle]
 unsafe extern "C" fn __toupper(_: __darwin_ct_rune_t) -> __darwin_ct_rune_t {
     todo!()
-}
-
-
-
-async fn click(s: String) -> Response {
-    let draw_req = serde_json::to_string(&Draw{text: s}).unwrap();
-    Request::post("/api/draw/v1")
-        .header("Content-Type", "application/json")
-        .body(draw_req)
-        .send()
-        .await
-        .unwrap()
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -255,7 +284,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let paths_by_rank = rank(condensed, &roots)?;
 
     let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank)?;
-    let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
+    let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, ..} = &layout_problem;
 
     let (crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
 
@@ -440,189 +469,114 @@ const PLACEHOLDER: &str = indoc!("
     person food: stir
 ");
 
-const PLACEHOLDER_DRAWING: &str = r#"
-{
-    "drawing": {
-        "crossing_number": 0,
-        "viewbox_width": 412.3232380465066,
-        "layout_debug": {
-            "nodes": [
-                "microwave 0",
-                "food 0",
-                "microwave food 2,0",
-                "microwave food 3,0",
-                "person 0",
-                "person food 1,0",
-                "person food 2,1",
-                "person food 3,0",
-                "person microwave 1,0",
-                "person microwave 2,0"
-            ],
-            "node_holes": [],
-            "edge_property": "directed",
-            "edges": [
-                [
-                    2,
-                    3,
-                    "2,0->3,0"
-                ],
-                [
-                    0,
-                    2,
-                    "3,0"
-                ],
-                [
-                    3,
-                    1,
-                    "3,0"
-                ],
-                [
-                    5,
-                    6,
-                    "1,0->2,1"
-                ],
-                [
-                    4,
-                    5,
-                    "2,1"
-                ],
-                [
-                    6,
-                    7,
-                    "2,1->3,0"
-                ],
-                [
-                    7,
-                    1,
-                    "3,0"
-                ],
-                [
-                    8,
-                    9,
-                    "1,0->2,0"
-                ],
-                [
-                    4,
-                    8,
-                    "2,0"
-                ],
-                [
-                    9,
-                    0,
-                    "2,0"
-                ]
-            ]
-        },
-        "nodes": [
-            {
-                "Div": {
-                    "key": "microwave",
-                    "label": "Microwave",
-                    "hpos": 0,
-                    "vpos": 170,
-                    "width": 186
-                }
+use svg::{Document, node::{element::{Group, Marker, Path, Rectangle, Text as TextElt}, Node as _, Text}};
+
+pub fn as_data_svg(drawing: Drawing) -> String {
+    let viewbox_width = drawing.viewbox_width;
+    let mut nodes = drawing.nodes;
+    let viewbox_height = 768f64;
+
+    let mut svg = Document::new()
+        .set("viewBox", (0f64, 0f64, viewbox_width, viewbox_height))
+        .set("text-rendering", "optimizeLegibility");
+
+    svg.append(Marker::new()
+        .set("id", "arrowhead")
+        .set("markerWidth", 7)
+        .set("markerHeight", 10)
+        .set("refX", 0)
+        .set("refY", 5)
+        .set("orient", "auto")
+        .set("viewBox", "0 0 10 10")
+        .add(Path::new()
+            .set("d", "M 0 0 L 10 5 L 0 10 z")
+            .set("fill", "black")
+        )
+    );
+    svg.append(Marker::new()
+        .set("id", "arrowheadrev")
+        .set("markerWidth", 7)
+        .set("markerHeight", 10)
+        .set("refX", 0)
+        .set("refY", 5)
+        .set("orient", "auto-start-reverse")
+        .set("viewBox", "0 0 10 10")
+        .add(Path::new()
+            .set("d", "M 0 0 L 10 5 L 0 10 z")
+            .set("fill", "black")
+        )
+    );
+
+    nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    for node in nodes {
+        match node {
+            Node::Div{label, hpos, vpos, width, ..} => {
+                    svg.append(Group::new()
+                        .set("transform", format!("translate({hpos}, {vpos})"))
+                        .add(Rectangle::new()
+                            .set("width", width)
+                            .set("height", 26f64)
+                            .set("stroke", "black")
+                            .set("fill", "none"))
+                        .add(TextElt::new()
+                            .set("text-anchor", "middle")
+                            .set("transform", format!("translate({}, {})", width / 2., 16.))
+                            .set("font-family", "serif") // 'Times New Roman', Times, serif
+                            .set("fill", "black")
+                            .set("stroke", "none")
+                            .add(Text::new(label)))
+                    );
             },
-            {
-                "Div": {
-                    "key": "person",
-                    "label": "Person",
-                    "hpos": 39,
-                    "vpos": 50,
-                    "width": 367
-                }
-            },
-            {
-                "Div": {
-                    "key": "food",
-                    "label": "Food",
-                    "hpos": 26,
-                    "vpos": 250,
-                    "width": 387
-                }
-            },
-            {
-                "Svg": {
-                    "key": "person_food_actuates_0",
-                    "path": "M 364 76 L 364 170 L 362 243",
-                    "rel": "actuates",
-                    "label": {
-                        "text": "stir",
-                        "hpos": 364,
-                        "width": 124.9860715305249,
-                        "vpos": 50
+            Node::Svg{path, rel, label, ..} => {
+                
+                let mut path_elt = Path::new()
+                    .set("d", path)
+                    .set("stroke", "black");
+                
+                match rel.as_str() {
+                    "actuates" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
+                    "senses" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
+                    _ => {},
+                };
+
+                if let Some(Label{text, hpos, width: _, vpos, ..}) = label {
+                    for (lineno, line) in text.lines().enumerate() {
+                        let translate = if rel == "actuates" { 
+                            format!("translate({}, {})", hpos-12., vpos + 56. + (20. * lineno as f64))
+                        } else { 
+                            format!("translate({}, {})", hpos+12., vpos + 56. + (20. * lineno as f64))
+                        };
+                        let anchor = if rel == "actuates" {
+                            "end"
+                        } else {
+                            "start"
+                        };
+                        svg.append(Group::new()
+                            .add(TextElt::new()
+                                .set("font-family", "ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace")
+                                .set("fill", "black")
+                                .set("stroke", "none")
+                                .set("transform", translate)
+                                .set("text-anchor", anchor)
+                                .add(Text::new(line))
+                            )
+                        );
                     }
                 }
+
+                svg.append(Group::new()
+                    .add(path_elt)
+                );
             },
-            {
-                "Svg": {
-                    "key": "person_microwave_actuates_0",
-                    "path": "M 136 76 L 136 163",
-                    "rel": "actuates",
-                    "label": {
-                        "text": "open\nstart\nstop",
-                        "hpos": 136,
-                        "width": 186.00027036035365,
-                        "vpos": 50
-                    }
-                }
-            },
-            {
-                "Svg": {
-                    "key": "person_microwave_actuates_1",
-                    "path": "M 136 76 L 136 163",
-                    "rel": "actuates",
-                    "label": {
-                        "text": "open\nstart\nstop",
-                        "hpos": 136,
-                        "width": 186.00027036035365,
-                        "vpos": 50
-                    }
-                }
-            },
-            {
-                "Svg": {
-                    "key": "person_microwave_actuates_2",
-                    "path": "M 136 76 L 136 163",
-                    "rel": "actuates",
-                    "label": {
-                        "text": "open\nstart\nstop",
-                        "hpos": 136,
-                        "width": 186.00027036035365,
-                        "vpos": 50
-                    }
-                }
-            },
-            {
-                "Svg": {
-                    "key": "person_microwave_senses_3",
-                    "path": "M 156 83 L 156 170",
-                    "rel": "senses",
-                    "label": {
-                        "text": "beep",
-                        "hpos": 156,
-                        "width": 186.00027036035365,
-                        "vpos": 50
-                    }
-                }
-            },
-            {
-                "Svg": {
-                    "key": "microwave_food_actuates_0",
-                    "path": "M 86 196 L 86 243",
-                    "rel": "actuates",
-                    "label": {
-                        "text": "heat",
-                        "hpos": 86,
-                        "width": 386.69389586984727,
-                        "vpos": 170
-                    }
-                }
-            }
-        ]
+        }
     }
+
+    let mut buf = BufWriter::new(Vec::new());
+    svg::write(&mut buf, &svg).unwrap();
+    let bytes = buf.into_inner().unwrap();
+    let svg_str = String::from_utf8(bytes).unwrap();
+    format!("data:image/svg+xml;utf8,{svg_str}")
 }
-"#;
 
 pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
     let viewbox_width = drawing.viewbox_width;
@@ -636,7 +590,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                 children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
-                        class: "absolute border border-black text-center z-10 bg-white", // bg-opacity-50
+                        style: "position: absolute; padding-top: 3px; padding-bottom: 3px; box-sizing: border-box; border: 1px solid black; text-align: center; z-index: 10; background-color: #fff;", // bg-opacity-50
                         top: "{vpos}px",
                         left: "{hpos}px",
                         width: "{width}px",
@@ -653,7 +607,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                 children.push(cx.render(rsx!{
                     div {
                         key: "{key}",
-                        class: "absolute",
+                        style: "position: absolute;",
                         svg {
                             fill: "none",
                             stroke: "{stroke_color}",
@@ -707,18 +661,18 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                                 } else { 
                                     "translate(1.5ex)"
                                 };
-                                let border = match rel.as_str() { 
-                                    "actuates" => "border border-red-300",
-                                    "senses" => "border border-blue-300",
-                                    _ => "",
-                                };
+                                // let border = match rel.as_str() { 
+                                //     // "actuates" => "border border-red-300",
+                                //     // "senses" => "border border-blue-300",
+                                //     _ => "",
+                                // };
                                 rsx!(div {
-                                    class: "absolute",
+                                    style: "position: absolute;",
                                     left: "{hpos}px",
                                     // width: "{width}px",
                                     top: "calc({vpos}px + 40px)",
                                     div {
-                                        class: "whitespace-pre z-50 bg-white border-box text-sm font-mono {border}",
+                                        style: "white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
                                         transform: "{translate}",
                                         "{text}"
                                     }
@@ -743,17 +697,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let model = use_state(&cx, || String::from(PLACEHOLDER));
 
     // let drawing = use_state(&cx, || serde_json::from_str::<DrawResp>(PLACEHOLDER_DRAWING).unwrap().drawing);
-    let drawing = use_state(&cx, || Drawing::default());
+    let drawing = use_state(&cx, || draw(PLACEHOLDER.into()).unwrap());
     
     let drawing_client = use_coroutine(&cx, |mut rx: UnboundedReceiver<String>| {
         to_owned![drawing];
         async move {
-            let mut prev_model: Option<String> = None;
             while let Some(model) = rx.next().await {
-                // let res: Result<DrawResp, _> = click(model).await.json().await;
-                // if let Ok(drawing_resp) = res {
-                //     drawing.set(drawing_resp.drawing);
-                // }
                 let nodes = if model.trim().is_empty() {
                     Ok(Ok(Drawing::default()))
                 } else {
@@ -763,7 +712,6 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                 };
                 match nodes {
                     Ok(Ok(drawing_nodes)) => {
-                        prev_model = Some(model);
                         drawing.set(drawing_nodes);
                     },
                     _ => {},
@@ -786,24 +734,29 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     //     None => rsx!(div{}),
     // }));
 
+    let data_svg = as_data_svg(drawing.get().clone());
+
     cx.render(rsx!{
-        link { href:"https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css", rel:"stylesheet" }
         div {
             // key: "editor",
-            class: "width-full z-20 p-4",
+            style: "width: 100%; z-index: 20; padding: 1rem;",
             div {
-                class: "max-w-3xl mx-auto flex flex-col",
+                style: "max-width: 36rem; margin-left: auto; margin-right: auto; flex-direction: column;",
                 div {
                     // key: "editor_label",
-                    class: "fs-24",
                     "Model"
                 }
                 div {
                     // key: "editor_editor",
                     textarea {
-                        class: "border",
+                        style: "border-width: 1px; border-color: #000;",
                         rows: "6",
                         cols: "80",
+                        autocomplete: "off",
+                        // autocorrect: "off",
+                        // autocapitalize: "off",
+                        autofocus: "true",
+                        spellcheck: "false",
                         // placeholder: "",
                         oninput: move |e| { 
                             event!(Level::TRACE, "INPUT");
@@ -812,46 +765,61 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         "{model}"
                     }
                 }
-                div {
-                    class: "text-sm text-gray-400 width-full",
+                div { 
+                    style: "display: flex; flex-direction: row; justify-content: space-between;",
                     div {
-                        span {
-                            class: "text-black",
-                            "Syntax: "
+                        style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: calc(100% - 8rem);",
+                        div {
+                            span {
+                                style: "color: #000;",
+                                "Syntax: "
+                            }
+                            span {
+                                style: "font-style: italic;",
+                                "node ... : action ... / percept ... : action ... / percept ..."
+                            }
                         }
-                        span {
-                            class: "italic",
-                            "node node ... : action action... / percept percept ... : action... / percept..."
+                        div {
+                            span {
+                                style: "color: #000;",
+                                "Example: "
+                            }
+                            span {
+                                style: "font-style: italic;",
+                                "person microwave food: open, start, stop / beep : heat"
+                            },
                         }
                     }
                     div {
-                        span {
-                            class: "text-black",
-                            "Example: "
+                        style: "display: flex; flex-direction: column; align-items: end;",
+                        a {
+                            href: "{data_svg}",
+                            download: "depict.svg",
+                            "Export SVG"
                         }
                         span {
-                            class: "italic",
-                            "person microwave food: open, start, stop / beep : heat. person food: stir"
-                        },
+                            style: "font-style: italic; font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity));",
+                            "('Copy Link' to use)"
+                        }
                     }
                 }
                 // div {
-                //     class: "text-sm text-gray-400 width-full",
+                //     style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
                 //     span {
-                //         class: "text-black",
+                //         style: "color: #000;",
                 //         "Crossing Number: "
                 //     }
                 //     span {
-                //         class: "italic",
+                //         style: "font-style: italic;",
                 //         crossing_number
                 //     }
                 // }
             }
         }
         div {
-            class: "width-full",
+            style: "width: 100%;",
             div {
-                class: "relative mx-auto border border-black",
+                style: "position: relative; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
                 width: "{viewbox_width}px",
                 nodes
             }
