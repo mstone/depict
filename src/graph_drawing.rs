@@ -2785,7 +2785,11 @@ pub mod layout {
 
 
     /// Solve for horizontal ranks that minimize edge crossing
+    #[cfg(any(not(feature="minion"), target_family="wasm"))]
     pub use heaps::minimize_edge_crossing;
+
+    #[cfg(all(feature="minion", not(target_family="wasm")))]
+    pub use minion::minimize_edge_crossing;
 }
 
 pub mod geometry {
