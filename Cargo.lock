@@ -805,6 +805,7 @@ dependencies = [
  "log",
  "logos",
  "osqp-rust",
+ "osqp-rust-sys",
  "petgraph",
  "reqwasm",
  "serde",
