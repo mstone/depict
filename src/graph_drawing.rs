@@ -1677,6 +1677,12 @@ pub mod layout {
         /// The vertical rank of the upper endpoint of the hop
         pub lvl: VerticalRank,
     }
+
+    impl<V: Graphic + Display> Display for Hop<V> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Hop{{{}->{}, {}, {}, {}}}", self.vl, self.wl, self.lvl, self.mhr, self.nhr)
+        }
+    }
     
     #[derive(Clone, Debug)]
     pub struct LayoutProblem<V: Graphic> {
@@ -2330,11 +2336,11 @@ pub mod layout {
             let u2 = p2[h12.0];
             let v1 = p1[h21.0];
             let v2 = p2[h22.0];
-            let xu21 = u2 < u1;
-            let xu12 = u1 < u2;
-            let xv21 = v2 < v1;
-            let xv12 = v1 < v2;
-            let c = (xu21 && xv12) || (xu12 && xv21);
+            let x121 = v1 < u1;
+            let x112 = u1 < v1;
+            let x221 = v2 < u2;
+            let x212 = u2 < v2;
+            let c = (x121 && x212) || (x112 && x221);
             c as usize
         }
 
@@ -2385,6 +2391,7 @@ pub mod layout {
                 for (rank, hops) in hops_by_level.iter() {
                     for h1 in hops.iter() {
                         for h2 in hops.iter() {
+                            // eprintln!("hop: {h1} {h2} -> {}", crosses(h1, h2, p[rank.0], p[rank.0+1]));
                             cn += crosses(h1, h2, p[rank.0], p[rank.0+1]);
                         }
                     }
@@ -2393,6 +2400,7 @@ pub mod layout {
                     crossing_number = cn;
                     solution = Some(p.iter().map(|q| q.to_vec()).collect());
                 }
+                // eprintln!("P cn: {cn}: p: {p:?}");
             });
 
             let solution = solution.or_err(LayoutError::HeapsError{error: "no solution found".into()})?;
@@ -2436,6 +2444,11 @@ pub mod layout {
                 assert!(is_odd(1));
                 assert!(!is_odd(2));
                 assert!(is_odd(3));
+            }
+
+            #[test]
+            fn test_crosses() {
+                // ???
             }
 
             #[test]

@@ -359,6 +359,10 @@ fn draw(data: String) -> Result<Drawing, Error> {
                     label_vpos = Some(((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height);
                 }
 
+                if n < hops.len() - 1 {
+                    vpos2 += 26.0;
+                }
+
                 if n == hops.len() - 1 && *ew == "actuates" { 
                     vpos2 -= 7.0; // arrowhead length
                 }
