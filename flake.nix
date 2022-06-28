@@ -18,8 +18,9 @@
   inputs.rust-overlay.inputs.flake-utils.follows = "flake-utils";
   inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-  inputs.minionSrc.url = "github:minion/minion";
-  inputs.minionSrc.flake = false;
+  inputs.minion.url = "github:mstone/minion";
+  inputs.minion.inputs.utils.follows = "flake-utils";
+  inputs.minion.inputs.nixpkgs.follows = "nixpkgs";
 
   inputs.nixbom.url = "github:mstone/nixbom";
   inputs.nixbom.inputs.crane.follows = "crane";
@@ -28,7 +29,7 @@
   inputs.nixbom.inputs.nix-filter.follows = "nix-filter";
   inputs.nixbom.inputs.rust-overlay.follows = "rust-overlay";
 
-  outputs = {self, nixpkgs, crane, deploy-rs, minionSrc, nixbom, rust-overlay, flake-utils, nix-filter}:
+  outputs = {self, nixpkgs, crane, deploy-rs, minion, nixbom, rust-overlay, flake-utils, nix-filter}:
     flake-utils.lib.simpleFlake {
       inherit self nixpkgs;
       name = "depict";
@@ -43,23 +44,6 @@
           depict = lib.depict { isShell = false; };
           devShell = lib.depict { isShell = true; };
           defaultPackage = depict;
-
-          minion = with final; with pkgs; stdenv.mkDerivation {
-            pname = "minion";
-            version = "2.0.0-rc1";
-            src = minionSrc;
-            buildInputs = [ python2 ];
-            buildPhase = ''
-              mkdir build
-              cd build
-              python2 $src/configure.py
-              make minion
-            '';
-            installPhase = ''
-              mkdir -p $out/bin
-              cp -a ./minion $out/bin
-            '';
-          };
 
           server = with final; with pkgs; let
             subpkg = "depict-server";

@@ -106,18 +106,25 @@
         "type": "github"
       }
     },
-    "minionSrc": {
-      "flake": false,
+    "minion": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "utils": [
+          "flake-utils"
+        ]
+      },
       "locked": {
-        "lastModified": 1619428864,
-        "narHash": "sha256-4PfgX0EIw4bAJmMSmyEQ3Ai9jqmBE/S/QEDlpQi6dIQ=",
-        "owner": "minion",
+        "lastModified": 1656374410,
+        "narHash": "sha256-jw/dFndKjENlLfDx0YU4/0DXEoT7SlZNri5/FCL7L+U=",
+        "owner": "mstone",
         "repo": "minion",
-        "rev": "283b74de15320b18fa723ff23810ccafa7631fcd",
+        "rev": "2c0e65c8368653f51c026ac2d169cf904b1b058a",
         "type": "github"
       },
       "original": {
-        "owner": "minion",
+        "owner": "mstone",
         "repo": "minion",
         "type": "github"
       }
@@ -186,7 +193,7 @@
         "crane": "crane",
         "deploy-rs": "deploy-rs",
         "flake-utils": "flake-utils_2",
-        "minionSrc": "minionSrc",
+        "minion": "minion",
         "nix-filter": "nix-filter",
         "nixbom": "nixbom",
         "nixpkgs": "nixpkgs",
