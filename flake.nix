@@ -18,10 +18,6 @@
   inputs.rust-overlay.inputs.flake-utils.follows = "flake-utils";
   inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-  inputs.minion.url = "github:mstone/minion";
-  inputs.minion.inputs.utils.follows = "flake-utils";
-  inputs.minion.inputs.nixpkgs.follows = "nixpkgs";
-
   inputs.nixbom.url = "github:mstone/nixbom";
   inputs.nixbom.inputs.crane.follows = "crane";
   inputs.nixbom.inputs.flake-utils.follows = "flake-utils";
@@ -29,7 +25,7 @@
   inputs.nixbom.inputs.nix-filter.follows = "nix-filter";
   inputs.nixbom.inputs.rust-overlay.follows = "rust-overlay";
 
-  outputs = {self, nixpkgs, crane, deploy-rs, minion, nixbom, rust-overlay, flake-utils, nix-filter}:
+  outputs = {self, nixpkgs, crane, deploy-rs, nixbom, rust-overlay, flake-utils, nix-filter}:
     flake-utils.lib.simpleFlake {
       inherit self nixpkgs;
       name = "depict";
@@ -57,7 +53,6 @@
               mkdir -p $out/bin
               cp ${serverBin}/bin/${subpkg} $out/bin/${subpkg}
               wrapProgram $out/bin/${subpkg} \
-                --prefix PATH : "${minion}/bin/" \
                 --set WEBROOT ${web}
             '';
           };
@@ -107,8 +102,6 @@
             installPhase = ''
               mkdir -p $out/bin
               cp ${pkg}/bin/${subpkg} $out/bin/${subpkg}
-              wrapProgram $out/bin/${subpkg} \
-                --prefix PATH : "${minion}/bin/"
             '';
           };
 
@@ -160,7 +153,6 @@
                 rust
                 # tex
                 cmake
-                llvmPackages.openmp
               ] ++ final.lib.optionals isShell [
                 entr
                 trunk
@@ -173,7 +165,6 @@
                 cargo-outdated
                 cargo-expand
                 rustfmt
-                minion
               ] ++ final.lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                 AppKit
                 Security

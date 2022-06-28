@@ -11,8 +11,7 @@ repository = "https://github.com/mstone/depict"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["highs", "minion", "osqp-rust"]
-minion = ["ndarray"]
+default = ["osqp-rust"]
 desktop = []
 server = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
@@ -35,15 +34,9 @@ tracing = "0.1"
 tracing-error = { version = "0.2", features = [ "traced-error" ] }
 typed-index-collections = "3.0"
 
-# HiGHS
-highs = { version = "*", optional = true }
-
 # osqp
 osqp = { version = "0.6", optional = true }
 osqp-rust = { version = "0.6", optional = true, git = "https://github.com/mstone/osqp.rs" }
-
-# minion
-ndarray = { version = "0.15", optional = true }
 
 # server
 serde = { version = "1", optional = true }

@@ -62,8 +62,12 @@ unsafe extern "C" fn printf(format: *const ::std::os::raw::c_char, mut args: ...
     // let c_str = c_str.to_string_lossy();
     // return c_str.len().try_into().unwrap();
     let mut s = String::new();
+    #[cfg(target_family="wasm")]
+    let format = format as *const u8;
+    #[cfg(not(target_family="wasm"))]
+    let format = format as *const i8;
     let bytes_written = printf_compat::format(
-        format as *const u8, 
+        format, 
         args.as_va_list(), 
         printf_compat::output::fmt_write(&mut s)
     );
