@@ -1,5 +1,5 @@
 use clap::Parser;
-use depict::parser::*;
+use depict::{parser::*, graph_drawing::layout::eval::eval};
 
 use logos::Logos;
 
@@ -71,7 +71,11 @@ fn do_one_expr(path: String, data: String) -> Result<()> {
             }
         })?;
         
-    println!("{v:#?}");
+    println!("PARSE: {v:#?}");
+
+    let ev = eval(&v[..]);
+    println!("EVAL: {ev:#?}");
+
     Ok(())
 }
 

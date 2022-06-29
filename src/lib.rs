@@ -185,6 +185,8 @@ pub mod parser {
     //! pretty-printer.
     use enum_kinds::EnumKind;
     use std::borrow::Cow;
+    use std::fmt::Display;
+    use std::fmt::Formatter;
     use std::hash::Hash;
 
     use pomelo::pomelo;
@@ -417,6 +419,12 @@ pub mod parser {
         expr3 ::= Colon { Item::Colon(vec![], vec![]) };
         expr3 ::= Comma { Item::Comma(vec![]) };
         expr3 ::= expr1(i) expr1(j) [Text] { merge_item(i, j) };
+    }
+
+    impl<'s> Display for Item<'s> {
+        fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> { 
+            write!(fmt, "{}", crate::printer::print1(self))
+        }
     }
 
     /// The [pomelo!]-generated depiction parser
