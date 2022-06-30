@@ -430,6 +430,234 @@ pub mod index {
 
 }
 
+pub mod eval {
+    //! The main "value" type of depiction parts.
+
+    use std::{collections::BTreeMap, borrow::{Cow}};
+
+    use crate::parser::Item;
+    
+    /// What kind of relationship between processes does 
+    /// the containing [Val::Chain] describe?
+    #[derive(Clone, Debug)]
+    pub enum Rel {
+        Vertical,
+        Horizontal,
+    }
+
+    #[non_exhaustive]
+    #[derive(Clone, Debug)]
+    pub enum Position {
+        /// north, west, outside
+        NWO,
+        /// north, east, outside
+        NEO,
+        /// north, west, inside
+        NWI,
+        /// south, inside
+        SI,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct Note<V> {
+        /// Content of the note
+        pub label: V,
+        /// Location of the note
+        pub pos: Position,
+    }
+
+    /// What are the labels for the forward and reverse 
+    /// directions for a given link of the containing 
+    /// [Val::Chain]?
+    #[derive(Clone, Debug)]
+    pub struct Level<V> {
+        /// What are the labels for the "forward" direction 
+        /// of this link of the chain?
+        pub forward: Option<Vec<V>>,
+        /// What are the labels for the "reverse" direction
+        /// of this link of the chain?
+        pub reverse: Option<Vec<V>>,
+    }
+
+    /// What processes and labeled relationships between them
+    /// are we depicting?
+    #[derive(Clone, Debug)]
+    pub enum Val<V> {
+        Ref {
+            name: V,
+        },
+        Process {
+            /// Maybe this process is named?
+            name: Option<V>,
+            /// Maybe this process has a label?
+            label: Option<V>,
+            /// Maybe this process has nested parts?
+            body: Option<Vec<Self>>,
+            /// Maybe there are nested parts accessible by name?
+            name_to_part: Option<BTreeMap<V, usize>>,
+            /// Maybe there are annotations?
+            notes: Option<Vec<Note<V>>>,
+        },
+        Chain {
+            /// Maybe this chain is named?
+            name: Option<V>,
+            /// How are the given processes related?
+            rel: Rel,
+            /// What processes are in the chain?
+            path: Vec<Self>,
+            /// What labels separate and connect the processes in the chain?
+            labels: Vec<Level<V>>
+        },
+    }
+
+    impl<V> Val<V> {
+        pub fn name(&self) -> Option<&V> {
+            match self {
+                Val::Ref { name } => Some(name),
+                Val::Process { name, .. } => name.as_ref(),
+                Val::Chain { name, .. } => name.as_ref(),
+            }
+        }
+
+        pub fn set_name(self, name: V) -> Self {
+            match self {
+                Val::Ref { name: _ } => Val::Ref{ 
+                    name 
+                },
+                Val::Process { name: _, label, body, name_to_part, notes } => Val::Process{
+                    name: Some(name), 
+                    label, 
+                    body,
+                    name_to_part,
+                    notes, 
+                },
+                Val::Chain { name: _, rel, path, labels } => Val::Chain {
+                    name: Some(name),
+                    rel,
+                    path,
+                    labels,
+                },
+            }
+        }
+    }
+
+    fn eval_path<'s>(path: &'s [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
+        path.iter().filter_map(|i| {
+            match i {
+                Item::Text(s) => Some(s.clone()),
+                Item::Seq(s) => Some(itertools::join(s, " ").into()),
+                _ => None
+            }
+        }).map(|label| {
+            Val::Process{
+                name: None,
+                label: Some(label),
+                body: None,
+                name_to_part: None,
+                notes: None,
+            }
+        }).collect::<Vec<_>>()
+    }
+
+    fn eval_slash<'s>(forward: Option<&'s [Item<'s>]>, reverse: Option<&'s [Item<'s>]>) -> Option<Vec<Cow<'s, str>>> {
+        let mut res: Option<Vec<Cow<'s, str>>> = None;
+        if let Some(side) = forward.or(reverse) {
+            for item in side {
+                match item {
+                    Item::Text(s) => {
+                        res.get_or_insert_with(Default::default).push(s.clone())
+                    },
+                    Item::Seq(s) | Item::Comma(s) => {
+                        res.get_or_insert_with(Default::default).append(&mut s
+                            .iter()
+                            .map(|c| Cow::from(crate::printer::print1(c)))
+                            .collect::<Vec<_>>()
+                        );
+                    },
+                    _ => {},
+                }
+            }
+        }
+        res
+    }
+
+    fn eval_labels<'s>(labels: Option<Vec<Level<Cow<'s, str>>>>, r: &'s [Item<'s>]) -> Vec<Level<Cow<'s, str>>> {
+        let mut labels = labels.unwrap_or_default();
+        match r.first() {
+            Some(_f @ Item::Colon(rl, rr)) => {
+                labels = eval_labels(Some(labels), rl);
+                labels = eval_labels(Some(labels), rr);
+            }
+            Some(Item::Slash(rl, rr)) => {
+                labels.push(Level{
+                    forward: eval_slash(Some(&rl[..]), None), 
+                    reverse: eval_slash(None, Some(&rr[..])),
+                });
+            },
+            Some(Item::Text(_)) | Some(Item::Seq(_)) | Some(Item::Comma(_)) => {
+                labels.push(Level{
+                    forward: eval_slash(Some(r), None),
+                    reverse: None,
+                });
+            },
+            _ => {},
+        }
+        labels
+    }
+
+    /// What depiction do the given depict-expressions denote?
+    pub fn eval<'s>(exprs: &'s [Item<'s>]) -> Val<Cow<'s, str>> {
+        let mut body: Option<Vec<Val<Cow<'s, str>>>> = None;
+
+        for expr in exprs {
+            match expr {
+                Item::Colon(l, r) => {
+                    if l.len() == 1 && matches!(l[0], Item::Text(..)){
+                        let process = eval(&r[..]);
+                        if let (Item::Text(name), mut process@Val::Process{..}) = (&l[0], process) {
+                            process = process.set_name(name.clone());
+                            body.get_or_insert_with(Default::default).push(process);
+                        }
+                    } else {
+                        body.get_or_insert_with(Default::default).push(Val::Chain{
+                            name: None,
+                            rel: Rel::Vertical,
+                            path: eval_path(&l[..]),
+                            labels: eval_labels(None, &r[..]),
+                        });
+                    }
+                },
+                Item::Seq(ls) | Item::Comma(ls) => {
+                    body.get_or_insert_with(Default::default).push(Val::Chain{
+                        name: None,
+                        rel: Rel::Vertical,
+                        path: eval_path(&ls[..]),
+                        labels: vec![],
+                    });
+                }
+                Item::Text(s) => {
+                    body.get_or_insert_with(Default::default).push(Val::Process{
+                        name: None, 
+                        label: Some(s.clone()), 
+                        body: None, 
+                        name_to_part: None, 
+                        notes: None
+                    })
+                }
+                _ => {},
+            }
+        }
+
+        Val::Process{ 
+            name: None, 
+            label: None, 
+            body, 
+            name_to_part: Some(BTreeMap::new()),
+            notes: None,
+        }
+    }
+}
+
 pub mod osqp {
     //! Types for optimization problems and conversions to osqp types
     //! 
@@ -895,6 +1123,7 @@ pub mod layout {
     use typed_index_collections::TiVec;
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
+    use crate::graph_drawing::eval::{Val, self};
     use crate::graph_drawing::graph::roots;
 
     #[derive(Clone, Debug)]
@@ -997,234 +1226,6 @@ pub mod layout {
     impl<'s> Len for Cow<'s, str> {
         fn len(&self) -> usize {
             str::len(self)
-        }
-    }
-
-    pub mod eval {
-        //! The main "value" type of depiction parts.
-
-        use std::{collections::BTreeMap, borrow::{Cow}};
-
-        use crate::parser::Item;
-        
-        /// What kind of relationship between processes does 
-        /// the containing [Val::Chain] describe?
-        #[derive(Clone, Debug)]
-        pub enum Rel {
-            Vertical,
-            Horizontal,
-        }
-
-        #[non_exhaustive]
-        #[derive(Clone, Debug)]
-        pub enum Position {
-            /// north, west, outside
-            NWO,
-            /// north, east, outside
-            NEO,
-            /// north, west, inside
-            NWI,
-            /// south, inside
-            SI,
-        }
-
-        #[derive(Clone, Debug)]
-        pub struct Note<V> {
-            /// Content of the note
-            pub label: V,
-            /// Location of the note
-            pub pos: Position,
-        }
-
-        /// What are the labels for the forward and reverse 
-        /// directions for a given link of the containing 
-        /// [Val::Chain]?
-        #[derive(Clone, Debug)]
-        pub struct Level<V> {
-            /// What are the labels for the "forward" direction 
-            /// of this link of the chain?
-            pub forward: Option<Vec<V>>,
-            /// What are the labels for the "reverse" direction
-            /// of this link of the chain?
-            pub reverse: Option<Vec<V>>,
-        }
-
-        /// What processes and labeled relationships between them
-        /// are we depicting?
-        #[derive(Clone, Debug)]
-        pub enum Val<V> {
-            Ref {
-                name: V,
-            },
-            Process {
-                /// Maybe this process is named?
-                name: Option<V>,
-                /// Maybe this process has a label?
-                label: Option<V>,
-                /// Maybe this process has nested parts?
-                body: Option<Vec<Self>>,
-                /// Maybe there are nested parts accessible by name?
-                name_to_part: Option<BTreeMap<V, usize>>,
-                /// Maybe there are annotations?
-                notes: Option<Vec<Note<V>>>,
-            },
-            Chain {
-                /// Maybe this chain is named?
-                name: Option<V>,
-                /// How are the given processes related?
-                rel: Rel,
-                /// What processes are in the chain?
-                path: Vec<Self>,
-                /// What labels separate and connect the processes in the chain?
-                labels: Vec<Level<V>>
-            },
-        }
-
-        impl<V> Val<V> {
-            pub fn name(&self) -> Option<&V> {
-                match self {
-                    Val::Ref { name } => Some(name),
-                    Val::Process { name, .. } => name.as_ref(),
-                    Val::Chain { name, .. } => name.as_ref(),
-                }
-            }
-
-            pub fn set_name(self, name: V) -> Self {
-                match self {
-                    Val::Ref { name: _ } => Val::Ref{ 
-                        name 
-                    },
-                    Val::Process { name: _, label, body, name_to_part, notes } => Val::Process{
-                        name: Some(name), 
-                        label, 
-                        body,
-                        name_to_part,
-                        notes, 
-                    },
-                    Val::Chain { name: _, rel, path, labels } => Val::Chain {
-                        name: Some(name),
-                        rel,
-                        path,
-                        labels,
-                    },
-                }
-            }
-        }
-
-        fn eval_path<'s>(path: &'s [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
-            path.iter().filter_map(|i| {
-                match i {
-                    Item::Text(s) => Some(s.clone()),
-                    Item::Seq(s) => Some(itertools::join(s, " ").into()),
-                    _ => None
-                }
-            }).map(|label| {
-                Val::Process{
-                    name: None,
-                    label: Some(label),
-                    body: None,
-                    name_to_part: None,
-                    notes: None,
-                }
-            }).collect::<Vec<_>>()
-        }
-
-        fn eval_slash<'s>(forward: Option<&'s [Item<'s>]>, reverse: Option<&'s [Item<'s>]>) -> Option<Vec<Cow<'s, str>>> {
-            let mut res: Option<Vec<Cow<'s, str>>> = None;
-            if let Some(side) = forward.or(reverse) {
-                for item in side {
-                    match item {
-                        Item::Text(s) => {
-                            res.get_or_insert_with(Default::default).push(s.clone())
-                        },
-                        Item::Seq(s) | Item::Comma(s) => {
-                            res.get_or_insert_with(Default::default).append(&mut s
-                                .iter()
-                                .map(|c| Cow::from(crate::printer::print1(c)))
-                                .collect::<Vec<_>>()
-                            );
-                        },
-                        _ => {},
-                    }
-                }
-            }
-            res
-        }
-
-        fn eval_labels<'s>(labels: Option<Vec<Level<Cow<'s, str>>>>, r: &'s [Item<'s>]) -> Vec<Level<Cow<'s, str>>> {
-            let mut labels = labels.unwrap_or_default();
-            match r.first() {
-                Some(_f @ Item::Colon(rl, rr)) => {
-                    labels = eval_labels(Some(labels), rl);
-                    labels = eval_labels(Some(labels), rr);
-                }
-                Some(Item::Slash(rl, rr)) => {
-                    labels.push(Level{
-                        forward: eval_slash(Some(&rl[..]), None), 
-                        reverse: eval_slash(None, Some(&rr[..])),
-                    });
-                },
-                Some(Item::Text(_)) | Some(Item::Seq(_)) | Some(Item::Comma(_)) => {
-                    labels.push(Level{
-                        forward: eval_slash(Some(r), None),
-                        reverse: None,
-                    });
-                },
-                _ => {},
-            }
-            labels
-        }
-
-        /// What depiction do the given depict-expressions denote?
-        pub fn eval<'s>(exprs: &'s [Item<'s>]) -> Val<Cow<'s, str>> {
-            let mut body: Option<Vec<Val<Cow<'s, str>>>> = None;
-
-            for expr in exprs {
-                match expr {
-                    Item::Colon(l, r) => {
-                        if l.len() == 1 && matches!(l[0], Item::Text(..)){
-                            let process = eval(&r[..]);
-                            if let (Item::Text(name), mut process@Val::Process{..}) = (&l[0], process) {
-                                process = process.set_name(name.clone());
-                                body.get_or_insert_with(Default::default).push(process);
-                            }
-                        } else {
-                            body.get_or_insert_with(Default::default).push(Val::Chain{
-                                name: None,
-                                rel: Rel::Vertical,
-                                path: eval_path(&l[..]),
-                                labels: eval_labels(None, &r[..]),
-                            });
-                        }
-                    },
-                    Item::Seq(ls) | Item::Comma(ls) => {
-                        body.get_or_insert_with(Default::default).push(Val::Chain{
-                            name: None,
-                            rel: Rel::Vertical,
-                            path: eval_path(&ls[..]),
-                            labels: vec![],
-                        });
-                    }
-                    Item::Text(s) => {
-                        body.get_or_insert_with(Default::default).push(Val::Process{
-                            name: None, 
-                            label: Some(s.clone()), 
-                            body: None, 
-                            name_to_part: None, 
-                            notes: None
-                        })
-                    }
-                    _ => {},
-                }
-            }
-
-            Val::Process{ 
-                name: None, 
-                label: None, 
-                body, 
-                name_to_part: Some(BTreeMap::new()),
-                notes: None,
-            }
         }
     }
 
@@ -1871,8 +1872,6 @@ pub mod layout {
 
     /// Solve for horizontal ranks that minimize edge crossing
     pub use heaps::minimize_edge_crossing;
-
-    use self::eval::Val;
 }
 
 pub mod geometry {

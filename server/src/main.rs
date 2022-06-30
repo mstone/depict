@@ -7,6 +7,7 @@ use axum::{http::StatusCode, Json, response::IntoResponse, Router, routing::post
 use depict::graph_drawing::error::Error;
 use depict::graph_drawing::error::Kind;
 use depict::graph_drawing::error::OrErrExt;
+use depict::graph_drawing::eval::eval;
 use depict::graph_drawing::geometry::GeometryProblem;
 use depict::graph_drawing::geometry::GeometrySolution;
 use depict::graph_drawing::geometry::calculate_sols;
@@ -14,7 +15,6 @@ use depict::graph_drawing::geometry::position_sols;
 use depict::graph_drawing::graph::roots;
 use depict::graph_drawing::index::OriginalHorizontalRank;
 use depict::graph_drawing::index::VerticalRank;
-use depict::graph_drawing::layout::eval::eval;
 use depict::graph_drawing::layout::{Cvcg, calculate_vcg, Len};
 use depict::graph_drawing::layout::Loc;
 use depict::graph_drawing::layout::LayoutProblem;

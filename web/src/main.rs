@@ -4,7 +4,8 @@ use std::{default::Default, panic::catch_unwind, io::BufWriter};
 
 use depict::{graph_drawing::{
     error::{Kind, Error, OrErrExt}, 
-    layout::{Loc, calculate_vcg, Vcg, condense, Cvcg, rank, calculate_locs_and_hops, LayoutProblem, minimize_edge_crossing, debug::debug, eval::eval}, 
+    eval::eval,
+    layout::{Loc, calculate_vcg, Vcg, condense, Cvcg, rank, calculate_locs_and_hops, LayoutProblem, minimize_edge_crossing, debug::debug}, 
     graph::roots, 
     geometry::{calculate_sols, position_sols, GeometryProblem, GeometrySolution}, index::{LocSol, HopSol, VerticalRank, OriginalHorizontalRank}, frontend::estimate_widths}, 
     parser::{Parser, Token, Item}

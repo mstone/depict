@@ -4,6 +4,7 @@ use std::io::{self, BufWriter};
 use std::panic::catch_unwind;
 
 use depict::graph_drawing::error::{Error, OrErrExt, Kind};
+use depict::graph_drawing::eval::eval;
 use depict::graph_drawing::geometry::{*};
 use depict::graph_drawing::graph::roots;
 use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
@@ -92,7 +93,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
     event!(Level::TRACE, ?v, "PARSE");
     eprintln!("PARSE {v:#?}");
 
-    let process = eval::eval(&v[..]);
+    let process = eval(&v[..]);
 
     let vcg = calculate_vcg(process)?;
 

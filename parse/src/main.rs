@@ -1,5 +1,5 @@
 use clap::Parser;
-use depict::{parser::*, graph_drawing::layout::eval::eval};
+use depict::{parser::*, graph_drawing::eval::eval};
 
 use logos::Logos;
 

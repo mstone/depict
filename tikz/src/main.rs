@@ -1,4 +1,5 @@
 use depict::graph_drawing::error::{Error};
+use depict::graph_drawing::eval::eval;
 use depict::graph_drawing::frontend::estimate_widths;
 use depict::graph_drawing::geometry::{*};
 use depict::graph_drawing::graph::roots;
@@ -22,7 +23,7 @@ pub fn tikz_escape(s: &str) -> String {
 }
 
 pub fn render<'s>(items: Vec<Item>) -> Result<(), Error> {
-    let process = eval::eval(&items[..]);
+    let process = eval(&items[..]);
 
     let vcg = calculate_vcg(process)?;
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
