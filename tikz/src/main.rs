@@ -1,8 +1,10 @@
 use depict::graph_drawing::error::{Error};
+use depict::graph_drawing::frontend::estimate_widths;
 use depict::graph_drawing::geometry::{*};
 use depict::graph_drawing::graph::roots;
+use depict::graph_drawing::index::{LocSol, VerticalRank};
 use depict::graph_drawing::layout::{*};
-use depict::parser::{Fact, Parser, Token, Item};
+use depict::parser::{Parser, Token, Item};
 
 use std::fs::read_to_string;
 use std::env::args;
@@ -19,14 +21,16 @@ pub fn tikz_escape(s: &str) -> String {
         .replace("\\n", "\\\\")
 }
 
-pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
+pub fn render<'s>(items: Vec<Item>) -> Result<(), Error> {
 
-    let vcg = calculate_vcg(&v)?;
+    let vcg = calculate_vcg2(&items[..])?;
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
     eprintln!("VERT: {:?}", Dot::new(&vert));
 
-    let Cvcg{condensed, condensed_vxmap: _} = condense(vert)?;
+    let cvcg = condense(vert)?;
+
+    let Cvcg{condensed, condensed_vxmap: _} = &cvcg; 
 
     let roots = roots(&condensed)?;
 
@@ -39,7 +43,9 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
 
     let (_crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
     
-    let geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+    let mut geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+
+    estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
 
     let GeometrySolution{ls, rs, ss, ..} = position_sols(&vcg, &layout_problem, &solved_locs, &geometry_problem)?;
 
@@ -47,6 +53,7 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
 
     // std::process::exit(0);
 
+    let base_width_scale = 1. / rs[LocSol(0)];
     let width_scale = 0.9;
     println!("{}", indoc!(r#"
     \documentclass[tikz,border=5mm]{standalone}
@@ -60,8 +67,8 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
         let (ovr, ohr) = loc;
         let n = sol_by_loc[&(*ovr, *ohr)];
 
-        let lpos = ls[n];
-        let rpos = rs[n];
+        let lpos = ls[n] * base_width_scale;
+        let rpos = rs[n] * base_width_scale;
 
         let vpos = -1.5 * (ovr.0 as f64);
         let hpos = 10.0 * ((lpos + rpos) / 2.0);
@@ -69,13 +76,19 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
 
         match node {
             Loc::Node(vl) => {
+                if vl == "root" {
+                    continue
+                }
                 println!(indoc!(r#"
                     \node[minimum width = {}cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
-                    width, vl, hpos, vpos, vert_node_labels[*vl]);
+                    width, vl, hpos, vpos, vert_node_labels[&*vl]);
             },
             Loc::Hop(_, vl, wl) => {
-                let hn = sol_by_hop[&(*ovr, *ohr, *vl, *wl)];
-                let spos = ss[hn];
+                if vl == "root" {
+                    continue
+                }
+                let hn = sol_by_hop[&(*ovr, *ohr, vl.clone(), wl.clone())];
+                let spos = ss[hn] * base_width_scale;
                 let hpos = 10.0 * spos;
                 println!(indoc!(r#"
                     \draw [fill, black] ({}, {}) circle (0.5pt);
@@ -87,27 +100,30 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
 
     for cer in condensed.edge_references() {
         for (vl, wl, ew) in cer.weight().iter() {
+            if vl == "root" {
+                continue
+            }
             let label_text = vert_edge_labels.get(vl).and_then(|dsts| dsts.get(wl).and_then(|rels| rels.get(ew)))
                 .map(|v| v.join("\n"))
                 .unwrap_or_else(|| ew.to_string());
 
-            let (ovr, ohr) = node_to_loc[&Loc::Node(*vl)];
-            let (ovrd, ohrd) = node_to_loc[&Loc::Node(*wl)];
+            let (ovr, ohr) = node_to_loc[&Loc::Node(vl.clone())];
+            let (ovrd, ohrd) = node_to_loc[&Loc::Node(wl.clone())];
 
-            let snv = sol_by_hop[&(ovr, ohr, *vl, *wl)];
-            let snw = sol_by_hop[&(ovrd, ohrd, *vl, *wl)];
+            let snv = sol_by_hop[&(ovr, ohr, vl.clone(), wl.clone())];
+            let snw = sol_by_hop[&(ovrd, ohrd, vl.clone(), wl.clone())];
 
-            let sposv = ss[snv];
-            let sposw = ss[snw];
+            let sposv = ss[snv] * base_width_scale;
+            let sposw = ss[snw] * base_width_scale;
 
             let nnv = sol_by_loc[&(ovr, ohr)];
             let nnw = sol_by_loc[&(ovrd, ohrd)];
 
-            let lposv = ls[nnv];
-            let lposw = ls[nnw];
+            let lposv = ls[nnv] * base_width_scale;
+            let lposw = ls[nnw] * base_width_scale;
 
-            let rposv = rs[nnv];
-            let rposw = rs[nnw];
+            let rposv = rs[nnv] * base_width_scale;
+            let rposw = rs[nnw] * base_width_scale;
 
             let src_width = rposv - lposv;
             let dst_width = rposw - lposw;
@@ -115,29 +131,29 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
             let bundle_src_frac = ((((sposv - lposv) / src_width) - 0.5) / width_scale) + 0.5;
             let bundle_dst_frac = ((((sposw - lposw) / dst_width) - 0.5) / width_scale) + 0.5;
 
-            let arr_src_frac = match *ew {
-                "actuates" => (bundle_src_frac) - (0.025 / src_width),
-                "senses" => (bundle_src_frac) + (0.025 / src_width),
+            let arr_src_frac = match ew {
+                x if x == "actuates" => (bundle_src_frac) - (0.025 / src_width),
+                x if x == "senses" => (bundle_src_frac) + (0.025 / src_width),
                 _ => (bundle_src_frac),
             };
-            let arr_dst_frac = match *ew {
-                "actuates" => bundle_dst_frac - (0.025 / dst_width),
-                "senses" => bundle_dst_frac + (0.025 / dst_width),
+            let arr_dst_frac = match ew {
+                x if x == "actuates" => bundle_dst_frac - (0.025 / dst_width),
+                x if x == "senses" => bundle_dst_frac + (0.025 / dst_width),
                 _ => bundle_dst_frac,
             };
 
-            let hops = &hops_by_edge[&(*vl, *wl)];
+            let hops = &hops_by_edge[&(vl.clone(), wl.clone())];
             eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
 
-            let dir = match *ew {
-                "actuates" | "rides" => "-{Stealth[]}",
-                "senses" => "{Stealth[]}-",
+            let dir = match ew {
+                x if x == "actuates" || x == "rides" => "-{Stealth[]}",
+                x if x == "senses" => "{Stealth[]}-",
                 _ => "-",
             };
 
-            let anchor = match *ew {
-                "actuates" => "north east",
-                "senses" => "south west",
+            let anchor = match ew {
+                x if x == "actuates" => "north east",
+                x if x == "senses" => "south west",
                 _ => "south east",
             };
 
@@ -193,10 +209,13 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
     let mut rng = rand::thread_rng();
 
     for LocRow{ovr, ohr, shr: _, loc, ..} in all_locs.iter() {
+        if *ovr == VerticalRank(0) {
+            continue
+        }
         let n = sol_by_loc[&(*ovr, *ohr)];
 
-        let lpos = ls[n];
-        let rpos = rs[n];
+        let lpos = ls[n] * base_width_scale;
+        let rpos = rs[n] * base_width_scale;
 
         let vpos = -1.5 * (ovr.0 as f64) + 0.5 - rng.gen_range(0.25..0.75);
         let hpos = 10.0 * ((lpos + rpos) / 2.0);
@@ -220,7 +239,7 @@ pub fn render(v: Vec<Fact<&str>>) -> Result<(), Error> {
     }
 
     for ((lvl, _mhr, vl, wl), n) in sol_by_hop.iter() {
-        let spos = ss[*n];
+        let spos = ss[*n] * base_width_scale;
 
         // let vpos = -1.5 * (*lvl as f64) - 0.5 + rng.gen_range(0.5..1.0);
         let vpos = -1.5 * (lvl.0 as f64);
@@ -298,7 +317,7 @@ pub fn main() -> Result<()> {
                 })?
         }
 
-        let v: Vec<Item> = p.end_of_input().map_err(|_| { 
+        let items: Vec<Item> = p.end_of_input().map_err(|_| { 
             TikzError::ParseError{
                 src: NamedSource::new(path.clone(), data.clone()), 
                 span: lex.span(), 
@@ -306,9 +325,9 @@ pub fn main() -> Result<()> {
             }
         })?;
 
-        eprintln!("PARSE {v:#?}");
+        eprintln!("PARSE {items:#?}");
 
-        // let vcg = calculate_vcg2(&v)?;
+        render(items)?;
     }
     Ok(())
 }

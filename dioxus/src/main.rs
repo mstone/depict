@@ -8,6 +8,7 @@ use depict::graph_drawing::geometry::{*};
 use depict::graph_drawing::graph::roots;
 use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
 use depict::graph_drawing::layout::{*};
+use depict::graph_drawing::frontend::{estimate_widths};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
 
@@ -63,80 +64,6 @@ impl Default for Drawing {
             nodes: Default::default() 
         }
     }
-}
-
-fn estimate_widths<I>(
-    vcg: &Vcg<I, I>, 
-    cvcg: &Cvcg<I, I>,
-    layout_problem: &LayoutProblem<I>,
-    geometry_problem: &mut GeometryProblem<I>
-) -> Result<(), Error> where
-    I: Clone + std::fmt::Debug + Ord + std::hash::Hash + std::fmt::Display + Len + PartialEq<&'static str>,
-{
-    // let char_width = 8.67;
-    let char_width = 9.0;
-    let arrow_width = 40.0;
-    
-    let vert_node_labels = &vcg.vert_node_labels;
-    let vert_edge_labels = &vcg.vert_edge_labels;
-    let width_by_loc = &mut geometry_problem.width_by_loc;
-    let width_by_hop = &mut geometry_problem.width_by_hop;
-    let hops_by_edge = &layout_problem.hops_by_edge;
-    let loc_to_node = &layout_problem.loc_to_node;
-    let condensed = &cvcg.condensed;
-    let condensed_vxmap = &cvcg.condensed_vxmap;
-    
-    for (loc, node) in loc_to_node.iter() {
-        let (ovr, ohr) = loc;
-        if let Loc::Node(vl) = node {
-            let label = vert_node_labels
-                .get(vl)
-                .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
-                .clone();
-            // if !label.is_screaming_snake_case() {
-            //     label = label.to_title_case();
-            // }
-            width_by_loc.insert((*ovr, *ohr), char_width * label.len() as f64);
-        }
-    }
-
-    for ((vl, wl), hops) in hops_by_edge.iter() {
-        let mut action_width = 10.0;
-        let mut percept_width = 10.0;
-        let cex = condensed.find_edge(condensed_vxmap[vl], condensed_vxmap[wl]).unwrap();
-        let cew = condensed.edge_weight(cex).unwrap();
-        for (vl, wl, ew) in cew.iter() {
-            let label_width = vert_edge_labels
-                .get(vl)
-                .and_then(|dsts| dsts
-                    .get(wl)
-                    .and_then(|rels| rels.get(ew)))
-                    .and_then(|labels| labels
-                        .iter()
-                        .map(|label| label.len())
-                        .max()
-                    );
-
-            match ew {
-                x if *x == "senses" => {
-                    percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
-                }
-                x if *x == "actuates" => {
-                    action_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
-                }
-                _ => {}
-            }
-        }
-
-        for (lvl, (mhr, _nhr)) in hops.iter() {
-            width_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), (action_width, percept_width));
-            if width_by_loc.get(&(*lvl, *mhr)).is_none() {
-                width_by_loc.insert((*lvl, *mhr), action_width + percept_width);
-            }
-        }
-    }
-
-    Ok(())
 }
 
 #[instrument(skip(data))]

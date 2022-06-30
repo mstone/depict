@@ -133,13 +133,16 @@ pub mod error {
     use petgraph::algo::NegativeCycle;
     use tracing_error::{TracedError, ExtractSpanTrace, SpanTrace, InstrumentError};
 
+    use miette::Diagnostic;
+
     #[cfg(all(feature="osqp", not(feature="osqp-rust")))]
     use osqp;
     #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
     use osqp_rust as osqp;
 
     #[non_exhaustive]
-    #[derive(Debug, thiserror::Error)]
+    #[derive(Debug, Diagnostic, thiserror::Error)]
+    #[diagnostic(code(depict::graph_drawing::error))]
     pub enum Kind {
         #[error("indexing error")]
         IndexingError {},
@@ -187,7 +190,8 @@ pub mod error {
     }
     
     #[non_exhaustive]
-    #[derive(Debug, thiserror::Error)]
+    #[derive(Debug, Diagnostic, thiserror::Error)]
+    #[diagnostic(code(depict::graph_drawing::error))]
     pub enum Error {
         #[error(transparent)]
         TypeError{
@@ -1955,7 +1959,7 @@ pub mod geometry {
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::visit::EdgeRef;
     use sorted_vec::SortedVec;
-    use tracing::{event, Level};
+    use tracing::{event, Level, instrument};
     use tracing_error::InstrumentError;
     use typed_index_collections::TiVec;
 
@@ -2132,6 +2136,7 @@ pub mod geometry {
         pub ts: TiVec<VerticalRank, f64>,
     }
 
+    #[instrument]
     pub fn position_sols<'s, V, E>(
         vcg: &'s Vcg<V, E>,
         layout_problem: &'s LayoutProblem<V>,
@@ -2654,6 +2659,86 @@ pub mod geometry {
         Ok(res)
     }
 
+}
+
+pub mod frontend {
+    use std::fmt::Display;
+
+    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc}, geometry::GeometryProblem, error::{Error, Kind, OrErrExt}};
+
+    pub fn estimate_widths<I>(
+        vcg: &Vcg<I, I>, 
+        cvcg: &Cvcg<I, I>,
+        layout_problem: &LayoutProblem<I>,
+        geometry_problem: &mut GeometryProblem<I>
+    ) -> Result<(), Error> where
+        I: Graphic + Display + Len + PartialEq<&'static str>,
+    {
+        // let char_width = 8.67;
+        let char_width = 9.0;
+        let arrow_width = 40.0;
+        
+        let vert_node_labels = &vcg.vert_node_labels;
+        let vert_edge_labels = &vcg.vert_edge_labels;
+        let width_by_loc = &mut geometry_problem.width_by_loc;
+        let width_by_hop = &mut geometry_problem.width_by_hop;
+        let hops_by_edge = &layout_problem.hops_by_edge;
+        let loc_to_node = &layout_problem.loc_to_node;
+        let condensed = &cvcg.condensed;
+        let condensed_vxmap = &cvcg.condensed_vxmap;
+        
+        for (loc, node) in loc_to_node.iter() {
+            let (ovr, ohr) = loc;
+            if let Loc::Node(vl) = node {
+                let label = vert_node_labels
+                    .get(vl)
+                    .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
+                    .clone();
+                // if !label.is_screaming_snake_case() {
+                //     label = label.to_title_case();
+                // }
+                width_by_loc.insert((*ovr, *ohr), char_width * label.len() as f64);
+            }
+        }
+    
+        for ((vl, wl), hops) in hops_by_edge.iter() {
+            let mut action_width = 10.0;
+            let mut percept_width = 10.0;
+            let cex = condensed.find_edge(condensed_vxmap[vl], condensed_vxmap[wl]).unwrap();
+            let cew = condensed.edge_weight(cex).unwrap();
+            for (vl, wl, ew) in cew.iter() {
+                let label_width = vert_edge_labels
+                    .get(vl)
+                    .and_then(|dsts| dsts
+                        .get(wl)
+                        .and_then(|rels| rels.get(ew)))
+                        .and_then(|labels| labels
+                            .iter()
+                            .map(|label| label.len())
+                            .max()
+                        );
+    
+                match ew {
+                    x if *x == "senses" => {
+                        percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
+                    }
+                    x if *x == "actuates" => {
+                        action_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
+                    }
+                    _ => {}
+                }
+            }
+    
+            for (lvl, (mhr, _nhr)) in hops.iter() {
+                width_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), (action_width, percept_width));
+                if width_by_loc.get(&(*lvl, *mhr)).is_none() {
+                    width_by_loc.insert((*lvl, *mhr), action_width + percept_width);
+                }
+            }
+        }
+    
+        Ok(())
+    }
 }
 
 #[cfg(test)]

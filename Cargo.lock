@@ -641,6 +641,7 @@ dependencies = [
  "enum-kinds",
  "itertools 0.10.3",
  "logos",
+ "miette",
  "osqp",
  "osqp-rust",
  "petgraph",

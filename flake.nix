@@ -151,7 +151,7 @@
             let 
               buildInputs = with final; with pkgs; [
                 rust
-                # tex
+                tex
                 cmake
               ] ++ final.lib.optionals isShell [
                 entr

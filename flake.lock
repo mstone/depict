@@ -106,29 +106,6 @@
         "type": "github"
       }
     },
-    "minion": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "utils": [
-          "flake-utils"
-        ]
-      },
-      "locked": {
-        "lastModified": 1656374410,
-        "narHash": "sha256-jw/dFndKjENlLfDx0YU4/0DXEoT7SlZNri5/FCL7L+U=",
-        "owner": "mstone",
-        "repo": "minion",
-        "rev": "2c0e65c8368653f51c026ac2d169cf904b1b058a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "mstone",
-        "repo": "minion",
-        "type": "github"
-      }
-    },
     "nix-filter": {
       "locked": {
         "lastModified": 1653590866,
@@ -193,7 +170,6 @@
         "crane": "crane",
         "deploy-rs": "deploy-rs",
         "flake-utils": "flake-utils_2",
-        "minion": "minion",
         "nix-filter": "nix-filter",
         "nixbom": "nixbom",
         "nixpkgs": "nixpkgs",
