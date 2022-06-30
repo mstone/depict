@@ -1,19 +1,14 @@
 use depict::graph_drawing::error::{Error};
-use depict::graph_drawing::eval::eval;
-use depict::graph_drawing::frontend::estimate_widths;
 use depict::graph_drawing::geometry::{*};
-use depict::graph_drawing::graph::roots;
 use depict::graph_drawing::index::{LocSol, VerticalRank};
 use depict::graph_drawing::layout::{*};
-use depict::parser::{Parser, Token, Item};
 
+use std::borrow::Cow;
 use std::fs::read_to_string;
 use std::env::args;
 
 use indoc::indoc;
-use logos::Logos;
 use miette::{Diagnostic, NamedSource, Result};
-use petgraph::dot::{Dot};
 
 
 pub fn tikz_escape(s: &str) -> String {
@@ -22,36 +17,22 @@ pub fn tikz_escape(s: &str) -> String {
         .replace("\\n", "\\\\")
 }
 
-pub fn render<'s>(items: Vec<Item>) -> Result<(), Error> {
-    let process = eval(&items[..]);
-
-    let vcg = calculate_vcg(process)?;
-    let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
-
-    eprintln!("VERT: {:?}", Dot::new(&vert));
-
-    let cvcg = condense(vert)?;
-
-    let Cvcg{condensed, condensed_vxmap: _} = &cvcg; 
-
-    let roots = roots(&condensed)?;
-
-    let paths_by_rank = rank(&condensed, &roots)?;
-
-    let layout_problem = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
-    let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
-
-    // std::process::exit(0);
-
-    let (_crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
+pub fn render<'s>(data: String) -> Result<(), Error> {
+    let render_cell = depict::graph_drawing::frontend::render(Cow::Owned(data))?;
+    let depiction = render_cell.borrow_dependent();
     
-    let mut geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
-
-    estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
-
-    let GeometrySolution{ls, rs, ss, ..} = position_sols(&vcg, &layout_problem, &solved_locs, &geometry_problem)?;
-
-    let GeometryProblem{all_locs, sol_by_loc, sol_by_hop, ..} = geometry_problem;
+    let rs = &depiction.geometry_solution.rs;
+    let ls = &depiction.geometry_solution.ls;
+    let ss = &depiction.geometry_solution.ss;
+    let all_locs = &depiction.geometry_problem.all_locs;
+    let sol_by_loc = &depiction.geometry_problem.sol_by_loc;
+    let node_to_loc = &depiction.layout_problem.node_to_loc;
+    let loc_to_node = &depiction.layout_problem.loc_to_node;
+    let vert_node_labels = &depiction.vcg.vert_node_labels;
+    let vert_edge_labels = &depiction.vcg.vert_edge_labels;
+    let hops_by_edge = &depiction.layout_problem.hops_by_edge;
+    let sol_by_hop = &depiction.geometry_problem.sol_by_hop;
+    let condensed = &depiction.cvcg.condensed;
 
     // std::process::exit(0);
 
@@ -298,31 +279,8 @@ pub fn main() -> Result<()> {
     for path in args().skip(1) {
         let data = read_to_string(path.clone())
             .map_err(|e| TikzError::IoError{source: e})?;
-        // println!("{}\n\n", &contents);
-        let mut p = Parser::new();
-        let mut lex = Token::lexer(&data);
-        while let Some(tk) = lex.next() {
-            p.parse(tk)
-                .map_err(|_| { 
-                    TikzError::ParseError{
-                        src: NamedSource::new(path.clone(), data.clone()), 
-                        span: lex.span(), 
-                        text: lex.slice().into()
-                    }
-                })?
-        }
-
-        let items: Vec<Item> = p.end_of_input().map_err(|_| { 
-            TikzError::ParseError{
-                src: NamedSource::new(path.clone(), data.clone()), 
-                span: lex.span(), 
-                text: lex.slice().into()
-            }
-        })?;
-
-        eprintln!("PARSE {items:#?}");
-
-        render(items)?;
+        
+        render(data)?;
     }
     Ok(())
 }

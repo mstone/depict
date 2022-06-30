@@ -1,24 +1,17 @@
+use std::borrow::Cow;
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::io::{self, BufWriter};
 use std::panic::catch_unwind;
 
 use depict::graph_drawing::error::{Error, OrErrExt, Kind};
-use depict::graph_drawing::eval::eval;
-use depict::graph_drawing::geometry::{*};
-use depict::graph_drawing::graph::roots;
 use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
 use depict::graph_drawing::layout::{*};
-use depict::graph_drawing::frontend::{estimate_widths};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
 
 // use dioxus_desktop::tao::dpi::{LogicalSize};
 // use dioxus_desktop::use_window;
 use tao::dpi::LogicalSize;
-
-use depict::parser::{Parser, Token, Item};
-use logos::Logos;
 
 use color_spantrace::colorize;
 
@@ -27,11 +20,8 @@ use futures::StreamExt;
 
 use indoc::indoc;
 
-use petgraph::Graph;
-use petgraph::dot::Dot;
-
 use tracing::{instrument, event, Level};
-use tracing_error::{InstrumentResult, ExtractSpanTrace};
+use tracing_error::{ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -52,7 +42,6 @@ pub enum Node {
 pub struct Drawing {
     pub crossing_number: Option<usize>,
     pub viewbox_width: f64,
-    pub layout_debug: Graph<String, String>,
     pub nodes: Vec<Node>,
 }
 
@@ -60,8 +49,7 @@ impl Default for Drawing {
     fn default() -> Self {
         Self { 
             crossing_number: Default::default(), 
-            viewbox_width: 1024.0, 
-            layout_debug: Default::default(),
+            viewbox_width: 1024.0,
             nodes: Default::default() 
         }
     }
@@ -69,85 +57,23 @@ impl Default for Drawing {
 
 #[instrument(skip(data))]
 fn draw(data: String) -> Result<Drawing, Error> {
-
-    let mut p = Parser::new();
-    {
-        let lex = Token::lexer(&data);
-        let tks = lex.collect::<Vec<_>>();
-        event!(Level::TRACE, ?tks, "LEX");
-    }
-    let mut lex = Token::lexer(&data);
-    while let Some(tk) = lex.next() {
-        p.parse(tk)
-            .map_err(|_| {
-                Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-            })
-            .in_current_span()?
-    }
-
-    let v: Vec<Item> = p.end_of_input()
-        .map_err(|_| {
-            Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-        })?;
-
-    event!(Level::TRACE, ?v, "PARSE");
-    eprintln!("PARSE {v:#?}");
-
-    let process = eval(&v[..]);
-
-    let vcg = calculate_vcg(process)?;
-
-    let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
-
-    let cvcg = condense(vert)?;
-    let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
-
-    let roots = roots(condensed)?;
-
-    let paths_by_rank = rank(condensed, &roots)?;
-
-    let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank)?;
-    let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
-
-    let (crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
-
-    let mut geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
-
-    estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
-
-    let GeometrySolution{ls, rs, ss, ts} = position_sols(&vcg, &layout_problem, &solved_locs, &geometry_problem)?;
-
-    let GeometryProblem{sol_by_loc, sol_by_hop, ..} = &geometry_problem;
-
-    let mut layout_debug = Graph::<String, String>::new();
-    let mut layout_debug_vxmap = HashMap::new();
-    for ((vl, wl), hops) in hops_by_edge.iter() {
-        if *vl == "root" { continue; }
-        let vn = node_to_loc[&Loc::Node(vl.clone())];
-        let wn = node_to_loc[&Loc::Node(wl.clone())];
-        let vshr = solved_locs[&vn.0][&vn.1];
-        let wshr = solved_locs[&wn.0][&wn.1];
-
-        let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
-        let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
-
-        for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-            let shr = solved_locs[lvl][mhr];
-            let shrd = solved_locs[&(*lvl+1)][nhr];
-            let lvl1 = *lvl+1;
-            let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
-            let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
-            layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
-            if n == 0 {
-                layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
-            }
-            if n == hops.len()-1 {
-                layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
-            }
-        }
-    }
-    let layout_debug_dot = Dot::new(&layout_debug);
-    event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
+    let render_cell = depict::graph_drawing::frontend::render(Cow::Owned(data))?;
+    let depiction = render_cell.borrow_dependent();
+    
+    let rs = &depiction.geometry_solution.rs;
+    let ls = &depiction.geometry_solution.ls;
+    let ss = &depiction.geometry_solution.ss;
+    let ts = &depiction.geometry_solution.ts;
+    let sol_by_loc = &depiction.geometry_problem.sol_by_loc;
+    let loc_to_node = &depiction.layout_problem.loc_to_node;
+    let vert_node_labels = &depiction.vcg.vert_node_labels;
+    let vert_edge_labels = &depiction.vcg.vert_edge_labels;
+    let hops_by_edge = &depiction.layout_problem.hops_by_edge;
+    let sol_by_hop = &depiction.geometry_problem.sol_by_hop;
+    let width_by_loc = &depiction.geometry_problem.width_by_loc;
+    let width_by_hop = &depiction.geometry_problem.width_by_hop;
+    let crossing_number = depiction.layout_solution.crossing_number;
+    let condensed = &depiction.cvcg.condensed;
 
     let height_scale = 80.0;
     let vpad = 50.0;
@@ -179,7 +105,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             // if !label.is_screaming_snake_case() {
             //     label = label.to_title_case();
             // }
-            let estimated_width = geometry_problem.width_by_loc[&(*ovr, *ohr)];
+            let estimated_width = width_by_loc[&(*ovr, *ohr)];
             texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
         }
     }
@@ -242,7 +168,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 hn0.push(hnd);
                 
                 if n == 0 {
-                    estimated_width0 = Some(geometry_problem.width_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())]);
+                    estimated_width0 = Some(width_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())]);
                     let mut vpos = vpos;
                     if *ew == "senses" {
                         vpos += 33.0; // box height + arrow length
@@ -314,8 +240,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
 
     Ok(Drawing{
         crossing_number: Some(crossing_number), 
-        viewbox_width: root_width, 
-        layout_debug,
+        viewbox_width: root_width,
         nodes
     })
 }
@@ -457,7 +382,7 @@ pub fn as_data_svg(drawing: Drawing) -> String {
 
     let mut svg = Document::new()
         .set("viewBox", (0f64, 0f64, viewbox_width, viewbox_height))
-        .set("text-rendering", "optimizeLegibility");
+        .set("text-depiction", "optimizeLegibility");
 
     svg.append(Marker::new()
         .set("id", "arrowhead")

@@ -435,7 +435,7 @@ pub mod eval {
 
     use std::{collections::BTreeMap, borrow::{Cow}};
 
-    use crate::parser::Item;
+    use crate::{parser::Item};
     
     /// What kind of relationship between processes does 
     /// the containing [Val::Chain] describe?
@@ -510,6 +510,18 @@ pub mod eval {
         },
     }
 
+    impl<V> Default for Val<V> {
+        fn default() -> Self {
+            Self::Process{
+                name: None,
+                label: None,
+                body: None,
+                name_to_part: None,
+                notes: None,
+            }
+        }
+    }
+
     impl<V> Val<V> {
         pub fn name(&self) -> Option<&V> {
             match self {
@@ -541,7 +553,7 @@ pub mod eval {
         }
     }
 
-    fn eval_path<'s>(path: &'s [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
+    fn eval_path<'s, 't>(path: &'t [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
         path.iter().filter_map(|i| {
             match i {
                 Item::Text(s) => Some(s.clone()),
@@ -559,7 +571,7 @@ pub mod eval {
         }).collect::<Vec<_>>()
     }
 
-    fn eval_slash<'s>(forward: Option<&'s [Item<'s>]>, reverse: Option<&'s [Item<'s>]>) -> Option<Vec<Cow<'s, str>>> {
+    fn eval_slash<'s, 't>(forward: Option<&'t [Item<'s>]>, reverse: Option<&'t [Item<'s>]>) -> Option<Vec<Cow<'s, str>>> {
         let mut res: Option<Vec<Cow<'s, str>>> = None;
         if let Some(side) = forward.or(reverse) {
             for item in side {
@@ -581,7 +593,7 @@ pub mod eval {
         res
     }
 
-    fn eval_labels<'s>(labels: Option<Vec<Level<Cow<'s, str>>>>, r: &'s [Item<'s>]) -> Vec<Level<Cow<'s, str>>> {
+    fn eval_labels<'s, 't>(labels: Option<Vec<Level<Cow<'s, str>>>>, r: &'t [Item<'s>]) -> Vec<Level<Cow<'s, str>>> {
         let mut labels = labels.unwrap_or_default();
         match r.first() {
             Some(_f @ Item::Colon(rl, rr)) => {
@@ -606,10 +618,12 @@ pub mod eval {
     }
 
     /// What depiction do the given depict-expressions denote?
-    pub fn eval<'s>(exprs: &'s [Item<'s>]) -> Val<Cow<'s, str>> {
-        let mut body: Option<Vec<Val<Cow<'s, str>>>> = None;
+    pub fn eval<'s, 't>(exprs: &'t [Item<'s>]) -> Val<Cow<'s, str>> {
+        // let mut body: Option<Vec<Val<Cow<'s, str>>>> = None;
+        let mut body: Option<Vec<_>> = None;
 
         for expr in exprs {
+            let _: &'t Item<'s> = expr;
             match expr {
                 Item::Colon(l, r) => {
                     if l.len() == 1 && matches!(l[0], Item::Text(..)){
@@ -652,7 +666,7 @@ pub mod eval {
             name: None, 
             label: None, 
             body, 
-            name_to_part: Some(BTreeMap::new()),
+            name_to_part: None,
             notes: None,
         }
     }
@@ -1126,7 +1140,7 @@ pub mod layout {
     use crate::graph_drawing::eval::{Val, self};
     use crate::graph_drawing::graph::roots;
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Default)]
     pub struct Vcg<V, E> {
         /// vert is a vertical constraint graph. 
         /// Edges (v, w) in vert indicate that v needs to be placed above w. 
@@ -1229,7 +1243,7 @@ pub mod layout {
         }
     }
 
-    pub fn calculate_vcg(process: Val<Cow<str>>) -> Result<Vcg<Cow<str>, Cow<str>>, Error> {
+    pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
         let vert = Graph::<Cow<str>, Cow<str>>::new();
         let vert_vxmap = HashMap::<Cow<str>, NodeIndex>::new();
         let vert_node_labels = HashMap::new();
@@ -1301,6 +1315,7 @@ pub mod layout {
 
     /// A "condensed" VCG, in which all parallel edges in the original Vcg 
     /// have been "condensed" into a single compound edge in the Cvcg.
+    #[derive(Default)]
     pub struct Cvcg<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord> {
         pub condensed: Graph<V, SortedVec<(V, V, E)>>,
         pub condensed_vxmap: HashMap::<V, NodeIndex>
@@ -1419,13 +1434,19 @@ pub mod layout {
         }
     }
     
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Default)]
     pub struct LayoutProblem<V: Graphic> {
         pub locs_by_level: BTreeMap<VerticalRank, TiVec<OriginalHorizontalRank, OriginalHorizontalRank>>, 
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
         pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>>,
         pub node_to_loc: HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct LayoutSolution {
+        pub crossing_number: usize,
+        pub solved_locs: BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
     }
 
     pub type RankedPaths<V> = BTreeMap<VerticalRank, SortedVec<(V, V)>>;
@@ -1641,7 +1662,7 @@ pub mod layout {
         use crate::graph_drawing::layout::debug::debug;
         use crate::graph_drawing::layout::{Hop};
         
-        use super::{LayoutProblem, Graphic};
+        use super::{LayoutProblem, Graphic, LayoutSolution};
 
         #[inline]
         pub fn is_odd(x: usize) -> bool {
@@ -1731,13 +1752,13 @@ pub mod layout {
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
             layout_problem: &LayoutProblem<V>
-        ) -> Result<(usize, BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>), Error> where
+        ) -> Result<LayoutSolution, Error> where
             V: Display + Graphic
         {
             let LayoutProblem{locs_by_level, hops_by_level, ..} = layout_problem;
             
             if hops_by_level.is_empty() {
-                return Ok((0, BTreeMap::new()));
+                return Ok(LayoutSolution{crossing_number: 0, solved_locs: BTreeMap::new()});
             }
             if hops_by_level.iter().all(|(_lvl, hops)| hops.iter().count() <= 1) {
                 let mut solved_locs = BTreeMap::new();
@@ -1746,7 +1767,7 @@ pub mod layout {
                         solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
                     }
                 }
-                return Ok((0, solved_locs))
+                return Ok(LayoutSolution{crossing_number: 0, solved_locs: BTreeMap::new()})
             }
             #[allow(clippy::unwrap_used)]
             let max_level = *hops_by_level.keys().max().unwrap();
@@ -1793,8 +1814,6 @@ pub mod layout {
                 eprintln!("{n}: {s:?}");
             }
             
-            // std::process::exit(0);
-            
             let mut solved_locs = BTreeMap::new();
             for (lvl, shrs) in solution.iter().enumerate() {
                 solved_locs.insert(VerticalRank(lvl), shrs
@@ -1803,16 +1822,10 @@ pub mod layout {
                     .map(|(a, b)| (OriginalHorizontalRank(a), SolvedHorizontalRank(*b)))
                     .collect::<BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>());
             }
-            // for (lvl, _locs) in locs_by_level.iter() {
-            //     for (shr, n) in solution[lvl.0].iter().enumerate() {
-            //         solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(*n), SolvedHorizontalRank(shr));
-            //     }
-            // }
 
             debug(layout_problem, &solved_locs);
 
-            // Ok((crossing_number, solved_locs))
-            Ok((0, solved_locs))
+            Ok(LayoutSolution{crossing_number, solved_locs})
         }
     
 
@@ -1872,6 +1885,8 @@ pub mod layout {
 
     /// Solve for horizontal ranks that minimize edge crossing
     pub use heaps::minimize_edge_crossing;
+
+    use super::index::SolvedHorizontalRank;
 }
 
 pub mod geometry {
@@ -2084,7 +2099,7 @@ pub mod geometry {
         GeometryProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop}
     }
     
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct GeometrySolution {
         pub ls: TiVec<LocSol, f64>,
         pub rs: TiVec<LocSol, f64>,
@@ -2618,9 +2633,17 @@ pub mod geometry {
 }
 
 pub mod frontend {
-    use std::fmt::Display;
+    use std::{fmt::Display, borrow::Cow};
 
-    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc}, geometry::GeometryProblem, error::{Error, Kind, OrErrExt}};
+    use logos::Logos;
+    use self_cell::self_cell;
+    use sorted_vec::SortedVec;
+    use tracing::{event, Level};
+    use tracing_error::InstrumentResult;
+
+    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
+
+    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution}, error::{Error, Kind, OrErrExt}, eval::Val};
 
     pub fn estimate_widths<I>(
         vcg: &Vcg<I, I>, 
@@ -2694,6 +2717,96 @@ pub mod frontend {
         }
     
         Ok(())
+    }
+
+    #[derive(Default)]
+    pub struct Depiction<'s> {
+        pub items: Vec<Item<'s>>,
+        pub val: Val<Cow<'s, str>>,
+        pub vcg: Vcg<Cow<'s, str>, Cow<'s, str>>,
+        pub cvcg: Cvcg<Cow<'s, str>, Cow<'s, str>>,
+        pub roots: SortedVec<Cow<'s, str>>,
+        pub paths_by_rank: RankedPaths<Cow<'s, str>>,
+        pub layout_problem: LayoutProblem<Cow<'s, str>>,
+        pub layout_solution: LayoutSolution,
+        pub geometry_problem: GeometryProblem<Cow<'s, str>>,
+        pub geometry_solution: GeometrySolution,
+    }
+
+    self_cell!{
+        pub struct RenderCell<'s> {
+            owner: Cow<'s, str>,
+            
+            #[covariant]
+            dependent: Depiction,
+        }
+    }
+
+    pub fn render<'s>(data: Cow<'s, str>) -> Result<RenderCell, Error> {
+        RenderCell::try_new(data, |data| {
+            let mut p = Parser::new();
+            {
+                let lex = Token::lexer(&data);
+                let tks = lex.collect::<Vec<_>>();
+                event!(Level::TRACE, ?tks, "LEX");
+            }
+            let mut lex = Token::lexer(data);
+            while let Some(tk) = lex.next() {
+                p.parse(tk)
+                    .map_err(|_| {
+                        Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+                    })
+                    .in_current_span()?
+            }
+    
+            let items = p.end_of_input()
+                .map_err(|_| {
+                    Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+                })?;
+    
+            event!(Level::TRACE, ?items, "PARSE");
+            eprintln!("PARSE {items:#?}");
+    
+            let val = eval(&items[..]);
+    
+            let vcg = calculate_vcg(&val)?;
+    
+            let Vcg{vert, ..} = &vcg;
+    
+            let cvcg = condense(vert)?;
+            let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
+    
+            let roots = crate::graph_drawing::graph::roots(condensed)?;
+    
+            let paths_by_rank = rank(condensed, &roots)?;
+    
+            let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank)?;
+            let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, ..} = &layout_problem;
+    
+            let layout_solution = minimize_edge_crossing(&layout_problem)?;
+            let LayoutSolution{solved_locs, ..} = &layout_solution;
+    
+            let mut geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+    
+            estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
+    
+            let geometry_solution = position_sols(&vcg, &layout_problem, &solved_locs, &geometry_problem)?;
+    
+            debug(&layout_problem, &solved_locs);
+            
+            Ok(Depiction{
+                items,
+                val,
+                vcg,
+                cvcg,
+                roots,
+                paths_by_rank,
+                layout_problem,
+                layout_solution,
+                geometry_problem,
+                geometry_solution,
+            })
+        })
     }
 }
 

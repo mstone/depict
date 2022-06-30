@@ -445,7 +445,6 @@ pub mod graph_drawing;
 pub mod rest {
     //! Message types and codecs for client-server implementations of depict APIs
     use serde::{Deserialize, Serialize};
-    use petgraph::Graph;
 
     /// Labels describe positioned boxes of text.
     #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
@@ -470,7 +469,6 @@ pub mod rest {
     pub struct Drawing {
         pub crossing_number: Option<usize>,
         pub viewbox_width: f64,
-        pub layout_debug: Graph<String, String>,
         pub nodes: Vec<Node>,
     }
 
