@@ -150,8 +150,6 @@ pub mod error {
         KeyNotFoundError {key: String},
         #[error("missing drawing error")]
         MissingDrawingError {},
-        #[error("missing fact error")]
-        MissingFactError {ident: String},
         #[error("unimplemented drawing style error")]
         UnimplementedDrawingStyleError { style: String },
         #[error("pomelo error")]
@@ -892,13 +890,12 @@ pub mod layout {
     use petgraph::graph::{Graph, NodeIndex};
     use petgraph::visit::{EdgeRef, IntoNodeReferences};
     use sorted_vec::SortedVec;
-    use tracing::{event, Level, instrument};
+    use tracing::{event, Level};
     use tracing_error::InstrumentError;
     use typed_index_collections::TiVec;
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::graph::roots;
-    use crate::parser::{Fact, Item};
 
     #[derive(Clone, Debug)]
     pub struct Vcg<V, E> {
@@ -1231,89 +1228,47 @@ pub mod layout {
         }
     }
 
-    pub fn calculate_vcg2<'s>(items: &'s [Item<'s>]) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> where 
-    {
-        let vs = eval::eval(items);
-        let mut facts: Vec<Fact<Cow<'s, str>>> = vec![];
-        if let eval::Val::Process{body, ..} = vs {
-            for v in body.iter().flatten() {
-                match v {
-                    eval::Val::Chain{path, labels, ..} => {
-                        facts.push(Fact{
-                            path: path.iter().filter_map(|p| {
-                                    if let eval::Val::Process{label, ..} = p {
-                                        Some(label.as_ref().unwrap().clone())
-                                    } else {
-                                        None
-                                    }
-                                }).collect::<Vec<_>>(),
-                            labels_by_level: labels.iter().map(|lvl| {
-                                (
-                                    lvl.forward.iter().flatten().map(|f| Some(f.clone())).collect::<Vec<_>>(),
-                                    lvl.reverse.iter().flatten().map(|r| Some(r.clone())).collect::<Vec<_>>()
-                                )
-                            }).collect::<Vec<_>>()
-                        })
-                    },
-                    eval::Val::Process{label, ..} => {
-                        facts.push(Fact{
-                            path: vec![label.as_ref().unwrap().clone()],
-                            labels_by_level: vec![],
-                        })
-                    },
-                    _ => {}
-                }
-            }
-        }
-        event!(Level::TRACE, ?facts, "CALCULATE_VCG2");
-        calculate_vcg(&facts[..])
-    }
-
-    #[instrument()]
-    pub fn calculate_vcg<'s, V>(v: &[Fact<V>]) -> Result<Vcg<V, V>, Error> where 
-        V: 's + Clone + Debug + Eq + Hash + Ord + AsRef<str> + From<&'s str> + Trim + IsEmpty,
-        String: From<V>
-    {
-        event!(Level::TRACE, "CALCULATE_VCG");
-        let vert = Graph::<V, V>::new();
-        let vert_vxmap = HashMap::<V, NodeIndex>::new();
+    pub fn calculate_vcg(process: Val<Cow<str>>) -> Result<Vcg<Cow<str>, Cow<str>>, Error> {
+        let vert = Graph::<Cow<str>, Cow<str>>::new();
+        let vert_vxmap = HashMap::<Cow<str>, NodeIndex>::new();
         let vert_node_labels = HashMap::new();
         let vert_edge_labels = HashMap::new();
         let mut vcg = Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels};
 
-        let _ = v;
+        let body = if let Val::Process{body: Some(body), ..} = process { body } else { unreachable!(); };
 
-        for Fact{path, labels_by_level} in v {
+        for chain in body {
+            let path = if let Val::Chain{path, ..} = &chain { path } else { continue; };
+            let labels_by_level = if let Val::Chain{labels, ..} = &chain { labels } else { continue; };
             for n in 0..path.len()-1 {
                 let src = &path[n];
+                let src = if let Val::Process { label: Some(label), .. } = src { label } else { continue; };
                 let dst = &path[n+1];
+                let dst = if let Val::Process { label: Some(label), .. } = dst { label } else { continue; };
                 let src_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, src.clone());
                 let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst.clone());
 
                 // TODO: record associated action/percept texts.
-                let empty = (vec![], vec![]);
-                let (actions, percepts) = labels_by_level.get(n).unwrap_or(&empty);
+                let empty = eval::Level{forward: None, reverse: None};
+                let labels = labels_by_level.get(n).unwrap_or(&empty);
                 let rels = vcg.vert_edge_labels.entry(src.clone()).or_default().entry(dst.clone()).or_default();
-                for action in actions {
-                    let action = action.clone().map(|a| a.trim());
-                    if let Some(action) = action {
-                        if !action.is_empty() {
-                            vcg.vert.add_edge(src_ix, dst_ix, "actuates".into());
-                            rels.entry("actuates".into()).or_default().push(action);
-                        }
+                for action in labels.forward.iter().flatten() {
+                    let action = action.clone().trim();
+                    if !action.is_empty() {
+                        vcg.vert.add_edge(src_ix, dst_ix, "actuates".into());
+                        rels.entry("actuates".into()).or_default().push(action);
                     }
                 }
-                for percept in percepts {
-                    let percept = percept.clone().map(|p| p.trim());
-                    if let Some(percept) = percept {
-                        if !percept.is_empty() {
-                            vcg.vert.add_edge(src_ix, dst_ix, "senses".into());
-                            rels.entry("senses".into()).or_default().push(percept);
-                        }
+                for percept in labels.reverse.iter().flatten() {
+                    let percept = percept.clone().trim();
+                    if !percept.is_empty() {
+                        vcg.vert.add_edge(src_ix, dst_ix, "senses".into());
+                        rels.entry("senses".into()).or_default().push(percept);
                     }
                 }
             }
             for node in path {
+                let node = if let eval::Val::Process{label: Some(label), ..} = node { label } else { continue; };
                 or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
                 vcg.vert_node_labels.insert(node.clone(), node.clone().into());
             }
@@ -1916,6 +1871,8 @@ pub mod layout {
 
     /// Solve for horizontal ranks that minimize edge crossing
     pub use heaps::minimize_edge_crossing;
+
+    use self::eval::Val;
 }
 
 pub mod geometry {

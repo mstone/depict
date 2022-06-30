@@ -92,18 +92,11 @@ fn draw(data: String) -> Result<Drawing, Error> {
     event!(Level::TRACE, ?v, "PARSE");
     eprintln!("PARSE {v:#?}");
 
-    let vcg = calculate_vcg2(&v)?;
+    let process = eval::eval(&v[..]);
+
+    let vcg = calculate_vcg(process)?;
 
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
-
-    // depict::graph_drawing::draw(v, &mut vcg)?;
-
-
-    // let draw_query = Fact::Atom(Ident("draw"));
-    // let draw_cmd = depict::render::resolve(v.iter(), &draw_query).next().unwrap();
-    // depict::graph_drawing::draw(&v, draw_cmd, &mut vcg)?;
-
-    // eprintln!("VERT: {:?}", Dot::new(&vert));
 
     let cvcg = condense(vert)?;
     let Cvcg{condensed, condensed_vxmap: _} = &cvcg;

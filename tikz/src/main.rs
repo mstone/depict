@@ -22,8 +22,9 @@ pub fn tikz_escape(s: &str) -> String {
 }
 
 pub fn render<'s>(items: Vec<Item>) -> Result<(), Error> {
+    let process = eval::eval(&items[..]);
 
-    let vcg = calculate_vcg2(&items[..])?;
+    let vcg = calculate_vcg(process)?;
     let Vcg{vert, vert_vxmap: _, vert_node_labels, vert_edge_labels} = &vcg;
 
     eprintln!("VERT: {:?}", Dot::new(&vert));
@@ -269,13 +270,6 @@ pub fn render<'s>(items: Vec<Item>) -> Result<(), Error> {
         }}
         \end{{document}}
     "#));
-
-    // println!("{}", "\n\n\n");
-    // println!("{:?}", Dot::new(&vert));
-
-    // use top-level "draw" fact to identify inline or top-level drawings to draw
-    // resolve top-level drawings + use inline drawings to identify objects to draw to make particular drawings
-    // use object facts to figure out directions + labels?
 
     Ok(())
 }

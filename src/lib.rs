@@ -187,7 +187,6 @@ pub mod parser {
     use std::borrow::Cow;
     use std::fmt::Display;
     use std::fmt::Formatter;
-    use std::hash::Hash;
 
     use pomelo::pomelo;
 
@@ -437,24 +436,6 @@ pub mod parser {
     /// use logos::Logos;
     /// ```
     pub use fact::Token;
-
-
-    pub type Labels<I> = Vec<Option<I>>;
-
-    /// The intermediate representation (IR) of depictions
-    /// 
-    /// In depict, models are viewed as asserting a claimed set of "facts" 
-    /// to be depicted.
-    /// 
-    /// These "facts" are represented by [Fact]s, each of which record a 
-    /// claim like "the sequence `path` model entities are related with 
-    /// labels for the forward and backward dimensions of each such 
-    /// atomic relationship in the corresponding entries of `labels_by_level`."
-    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-    pub struct Fact<I> {
-        pub path: Vec<I>,
-        pub labels_by_level: Vec<(Labels<I>, Labels<I>)>,
-    }
 }
 
 #[cfg(any(feature="osqp", feature="osqp-rust"))]
