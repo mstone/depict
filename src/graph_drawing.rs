@@ -439,7 +439,7 @@ pub mod eval {
     
     /// What kind of relationship between processes does 
     /// the containing [Val::Chain] describe?
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub enum Rel {
         Vertical,
         Horizontal,
@@ -642,9 +642,14 @@ pub mod eval {
                     }
                 },
                 Item::Seq(ls) | Item::Comma(ls) => {
+                    let rel = if ls.len() > 0 && ls[0] == Item::Text(Cow::from("LEFT")) {
+                        Rel::Horizontal
+                    } else {
+                        Rel::Vertical
+                    };
                     body.get_or_insert_with(Default::default).push(Val::Chain{
                         name: None,
-                        rel: Rel::Vertical,
+                        rel,
                         path: eval_path(&ls[..]),
                         labels: vec![],
                     });
@@ -1141,6 +1146,50 @@ pub mod layout {
     use crate::graph_drawing::graph::roots;
 
     #[derive(Clone, Debug, Default)]
+    pub struct Hcg<V: Graphic> {
+        constraints: Vec<HorizontalConstraint<V>>,
+    }
+
+    /// Require a to be left of b
+    #[derive(Clone, Debug, Default)]
+    pub struct HorizontalConstraint<V: Graphic> {
+        a: V,
+        b: V,
+    }
+
+    impl<V: Graphic> Hcg<V> {
+        fn iter(&self) -> impl Iterator<Item=&HorizontalConstraint<V>> {
+            self.constraints.iter()
+        }
+    }
+
+    pub fn calculate_hcg<'s, 't>(process: &'t Val<Cow<'s, str>>) -> Result<Hcg<Cow<'s, str>>, Error> {
+        let mut hcg = Hcg::default();
+        if let Val::Process{body, ..} = process {
+            for part in body.iter().flatten() {
+                if let Val::Chain{rel, path, ..} = part {
+                    // for now, all horizontal chains are constraints, not edges
+                    if *rel == Rel::Horizontal {
+                        for n in 0..path.len()-1 {
+                            if let Val::Process{label: Some(al), ..} = &path[n] {
+                                if let Val::Process{label: Some(bl), ..} = &path[n+1] {
+                                    hcg.constraints.push(
+                                        HorizontalConstraint{
+                                            a: al.clone(), 
+                                            b: bl.clone()
+                                        }
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(hcg)
+    }
+
+    #[derive(Clone, Debug, Default)]
     pub struct Vcg<V, E> {
         /// vert is a vertical constraint graph. 
         /// Edges (v, w) in vert indicate that v needs to be placed above w. 
@@ -1253,8 +1302,16 @@ pub mod layout {
         let body = if let Val::Process{body: Some(body), ..} = process { body } else { unreachable!(); };
 
         for chain in body {
-            let path = if let Val::Chain{path, ..} = &chain { path } else { continue; };
-            let labels_by_level = if let Val::Chain{labels, ..} = &chain { labels } else { continue; };
+            if let Val::Process{label: Some(node), ..} = &chain {
+                or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
+                vcg.vert_node_labels.insert(node.clone(), node.clone().into());
+                continue;
+            }
+            let (path, rel, labels_by_level) = if let Val::Chain{path, rel, labels, ..} = &chain { (path, rel, labels) } else { continue; };
+            // for now, all horizontal chains are constraints
+            if *rel == Rel::Horizontal {
+                continue
+            }
             for n in 0..path.len()-1 {
                 let src = &path[n];
                 let src = if let Val::Process { label: Some(label), .. } = src { label } else { continue; };
@@ -1440,7 +1497,8 @@ pub mod layout {
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
         pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>>,
-        pub node_to_loc: HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>
+        pub node_to_loc: HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>,
+        pub hcg: Hcg<V>,  
     }
 
     #[derive(Clone, Debug, Default)]
@@ -1454,7 +1512,8 @@ pub mod layout {
     /// Set up a [LayoutProblem] problem
     pub fn calculate_locs_and_hops<'s, V, E>(
         dag: &'s Graph<V, E>, 
-        paths_by_rank: &'s RankedPaths<V>
+        paths_by_rank: &'s RankedPaths<V>,
+        hcg: Hcg<V>,
     ) -> Result<LayoutProblem<V>, Error>
             where 
         V: Display + Graphic, 
@@ -1558,7 +1617,7 @@ pub mod layout {
         let g_hops_dot = Dot::new(&g_hops);
         event!(Level::DEBUG, ?g_hops_dot, "HOPS GRAPH");
 
-        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc})
+        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, hcg})
     }
 
     pub mod sol {
@@ -1662,7 +1721,7 @@ pub mod layout {
         use crate::graph_drawing::layout::debug::debug;
         use crate::graph_drawing::layout::{Hop};
         
-        use super::{LayoutProblem, Graphic, LayoutSolution};
+        use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Loc};
 
         #[inline]
         pub fn is_odd(x: usize) -> bool {
@@ -1748,6 +1807,24 @@ pub mod layout {
             c as usize
         }
 
+        fn conforms<V: Graphic>(layout_problem: &LayoutProblem<V>, p: &mut [&mut [usize]]) -> bool {
+            let LayoutProblem{node_to_loc, hcg, ..} = layout_problem;
+
+            hcg.iter().all(|constraint| {
+                let HorizontalConstraint{a, b} = constraint;
+                let an = if let Some(an) = node_to_loc.get(&Loc::Node(a.clone())) { an } else { return true; };
+                let bn = if let Some(bn) = node_to_loc.get(&Loc::Node(b.clone())) { bn } else { return true; };
+                let aovr = an.0.0;
+                let aohr = an.1.0;
+                let bovr = bn.0.0;
+                let bohr = bn.1.0;
+                let ashr = p[aovr][aohr];
+                let bshr = p[bovr][bohr];
+                // for now, only constrain nodes on the same vertical rank
+                aovr != bovr || ashr < bshr
+            })
+        }
+
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
@@ -1800,7 +1877,7 @@ pub mod layout {
                         }
                     }
                 }
-                if cn < crossing_number {
+                if cn < crossing_number && conforms(&layout_problem, p) {
                     crossing_number = cn;
                     solution = Some(p.iter().map(|q| q.to_vec()).collect());
                 }
@@ -1886,6 +1963,7 @@ pub mod layout {
     /// Solve for horizontal ranks that minimize edge crossing
     pub use heaps::minimize_edge_crossing;
 
+    use super::eval::Rel;
     use super::index::SolvedHorizontalRank;
 }
 
@@ -2641,7 +2719,7 @@ pub mod frontend {
     use tracing::{event, Level};
     use tracing_error::InstrumentResult;
 
-    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution}, error::{Error, Kind, OrErrExt}, eval::Val};
 
@@ -2768,8 +2846,15 @@ pub mod frontend {
             eprintln!("PARSE {items:#?}");
     
             let val = eval(&items[..]);
+
+            event!(Level::TRACE, ?val, "EVAL");
+            eprintln!("EVAL {val:#?}");
     
             let vcg = calculate_vcg(&val)?;
+            let hcg = calculate_hcg(&val)?;
+
+            event!(Level::TRACE, ?val, "HCG");
+            eprintln!("HCG {hcg:#?}");
     
             let Vcg{vert, ..} = &vcg;
     
@@ -2780,7 +2865,7 @@ pub mod frontend {
     
             let paths_by_rank = rank(condensed, &roots)?;
     
-            let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank)?;
+            let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank, hcg)?;
             let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, ..} = &layout_problem;
     
             let layout_solution = minimize_edge_crossing(&layout_problem)?;
