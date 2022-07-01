@@ -1366,6 +1366,7 @@ pub mod layout {
         }
 
         event!(Level::TRACE, ?vcg, "VCG");
+        eprintln!("VCG: {vcg:#?}");
 
         Ok(vcg)
     }
@@ -1844,7 +1845,7 @@ pub mod layout {
                         solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
                     }
                 }
-                return Ok(LayoutSolution{crossing_number: 0, solved_locs: BTreeMap::new()})
+                return Ok(LayoutSolution{crossing_number: 0, solved_locs})
             }
             #[allow(clippy::unwrap_used)]
             let max_level = *hops_by_level.keys().max().unwrap();
