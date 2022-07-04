@@ -23,6 +23,7 @@ proptest = "1"
 self_cell = "0.10.2"
 derive_more = "0.99"
 enum-kinds = "0.5.1"
+include_dir = "0.7"
 itertools = "0.10"
 logos = "0.12"
 miette = { version = "4", features = [ "fancy" ] }

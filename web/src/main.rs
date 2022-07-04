@@ -693,6 +693,44 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         }
                     }
                 }
+                div {
+                    details {
+                        summary {
+                            style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); text-align: right;",
+                            "Licenses",
+                        },
+                        div {
+                            (depict::licenses::LICENSES.dirs().map(|dir| {
+                                let path = dir.path().display();
+                                cx.render(rsx!{
+                                    div {
+                                        key: "{path}",
+                                        span {
+                                            style: "font-style: italic; text-decoration: underline;",
+                                            "{path}"
+                                        },
+                                        ul {
+                                            dir.files().map(|f| {
+                                                let file_path = f.path();
+                                                let file_contents = f.contents_utf8().unwrap();
+                                                cx.render(rsx!{
+                                                    details {
+                                                        key: "{file_path:?}",
+                                                        style: "white-space: pre;",
+                                                        summary {
+                                                            "{file_path:?}"
+                                                        }
+                                                        "{file_contents}"
+                                                    }
+                                                })
+                                            })
+                                        }
+                                    }
+                                })
+                            }))
+                        }
+                    }
+                }
                 // div {
                 //     style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
                 //     span {

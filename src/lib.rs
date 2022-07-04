@@ -485,3 +485,9 @@ pub mod rest {
     }
 
 }
+
+
+pub mod licenses {
+    use include_dir::{Dir, include_dir};
+    pub const LICENSES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/licenses");
+}
