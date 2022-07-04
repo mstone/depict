@@ -644,7 +644,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         cols: "80",
                         autocomplete: "off",
                         // autocorrect: "off",
-                        // autocapitalize: "off",
+                        "autocapitalize": "off",
                         autofocus: "true",
                         spellcheck: "false",
                         // placeholder: "",
