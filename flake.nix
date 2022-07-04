@@ -25,13 +25,19 @@
   inputs.nixbom.inputs.nix-filter.follows = "nix-filter";
   inputs.nixbom.inputs.rust-overlay.follows = "rust-overlay";
 
-  outputs = {self, nixpkgs, crane, deploy-rs, nixbom, rust-overlay, flake-utils, nix-filter}:
+  inputs.cargo-include-licenses.url = "github:mstone/cargo-include-licenses";
+  inputs.cargo-include-licenses.inputs.crane.follows = "crane";
+  inputs.cargo-include-licenses.inputs.flake-utils.follows = "flake-utils";
+  inputs.cargo-include-licenses.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.cargo-include-licenses.inputs.rust-overlay.follows = "rust-overlay";
+
+  outputs = {self, nixpkgs, crane, deploy-rs, nixbom, rust-overlay, flake-utils, nix-filter, cargo-include-licenses}:
     flake-utils.lib.simpleFlake {
       inherit self nixpkgs;
       name = "depict";
       systems = flake-utils.lib.allSystems;
       preOverlays = [ 
-        rust-overlay.overlay
+        rust-overlay.overlays.default
       ];
       overlay = final: prev: {
         depict = rec {
@@ -140,9 +146,15 @@
           # by the stdenv itself (passed as the environment variable "stdenv" that 
           # in turn defines a defaultNativeBuildInputs variable that gets added to 
           # PATH via the genericBuild initialization code. Therefore, we override
-          # crane's stdenv to use our modified cc-wrapper.
+          # crane's stdenv to use our modified cc-wrapper. Then, we override
+          # cargo, clippy, rustc, and rustfmt, similar to the newly introduced 
+          # crane.lib.overrideToolchain helper.
           cranelib = crane.lib.${final.system}.overrideScope' (final: prev: {
             inherit stdenv;
+            cargo = rust;
+            clippy = rust;
+            rustc = rust;
+            rustfmt = rust;
           });
 
           tex = with final; with pkgs; texlive.combined.scheme-full;
@@ -162,6 +174,7 @@
                 (terraform_1.withPlugins (p: with p; [aws gandi vultr]))
                 nixbom.legacyPackages.${final.system}.nixbom
                 cargo-expand
+                cargo-include-licenses.legacyPackages.${final.system}.defaultPackage
                 cargo-license
                 cargo-outdated
                 cargo-udeps
