@@ -29,9 +29,9 @@
   </a>
 </div>
 
-*Depict* helps people who need to communicate about complex systems with pictures.
+*Depict* helps people who need to communicate about complex systems with pictures. ([demo](https://mstone.info/depict/))
 
-![Depict "microwave" model screenshot](https://raw.githubusercontent.com/mstone/depict/main/doc/microwave.gif)
+[![Depict live demo, showing a model of a microwave](https://raw.githubusercontent.com/mstone/depict/main/doc/microwave.gif)](https://mstone.info/depict/)
 
 People who need to communicate about complex systems often draw pictures with boxes and arrows. 
 
