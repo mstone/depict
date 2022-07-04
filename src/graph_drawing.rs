@@ -2901,7 +2901,7 @@ mod tests {
     use std::borrow::Cow;
 
     use super::{error::Error};
-    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, graph::roots, index::VerticalRank, geometry::calculate_sols, error::Kind}};
+    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, graph::roots, index::VerticalRank, geometry::calculate_sols, error::Kind, eval}};
     use tracing_error::InstrumentResult;
     use logos::Logos;
 
@@ -2924,8 +2924,12 @@ mod tests {
                 Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
             })
             .in_current_span()?;
+        
+        let val = eval::eval(&v[..]);
 
-        let vcg = calculate_vcg2(&v)?;
+        let vcg = calculate_vcg(&val)?;
+        let hcg = calculate_hcg(&val)?;
+
         let Vcg{vert, vert_vxmap, ..} = vcg;
         let vx = vert_vxmap["e"];
         let wx = vert_vxmap["af"];
@@ -2943,7 +2947,7 @@ mod tests {
         let paths_by_rank = rank(&condensed, &roots)?;
         assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("af")));
 
-        let layout_problem = calculate_locs_and_hops(&condensed, &paths_by_rank)?;
+        let layout_problem = calculate_locs_and_hops(&condensed, &paths_by_rank, hcg)?;
         let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
         let nv: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("e"));
         let nw: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("af"));
@@ -2969,7 +2973,7 @@ mod tests {
         assert_eq!(np2, &np);
         assert_eq!(nq2, &nq);
         
-        let (crossing_number, solved_locs) = minimize_edge_crossing(&layout_problem)?;
+        let LayoutSolution{crossing_number, solved_locs} = minimize_edge_crossing(&layout_problem)?;
         assert_eq!(crossing_number, 0);
         // let sv = solved_locs[&2][&1];
         // let sw = solved_locs[&3][&0];

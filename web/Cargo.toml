@@ -21,7 +21,6 @@ osqp-rust = { version = "0.6", git = "https://github.com/mstone/osqp.rs" }
 osqp-rust-sys = { version = "0.6", git = "https://github.com/mstone/osqp.rs" }
 petgraph = { version = "0.6", features = ["serde-1"] }
 printf-compat = "0.1"
-reqwasm = "0.5"
 serde = "1"
 serde_json = "1"
 svg = "0.10"

@@ -234,18 +234,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bitvec"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1489fcb93a5bb47da0462ca93ad252ad6af2145cce58d10d46a83931ba9f016b"
-dependencies = [
- "funty",
- "radium",
- "tap",
- "wyz",
-]
-
-[[package]]
 name = "block"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -636,7 +624,6 @@ dependencies = [
 name = "depict"
 version = "0.2.0"
 dependencies = [
- "bitvec",
  "derive_more",
  "enum-kinds",
  "itertools 0.10.3",
@@ -647,7 +634,6 @@ dependencies = [
  "petgraph",
  "pomelo",
  "proptest",
- "rand",
  "self_cell",
  "serde",
  "serde_json",
@@ -662,14 +648,12 @@ dependencies = [
 name = "depict-desktop"
 version = "0.2.0"
 dependencies = [
- "Inflector",
  "color-spantrace",
  "depict",
  "dioxus",
  "futures",
  "indoc",
  "logos",
- "nom",
  "petgraph",
  "serde",
  "serde_json",
@@ -714,7 +698,6 @@ dependencies = [
  "Inflector",
  "axum",
  "depict",
- "futures",
  "hyper",
  "logos",
  "petgraph",
@@ -760,7 +743,6 @@ dependencies = [
  "osqp-rust-sys",
  "petgraph",
  "printf-compat",
- "reqwasm",
  "serde",
  "serde_json",
  "svg",
@@ -1046,12 +1028,6 @@ name = "fs_extra"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2022715d62ab30faffd124d40b76f4134a550a87792276512b18d63272333394"
-
-[[package]]
-name = "funty"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
@@ -1351,26 +1327,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gloo-net"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2899cb1a13be9020b010967adc6b2a8a343b6f1428b90238c9d53ca24decc6db"
-dependencies = [
- "futures-channel",
- "futures-core",
- "futures-sink",
- "gloo-utils",
- "js-sys",
- "pin-project",
- "serde",
- "serde_json",
- "thiserror",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "gloo-timers"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1380,17 +1336,6 @@ dependencies = [
  "futures-core",
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "gloo-utils"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "929c53c913bb7a88d75d9dc3e9705f963d8c2b9001510b25ddaf671b9fb7049d"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -2413,12 +2358,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "radium"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
-
-[[package]]
 name = "rand"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2517,15 +2456,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3acd125665422973a33ac9d3dd2df85edad0f4ae9b00dafb1a05e43a9f5ef8e7"
 dependencies = [
  "winapi",
-]
-
-[[package]]
-name = "reqwasm"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05b89870d729c501fa7a68c43bf4d938bbb3a8c156d333d90faa0e8b3e3212fb"
-dependencies = [
- "gloo-net",
 ]
 
 [[package]]
@@ -2934,12 +2864,6 @@ dependencies = [
  "libc",
  "objc",
 ]
-
-[[package]]
-name = "tap"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tempfile"
@@ -3727,15 +3651,6 @@ dependencies = [
  "webview2-com",
  "windows",
  "windows_macros",
-]
-
-[[package]]
-name = "wyz"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30b31594f29d27036c383b53b59ed3476874d518f0efb151b27a4c275141390e"
-dependencies = [
- "tap",
 ]
 
 [[package]]
