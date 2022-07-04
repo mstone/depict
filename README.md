@@ -29,7 +29,7 @@
   </a>
 </div>
 
-*Depict* helps people who need to communicate about complex systems with pictures. ([demo](https://mstone.info/depict/))
+*Depict* helps people communicate about complex systems with pictures. ([demo](https://mstone.info/depict/))
 
 [![Depict live demo, showing a model of a microwave](https://raw.githubusercontent.com/mstone/depict/main/doc/microwave.gif)](https://mstone.info/depict/)
 
