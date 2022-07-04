@@ -29,7 +29,7 @@
   </a>
 </div>
 
-*Depict* helps you draw pictures of systems, processes, and concepts of operation (ConOps).
+*Depict* helps people who need to communicate about complex systems with pictures.
 
 ![Depict "microwave" model screenshot](https://raw.githubusercontent.com/mstone/depict/main/doc/microwave.gif)
 
