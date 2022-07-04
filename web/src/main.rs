@@ -666,7 +666,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             }
                             span {
                                 style: "font-style: italic;",
-                                "node ... : action ... / percept ... : action ... / percept ..."
+                                "node ... : action ... / feedback ... : action ... / feedback ..."
                             }
                         }
                         div {
