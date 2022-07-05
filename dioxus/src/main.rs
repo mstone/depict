@@ -268,6 +268,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                 }));
             },
             Node::Svg{key, path, rel, label, ..} => {
+                let marker_id = if rel == "actuates" { "arrowhead" } else { "arrowheadrev" };
                 let marker_orient = if rel == "actuates" { "auto" } else { "auto-start-reverse" };
                 let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
                 let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
@@ -285,7 +286,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                             width: "{viewbox_width}px",
                             height: "{viewbox_height}px",
                             marker {
-                                id: "arrowhead",
+                                id: "{marker_id}",
                                 markerWidth: "7",
                                 markerHeight: "10",
                                 refX: "0",
@@ -308,7 +309,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                                     "senses" => {
                                         rsx!(path {
                                             d: "{path}",
-                                            "marker-start": "url(#arrowhead)",
+                                            "marker-start": "url(#arrowheadrev)",
                                             // marker_start: "url(#arrowhead)", // BUG: should work, but doesn't.
                                         })
                                     },
