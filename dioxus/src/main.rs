@@ -105,7 +105,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             // if !label.is_screaming_snake_case() {
             //     label = label.to_title_case();
             // }
-            let estimated_width = width_by_loc[&(*ovr, *ohr)];
+            let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
             texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
         }
     }

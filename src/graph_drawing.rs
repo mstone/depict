@@ -2088,6 +2088,13 @@ pub mod geometry {
         pub wl: V,
         pub n: HopSol,
     }
+
+    #[derive(Clone, Debug)]
+    pub struct NodeWidth {
+        pub width: f64,
+        pub left: f64,
+        pub right: f64,
+    }
     
     #[derive(Clone, Debug, Default)]
     pub struct GeometryProblem<V: Clone + Debug + Display + Ord + Hash> {
@@ -2096,7 +2103,7 @@ pub mod geometry {
         pub all_hops: Vec<HopRow<V>>,
         pub sol_by_loc: HashMap<(VerticalRank, OriginalHorizontalRank), LocSol>,
         pub sol_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol>,
-        pub width_by_loc: HashMap<LocIx, f64>,
+        pub width_by_loc: HashMap<LocIx, NodeWidth>,
         pub width_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), (f64, f64)>,
     }
     
@@ -2305,7 +2312,8 @@ pub mod geometry {
             let locs = &solved_locs[&ovr];
             let shr = locs[&ohr];
             let n = sol_by_loc[&(ovr, ohr)];
-            let min_width = *width_by_loc.get(&(ovr, ohr))
+            let min_width = width_by_loc.get(&(ovr, ohr))
+                .map(|nw| nw.width)
                 .ok_or_else::<Error,_>(|| LayoutError::OsqpError{error: format!("missing node width: {ovr}, {ohr}")}.in_current_span().into())?;
             let mut min_width = min_width.round() as usize;
 
@@ -2398,7 +2406,6 @@ pub mod geometry {
 
             if let Loc::Hop(_lvl, vl, wl) = loc {
                 let ns = sol_by_hop[&(ovr, ohr, vl.clone(), wl.clone())];
-                
                 c.leq(&mut v, l(n), s(ns));
                 c.leq(&mut v, s(ns), r(n));
                 event!(Level::TRACE, ?loc, %n, %min_width, "X3: l{n} <= s{ns} <= r{n}");
@@ -2413,17 +2420,13 @@ pub mod geometry {
             // WIDTH
             // BUG! WHY DOES THIS MATTER???????
             // obj = add(obj, sub(r.get(n)?, l.get(n)?)?)?;
-            if shr > SolvedHorizontalRank(0) {
-                #[allow(clippy::unwrap_used)]
-                let ohrp = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr-1).unwrap());
+            if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
                 let np = sol_by_loc[&(ovr, ohrp)];
                 let shrp = locs[&ohrp];
                 c.leqc(&mut v, r(np), l(n), sep);
                 event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, "X1: l{n} >= r{np} + ε")
             }
-            if shr < SolvedHorizontalRank(locs.len()-1) {
-                #[allow(clippy::unwrap_used)]
-                let ohrn = OriginalHorizontalRank(locs.iter().position(|(_, shrp)| *shrp == shr+1).unwrap());
+            if let Some(ohrn) = locs.iter().position(|(_, shrn)| *shrn == shr+1).map(OriginalHorizontalRank) {
                 let nn = sol_by_loc[&(ovr,ohrn)];
                 let shrn = locs[&(ohrn)];
                 c.leqc(&mut v, r(n), l(nn), sep);
@@ -2456,6 +2459,7 @@ pub mod geometry {
             };
             let action_width = *action_width;
             let percept_width = *percept_width;
+            // flow_width, flow_rev_width?
 
             c.leqc(&mut v, l(root_n), s(n), action_width);
             c.leqc(&mut v, s(n), r(root_n), percept_width);
@@ -2685,6 +2689,7 @@ pub mod geometry {
         // eprintln!("R: {:.2?}\n", rv);
         // eprintln!("S: {:.2?}\n", sv);
         let ts = row_height_offsets.values().copied().collect::<TiVec<VerticalRank, _>>();
+
         let mut ls = v.iter()
             .filter_map(|(sol, var)| {
                 if let AnySol::L(l) = sol { 
@@ -2742,7 +2747,7 @@ pub mod frontend {
 
     use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
 
-    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution}, error::{Error, Kind, OrErrExt}, eval::Val};
+    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeWidth}, error::{Error, Kind, OrErrExt}, eval::Val};
 
     pub fn estimate_widths<I>(
         vcg: &Vcg<I, I>, 
@@ -2775,7 +2780,12 @@ pub mod frontend {
                 // if !label.is_screaming_snake_case() {
                 //     label = label.to_title_case();
                 // }
-                width_by_loc.insert((*ovr, *ohr), char_width * label.len() as f64);
+                let width = NodeWidth{
+                    width: char_width * label.len() as f64,
+                    left: 0.,
+                    right: 0.,
+                };
+                width_by_loc.insert((*ovr, *ohr), width);
             }
         }
     
@@ -2810,7 +2820,11 @@ pub mod frontend {
             for (lvl, (mhr, _nhr)) in hops.iter() {
                 width_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), (action_width, percept_width));
                 if width_by_loc.get(&(*lvl, *mhr)).is_none() {
-                    width_by_loc.insert((*lvl, *mhr), action_width + percept_width);
+                    width_by_loc.insert((*lvl, *mhr), NodeWidth{
+                        width: action_width + percept_width, 
+                        left: 0., 
+                        right: 0.,
+                    });
                 }
             }
         }
