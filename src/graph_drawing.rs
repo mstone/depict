@@ -1686,19 +1686,20 @@ pub mod layout {
 
     pub mod debug {
         //! Debug-print helpers for layout problems.
-        use std::{collections::{HashMap, BTreeMap}, fmt::Display};
+        use std::{collections::{HashMap}, fmt::Display};
 
         use petgraph::{Graph, dot::Dot};
         use tracing::{event, Level};
 
-        use crate::graph_drawing::{layout::{LayoutProblem, Loc, or_insert}, index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank}};
+        use crate::graph_drawing::{layout::{LayoutProblem, Loc, or_insert, LayoutSolution}};
 
         use super::Graphic;
         
         /// Print a graphviz "dot" representation of the solution `solved_locs` 
         /// to `layout_problem`
-        pub fn debug<V: Display + Graphic>(layout_problem: &LayoutProblem<V>, solved_locs: &BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>) {
+        pub fn debug<V: Display + Graphic>(layout_problem: &LayoutProblem<V>, layout_solution: &LayoutSolution) {
             let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
+            let LayoutSolution{solved_locs, ..} = &layout_solution;
             let mut layout_debug = Graph::<String, String>::new();
             let mut layout_debug_vxmap = HashMap::new();
             for ((vl, wl), hops) in hops_by_edge.iter() {
@@ -1740,7 +1741,6 @@ pub mod layout {
 
         use crate::graph_drawing::error::{Error, LayoutError, OrErrExt};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
-        use crate::graph_drawing::layout::debug::debug;
         use crate::graph_drawing::layout::{Hop};
         
         use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Loc};
@@ -1922,8 +1922,6 @@ pub mod layout {
                     .collect::<BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>());
             }
 
-            debug(layout_problem, &solved_locs);
-
             Ok(LayoutSolution{crossing_number, solved_locs})
         }
     
@@ -2029,7 +2027,6 @@ pub mod geometry {
 
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::visit::EdgeRef;
-    use sorted_vec::SortedVec;
     use tracing::{event, Level, instrument};
     use tracing_error::InstrumentError;
     use typed_index_collections::TiVec;
@@ -2041,7 +2038,7 @@ pub mod geometry {
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic};
+    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution};
 
     use std::cmp::max;
     use std::collections::{HashMap, BTreeMap, HashSet};
@@ -2113,13 +2110,14 @@ pub mod geometry {
     pub type HopMap = BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>;
     
     pub fn calculate_sols<'s, V>(
-        solved_locs: &'s BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
-        loc_to_node: &'s HashMap<LocIx, Loc<V, V>>,
-        hops_by_level: &'s BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
-        hops_by_edge: &'s BTreeMap<(V, V), HopMap>,
+        layout_problem: &'s LayoutProblem<V>,
+        layout_solution: &'s LayoutSolution,
     ) -> GeometryProblem<V> where
         V: Display + Graphic
     {
+        let LayoutProblem{loc_to_node, hops_by_level, hops_by_edge, ..} = layout_problem;
+        let LayoutSolution{solved_locs, ..} = layout_solution;
+
         let all_locs = solved_locs
             .iter()
             .flat_map(|(ovr, nodes)| nodes
@@ -2211,7 +2209,7 @@ pub mod geometry {
     pub fn position_sols<'s, V, E>(
         vcg: &'s Vcg<V, E>,
         layout_problem: &'s LayoutProblem<V>,
-        solved_locs: &'s BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
+        layout_solution: &'s LayoutSolution,
         geometry_problem: &'s GeometryProblem<V>,
     ) -> Result<GeometrySolution, Error> where 
         V: Display + Graphic,
@@ -2219,6 +2217,7 @@ pub mod geometry {
     {
         let Vcg{vert: dag, vert_vxmap: dag_map, vert_node_labels: _, vert_edge_labels: dag_edge_labels, ..} = vcg;
         let LayoutProblem{hops_by_edge, node_to_loc, ..} = layout_problem;
+        let LayoutSolution{solved_locs, ..} = &layout_solution;
         let GeometryProblem{all_locs, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop, ..} = geometry_problem;
     
         let mut edge_label_heights = BTreeMap::<VerticalRank, usize>::new();
@@ -2888,20 +2887,18 @@ pub mod frontend {
             let paths_by_rank = rank(condensed, &roots)?;
     
             let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank, hcg)?;
-            let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, ..} = &layout_problem;
 
             // ... adjust problem for horizontal edges
     
             let layout_solution = minimize_edge_crossing(&layout_problem)?;
-            let LayoutSolution{solved_locs, ..} = &layout_solution;
     
-            let mut geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+            let mut geometry_problem = calculate_sols(&layout_problem, &layout_solution);
     
             estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
     
-            let geometry_solution = position_sols(&vcg, &layout_problem, &solved_locs, &geometry_problem)?;
+            let geometry_solution = position_sols(&vcg, &layout_problem, &layout_solution, &geometry_problem)?;
     
-            debug(&layout_problem, &solved_locs);
+            debug(&layout_problem, &layout_solution);
             
             Ok(Depiction{
                 items,
