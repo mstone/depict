@@ -1,26 +1,11 @@
+use std::borrow::Cow;
+
 use clap::Parser;
-use depict::{parser::*, graph_drawing::eval::eval};
-
-use logos::Logos;
-
-use miette::{Diagnostic, NamedSource, Result};
+use depict::graph_drawing::{error::Error};
 
 // use tracing::{instrument, event, Level};
 // use tracing_error::{InstrumentResult, ExtractSpanTrace, TracedError};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-#[derive(Debug, Diagnostic, thiserror::Error)]
-#[error("parse error")]
-#[diagnostic(code(depict::parse_error))]
-pub struct Error {
-    #[source_code]
-    pub src: NamedSource,
-
-    #[label = "Unexpected token"]
-    pub span: std::ops::Range<usize>,
-
-    pub text: String,
-}
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -32,7 +17,7 @@ pub struct Args {
 }
 
 
-fn do_one_path(path: String) -> Result<()> {
+fn do_one_path(path: String) -> Result<(), Error> {
     let data = std::fs::read_to_string(&path)
         .expect("read error");
 
@@ -40,46 +25,12 @@ fn do_one_path(path: String) -> Result<()> {
     do_one_expr(path, data)
 }
 
-fn do_one_expr(path: String, data: String) -> Result<()> {
-    println!("data:\n\n{data}\n");
-    { 
-        let lex = Token::lexer(&data);
-        let tks = lex.collect::<Vec<_>>();
-        println!("lex: {tks:?}");
-    }
-
-    let mut lex = Token::lexer(&data);
-    let mut p = depict::parser::Parser::new();
-
-    while let Some(tk) = lex.next() {
-        println!("token: {:?}", tk);
-        p.parse(tk)
-            .map_err(|_| { 
-                Error{
-                    src: NamedSource::new(path.clone(), data.clone()), 
-                    span: lex.span(), 
-                    text: lex.slice().into()
-                }
-            })?
-    }
-    let v = p.end_of_input()
-        .map_err(|_| { 
-            Error{
-                src: NamedSource::new(path.clone(), data.clone()), 
-                span: lex.span(), 
-                text: lex.slice().into()
-            }
-        })?;
-        
-    println!("PARSE: {v:#?}");
-
-    let ev = eval(&v[..]);
-    println!("EVAL: {ev:#?}");
-
-    Ok(())
+fn do_one_expr(_path: String, data: String) -> Result<(), Error> {
+    depict::graph_drawing::frontend::render(Cow::Owned(data))
+        .map(|_| ())
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Error> {
     tracing_subscriber::Registry::default()
         .with(tracing_error::ErrorLayer::default())
         .with(tracing_subscriber::fmt::layer())
@@ -95,7 +46,7 @@ fn main() -> Result<()> {
                 // .tab_width(4)
                 .build(),
         )
-    }))?;
+    })).unwrap();
 
     let args = Args::parse();
 

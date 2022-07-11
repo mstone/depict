@@ -556,6 +556,7 @@ pub mod eval {
     fn eval_path<'s, 't>(path: &'t [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
         path.iter().filter_map(|i| {
             match i {
+                Item::Text(s) if s == "LEFT" => None,
                 Item::Text(s) => Some(s.clone()),
                 Item::Seq(s) => Some(itertools::join(s, " ").into()),
                 _ => None
@@ -617,6 +618,14 @@ pub mod eval {
         labels
     }
 
+    fn eval_rel<'s, 't>(path: &'t [Item<'s>]) -> Rel {
+        if path.len() > 0 && path[0] == Item::Text(Cow::from("LEFT")) {
+            Rel::Horizontal
+        } else {
+            Rel::Vertical
+        }
+    }
+
     /// What depiction do the given depict-expressions denote?
     pub fn eval<'s, 't>(exprs: &'t [Item<'s>]) -> Val<Cow<'s, str>> {
         // let mut body: Option<Vec<Val<Cow<'s, str>>>> = None;
@@ -635,21 +644,16 @@ pub mod eval {
                     } else {
                         body.get_or_insert_with(Default::default).push(Val::Chain{
                             name: None,
-                            rel: Rel::Vertical,
+                            rel: eval_rel(&l[..]),
                             path: eval_path(&l[..]),
                             labels: eval_labels(None, &r[..]),
                         });
                     }
                 },
                 Item::Seq(ls) | Item::Comma(ls) => {
-                    let rel = if ls.len() > 0 && ls[0] == Item::Text(Cow::from("LEFT")) {
-                        Rel::Horizontal
-                    } else {
-                        Rel::Vertical
-                    };
                     body.get_or_insert_with(Default::default).push(Val::Chain{
                         name: None,
-                        rel,
+                        rel: eval_rel(&ls[..]),
                         path: eval_path(&ls[..]),
                         labels: vec![],
                     });
@@ -1126,7 +1130,7 @@ pub mod layout {
     //! seems to serve us best.
     
     use std::borrow::{Cow};
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
     use std::collections::{HashMap, hash_map::Entry};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
@@ -1147,11 +1151,12 @@ pub mod layout {
 
     #[derive(Clone, Debug, Default)]
     pub struct Hcg<V: Graphic> {
-        constraints: Vec<HorizontalConstraint<V>>,
+        constraints: HashSet<HorizontalConstraint<V>>,
+        labels: HashMap<(V, V), eval::Level<V>>,
     }
 
     /// Require a to be left of b
-    #[derive(Clone, Debug, Default)]
+    #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
     pub struct HorizontalConstraint<V: Graphic> {
         a: V,
         b: V,
@@ -1167,18 +1172,35 @@ pub mod layout {
         let mut hcg = Hcg::default();
         if let Val::Process{body, ..} = process {
             for part in body.iter().flatten() {
-                if let Val::Chain{rel, path, ..} = part {
-                    // for now, all horizontal chains are constraints, not edges
+                if let Val::Chain{rel, path, labels, ..} = part {
                     if *rel == Rel::Horizontal {
                         for n in 0..path.len()-1 {
                             if let Val::Process{label: Some(al), ..} = &path[n] {
                                 if let Val::Process{label: Some(bl), ..} = &path[n+1] {
-                                    hcg.constraints.push(
+                                    hcg.constraints.insert(
                                         HorizontalConstraint{
                                             a: al.clone(), 
                                             b: bl.clone()
                                         }
                                     );
+                                    if let Some(level) = labels.get(n) {
+                                        let eval::Level{forward, reverse} = level.clone();
+                                        let hlvl = hcg.labels.entry((al.clone(), bl.clone()))
+                                            .or_insert(eval::Level{forward: None, reverse: None});
+                                        // if hf.is_none() then forward else hf.map()
+                                        match (&mut hlvl.forward, forward) {
+                                            (Some(f1), Some(mut f2)) => { f1.append(&mut f2); }
+                                            (Some(_), None) => {},
+                                            (None, Some(f2)) => { hlvl.forward.replace(f2); },
+                                            _ => {},
+                                        };
+                                        match (&mut hlvl.reverse, reverse) {
+                                            (Some(r1), Some(mut r2)) => { r1.append(&mut r2); }
+                                            (Some(_), None) => {},
+                                            (None, Some(r2)) => { hlvl.reverse.replace(r2); },
+                                            _ => {},
+                                        };
+                                    }
                                 }
                             }
                         }
@@ -2868,6 +2890,8 @@ pub mod frontend {
     
             let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank, hcg)?;
             let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, ..} = &layout_problem;
+
+            // ... adjust problem for horizontal edges
     
             let layout_solution = minimize_edge_crossing(&layout_problem)?;
             let LayoutSolution{solved_locs, ..} = &layout_solution;
