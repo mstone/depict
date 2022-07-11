@@ -1330,7 +1330,11 @@ pub mod layout {
                 continue;
             }
             let (path, rel, labels_by_level) = if let Val::Chain{path, rel, labels, ..} = &chain { (path, rel, labels) } else { continue; };
-            // for now, all horizontal chains are constraints
+            for node in path {
+                let node = if let eval::Val::Process{label: Some(label), ..} = node { label } else { continue; };
+                or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
+                vcg.vert_node_labels.insert(node.clone(), node.clone().into());
+            }
             if *rel == Rel::Horizontal {
                 continue
             }
@@ -1360,11 +1364,6 @@ pub mod layout {
                         rels.entry("senses".into()).or_default().push(percept);
                     }
                 }
-            }
-            for node in path {
-                let node = if let eval::Val::Process{label: Some(label), ..} = node { label } else { continue; };
-                or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
-                vcg.vert_node_labels.insert(node.clone(), node.clone().into());
             }
         }
 
