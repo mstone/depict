@@ -1210,6 +1210,36 @@ pub mod layout {
         }
         Ok(hcg)
     }
+    
+    pub fn fixup_hcg_rank<'s, 't>(hcg: &'t Hcg<Cow<'s, str>>, paths_by_rank: &'t mut BTreeMap<VerticalRank, SortedVec<(Cow<'s, str>, Cow<'s, str>)>>) {
+        let mut preliminary_rank = HashMap::new();
+        for (rank, paths) in paths_by_rank.iter() {
+            for (_, wl) in paths.iter() {
+                preliminary_rank.insert(wl.clone(), *rank);
+            }
+        }
+        let mut modified_rank = HashMap::new();
+        for (node, rank) in preliminary_rank.iter() {
+            let rank = *rank;
+            for HorizontalConstraint{a, b} in hcg.constraints.iter() {
+                let ar = modified_rank.get(a).copied().unwrap_or(preliminary_rank[a]);
+                let br = modified_rank.get(b).copied().unwrap_or(preliminary_rank[b]);
+                if node == a || node == b {
+                    let (o, or) = if node == a { (b, br) } else { (a, ar) };
+                    if ar != br {
+                        if rank < or {
+                            modified_rank.insert(node.clone(), or);
+                        } else {
+                            modified_rank.insert(o.clone(), rank);
+                        }
+                    }
+                }
+            }
+        }
+        for (node, rank) in modified_rank.iter() {
+            paths_by_rank.entry(*rank).or_default().insert(("root".into(), node.clone()));
+        }
+    }
 
     #[derive(Clone, Debug, Default)]
     pub struct Vcg<V, E> {
@@ -1843,7 +1873,7 @@ pub mod layout {
                 let ashr = p[aovr][aohr];
                 let bshr = p[bovr][bohr];
                 // for now, only constrain nodes on the same vertical rank
-                aovr != bovr || ashr < bshr
+                (aovr == bovr && ashr < bshr) || ashr <= bshr
             })
         }
 
@@ -2748,7 +2778,7 @@ pub mod frontend {
     use tracing::{event, Level};
     use tracing_error::InstrumentResult;
 
-    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeWidth}, error::{Error, Kind, OrErrExt}, eval::Val};
 
@@ -2914,7 +2944,9 @@ pub mod frontend {
     
             let roots = crate::graph_drawing::graph::roots(condensed)?;
     
-            let paths_by_rank = rank(condensed, &roots)?;
+            let mut paths_by_rank = rank(condensed, &roots)?;
+
+            fixup_hcg_rank(&hcg, &mut paths_by_rank);
     
             let layout_problem = calculate_locs_and_hops(condensed, &paths_by_rank, hcg)?;
 
