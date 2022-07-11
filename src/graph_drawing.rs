@@ -1151,15 +1151,15 @@ pub mod layout {
 
     #[derive(Clone, Debug, Default)]
     pub struct Hcg<V: Graphic> {
-        constraints: HashSet<HorizontalConstraint<V>>,
-        labels: HashMap<(V, V), eval::Level<V>>,
+        pub constraints: HashSet<HorizontalConstraint<V>>,
+        pub labels: HashMap<(V, V), eval::Level<V>>,
     }
 
     /// Require a to be left of b
     #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
     pub struct HorizontalConstraint<V: Graphic> {
-        a: V,
-        b: V,
+        pub a: V,
+        pub b: V,
     }
 
     impl<V: Graphic> Hcg<V> {
@@ -2040,7 +2040,7 @@ pub mod geometry {
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
     use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution};
 
-    use std::cmp::max;
+    use std::cmp::{max, max_by};
     use std::collections::{HashMap, BTreeMap, HashSet};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
@@ -2312,10 +2312,9 @@ pub mod geometry {
             let locs = &solved_locs[&ovr];
             let shr = locs[&ohr];
             let n = sol_by_loc[&(ovr, ohr)];
-            let min_width = width_by_loc.get(&(ovr, ohr))
-                .map(|nw| nw.width)
+            let node_width = width_by_loc.get(&(ovr, ohr))
                 .ok_or_else::<Error,_>(|| LayoutError::OsqpError{error: format!("missing node width: {ovr}, {ohr}")}.in_current_span().into())?;
-            let mut min_width = min_width.round() as usize;
+            let mut min_width = node_width.width.round() as usize;
 
             if let Loc::Node(vl) = loc {
                 let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
@@ -2423,14 +2422,18 @@ pub mod geometry {
             if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
                 let np = sol_by_loc[&(ovr, ohrp)];
                 let shrp = locs[&ohrp];
-                c.leqc(&mut v, r(np), l(n), sep);
-                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, "X1: l{n} >= r{np} + ε")
+                let wp = &width_by_loc[&(ovr, ohrp)];
+                let gap = max_by(sep, wp.right + node_width.left, f64::total_cmp);
+                c.leqc(&mut v, r(np), l(n), gap);
+                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, %gap, "X1: l{n} >= r{np} + ε")
             }
             if let Some(ohrn) = locs.iter().position(|(_, shrn)| *shrn == shr+1).map(OriginalHorizontalRank) {
                 let nn = sol_by_loc[&(ovr,ohrn)];
                 let shrn = locs[&(ohrn)];
-                c.leqc(&mut v, r(n), l(nn), sep);
-                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, "X2: r{n} <= l{nn} - ε")
+                let wn = &width_by_loc[&(ovr, ohrn)];
+                let gap = max_by(sep, node_width.right + wn.left, f64::total_cmp);
+                c.leqc(&mut v, r(n), l(nn), gap);
+                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, %gap, "X2: r{n} <= l{nn} - ε")
             }
         }
         for hop_row in all_hops.iter() {
@@ -2767,6 +2770,7 @@ pub mod frontend {
         let width_by_hop = &mut geometry_problem.width_by_hop;
         let hops_by_edge = &layout_problem.hops_by_edge;
         let loc_to_node = &layout_problem.loc_to_node;
+        let hcg = &layout_problem.hcg;
         let condensed = &cvcg.condensed;
         let condensed_vxmap = &cvcg.condensed_vxmap;
         
@@ -2780,10 +2784,20 @@ pub mod frontend {
                 // if !label.is_screaming_snake_case() {
                 //     label = label.to_title_case();
                 // }
+                let mut left = 0;
+                let mut right = 0;
+                for (hc, lvl) in &hcg.labels {
+                    if hc.0 == *vl {
+                        right = std::cmp::max(right, lvl.forward.as_ref().and_then(|fs| fs.iter().map(|f| f.len()).max()).unwrap_or(0));
+                    }
+                    if hc.1 == *vl {
+                        left = std::cmp::max(left, lvl.reverse.as_ref().and_then(|rs| rs.iter().map(|r| r.len()).max()).unwrap_or(0));
+                    }
+                }
                 let width = NodeWidth{
                     width: char_width * label.len() as f64,
-                    left: 0.,
-                    right: 0.,
+                    left: char_width * left as f64,
+                    right: char_width * right as f64,
                 };
                 width_by_loc.insert((*ovr, *ohr), width);
             }
@@ -2828,6 +2842,8 @@ pub mod frontend {
                 }
             }
         }
+
+        eprintln!("WIDTH_BY_LOC: {width_by_loc:#?}");
     
         Ok(())
     }

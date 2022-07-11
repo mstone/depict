@@ -66,9 +66,11 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let ts = &depiction.geometry_solution.ts;
     let sol_by_loc = &depiction.geometry_problem.sol_by_loc;
     let loc_to_node = &depiction.layout_problem.loc_to_node;
+    let node_to_loc = &depiction.layout_problem.node_to_loc;
     let vert_node_labels = &depiction.vcg.vert_node_labels;
     let vert_edge_labels = &depiction.vcg.vert_edge_labels;
     let hops_by_edge = &depiction.layout_problem.hops_by_edge;
+    let hcg = &depiction.layout_problem.hcg;
     let sol_by_hop = &depiction.geometry_problem.sol_by_hop;
     let width_by_loc = &depiction.geometry_problem.width_by_loc;
     let width_by_hop = &depiction.geometry_problem.width_by_hop;
@@ -78,6 +80,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let height_scale = 80.0;
     let vpad = 50.0;
     let line_height = 20.0;
+    let char_width = 9.0;
 
     let mut texts = vec![];
 
@@ -229,6 +232,55 @@ fn draw(data: String) -> Result<Drawing, Error> {
             arrows.push(Node::Svg{key, path, rel: ew.to_string(), label, hops: hn0, estimated_width: estimated_width0.unwrap()});
         }
     }
+    let forward_voffset = 6.;
+    let reverse_voffset = 20.;
+
+    for (m, ((vl, wl), lvl)) in hcg.labels.iter().enumerate() {
+        if let Some(forward) = &lvl.forward {
+            let key = format!("{vl}_{wl}_forward_{m}");
+            let locl = &node_to_loc[&Loc::Node(vl.clone())];
+            let locr = &node_to_loc[&Loc::Node(wl.clone())];
+            let nl = sol_by_loc[locl];
+            let nr = sol_by_loc[locr];
+            let lr = rs[nl];
+            let rl = ls[nr] - 7.;
+            let wl = width_by_loc[locl].right;
+            let wr = width_by_loc[locr].left;
+            let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] * line_height + forward_voffset;
+            let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] * line_height + forward_voffset;
+            let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
+            let label_text = forward.join("\n");
+            let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
+            let label = if !forward.is_empty() { 
+                Some(Label{text: label_text, hpos: rl, width: label_width, vpos: vposl })
+            } else {
+                None
+            };
+            arrows.push(Node::Svg{key, path, label, rel: "forward".into(), hops: vec![], estimated_width: (wl, wr) });
+        }
+        if let Some(reverse) = &lvl.reverse {
+            let key = format!("{vl}_{wl}_reverse_{m}");
+            let locl = &node_to_loc[&Loc::Node(vl.clone())];
+            let locr = &node_to_loc[&Loc::Node(wl.clone())];
+            let nl = sol_by_loc[locl];
+            let nr = sol_by_loc[locr];
+            let lr = rs[nl] + 7.;
+            let rl = ls[nr];
+            let wl = width_by_loc[locl].right;
+            let wr = width_by_loc[locr].left;
+            let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] * line_height + reverse_voffset;
+            let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] * line_height + reverse_voffset;
+            let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
+            let label_text = reverse.join("\n");
+            let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
+            let label = if !reverse.is_empty() { 
+                Some(Label{text: label_text, hpos: lr, width: label_width, vpos: vposl })
+            } else {
+                None
+            };
+            arrows.push(Node::Svg{key, path, label, rel: "reverse".into(), hops: vec![], estimated_width: (wl, wr) });
+        }
+    }
 
     let nodes = texts
         .into_iter()
@@ -268,8 +320,8 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                 }));
             },
             Node::Svg{key, path, rel, label, ..} => {
-                let marker_id = if rel == "actuates" { "arrowhead" } else { "arrowheadrev" };
-                let marker_orient = if rel == "actuates" { "auto" } else { "auto-start-reverse" };
+                let marker_id = if rel == "actuates" || rel == "forward" { "arrowhead" } else { "arrowheadrev" };
+                let marker_orient = if rel == "actuates" || rel == "forward" { "auto" } else { "auto-start-reverse" };
                 let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
                 let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
                 children.push(cx.render(rsx!{
@@ -300,13 +352,13 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                             }
                             { 
                                 match rel.as_str() {
-                                    "actuates" => {
+                                    "actuates" | "forward" => {
                                         rsx!(path {
                                             d: "{path}",
                                             marker_end: "url(#arrowhead)",
                                         })
                                     },
-                                    "senses" => {
+                                    "senses" | "reverse" => {
                                         rsx!(path {
                                             d: "{path}",
                                             "marker-start": "url(#arrowheadrev)",
@@ -324,10 +376,16 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                         }
                         {match label { 
                             Some(Label{text, hpos, width: _, vpos}) => {
-                                let translate = if rel == "actuates" { 
-                                    "translate(calc(-100% - 1.5ex))"
-                                } else { 
-                                    "translate(1.5ex)"
+                                let translate = match &rel[..] {
+                                    "actuates" | "forward" => "translate(calc(-100% - 1.5ex))",
+                                    "senses" | "reverse" => "translate(1.5ex)",
+                                    _ => "translate(0px, 0px)",
+                                };
+                                let offset = match &rel[..] {
+                                    "actuates" | "senses" => "40px",
+                                    "forward" => "-24px",
+                                    "reverse" => "4px",
+                                    _ => "0px",
                                 };
                                 // let border = match rel.as_str() { 
                                 //     // "actuates" => "border border-red-300",
@@ -338,7 +396,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                                     style: "position: absolute;",
                                     left: "{hpos}px",
                                     // width: "{width}px",
-                                    top: "calc({vpos}px + 40px)",
+                                    top: "calc({vpos}px + {offset})",
                                     div {
                                         style: "white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
                                         transform: "{translate}",
@@ -360,6 +418,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
 const PLACEHOLDER: &str = indoc!("
 person microwave food: open, start, stop / beep : heat
 person food: stir
+LEFT test person: aaaaaaaaaa / bbbbbbb
 ");
 // driver wheel car: turn / wheel angle
 // driver accel car: accelerate / pedal position
@@ -439,8 +498,8 @@ pub fn as_data_svg(drawing: Drawing) -> String {
                     .set("stroke", "black");
                 
                 match rel.as_str() {
-                    "actuates" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
-                    "senses" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
+                    "actuates" | "forward" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
+                    "senses" | "reverse" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
                     _ => {},
                 };
 
