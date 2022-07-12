@@ -787,7 +787,7 @@ pub mod eval {
                     if l.len() == 1 && matches!(l[0], Item::Text(..)){
                         let rbody = eval_seq(&r[..]);
                         if let Item::Text(name) = &l[0] {
-                            let sublabel = if let Some(rbody) = rbody {
+                            let sublabel = if let Some(ref rbody) = rbody {
                                 match &rbody[..] {
                                     [Val::Process{label, ..}, ..] => { label.as_ref().cloned() },
                                     _ => {None},
@@ -799,7 +799,19 @@ pub mod eval {
                             let process = Val::Process {
                                 name: Some(name.clone()),
                                 label,
-                                body: eval_seq(&r[..]),
+                                body: if let Some(Body::All(rb)) = &rbody {
+                                    if rb.len() == 1 {
+                                        if let Val::Process{body: b, ..} = &rb[0] {
+                                            b.clone()
+                                        } else {
+                                            rbody
+                                        }
+                                    } else { 
+                                        rbody
+                                    }
+                                } else { 
+                                    rbody 
+                                },
                                 name_to_part: None,
                                 notes: None,
                             };
