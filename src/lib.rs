@@ -377,7 +377,7 @@ pub mod parser {
         // %type #[token("-")] Dash;
         %type #[token("!")] Bang;
         %type #[regex("[\r\n;]+")] Nl;
-        %type #[regex(r#"[\p{XID_Start}$<()][\p{XID_Continue}().\->&&[^:/]]*(\\/[\p{XID_Continue}().\->&&[^:/]]*)*"#)] Text &'s str;
+        %type #[regex(r#"[\p{XID_Start}$<()_][\p{XID_Continue}().\-_>&&[^:/]]*(\\/[\p{XID_Continue}().\-_>&&[^:/]]*)*"#)] Text &'s str;
         %type start Model<'s>;
         %type model Vec<Item<'s>>;
         %type item Item<'s>;

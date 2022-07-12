@@ -433,7 +433,7 @@ pub mod index {
 pub mod eval {
     //! The main "value" type of depiction parts.
 
-    use std::{collections::BTreeMap, borrow::{Cow}};
+    use std::{collections::BTreeMap, borrow::{Cow}, vec::IntoIter, ops::Deref, slice::Iter};
 
     use crate::{parser::Item};
     
@@ -479,6 +479,80 @@ pub mod eval {
         pub reverse: Option<Vec<V>>,
     }
 
+    /// How are these parts related to the whole they make up?
+    #[derive(Clone, Debug)]
+    pub enum Body<V> {
+        /// States or modes the process could be in
+        Any(Vec<Val<V>>),
+        /// Parts or constituents making up the process
+        All(Vec<Val<V>>),
+    }
+
+    impl<V> IntoIterator for Body<V> {
+        type Item = Val<V>;
+
+        type IntoIter = IntoIter<Val<V>>;
+
+        fn into_iter(self) -> Self::IntoIter {
+            match self {
+                Body::Any(b) => b.into_iter(),
+                Body::All(b) => b.into_iter(),
+            }
+        }
+    }
+
+    impl<'a, V> IntoIterator for &'a Body<V> {
+        type Item = &'a Val<V>;
+
+        type IntoIter = Iter<'a, Val<V>>;
+
+        fn into_iter(self) -> Iter<'a, Val<V>> {
+            self.iter()
+        }
+    }
+
+    impl<V> From<Body<V>> for Vec<Val<V>> {
+        fn from(b: Body<V>) -> Self {
+            match b {
+                Body::Any(b) => b,
+                Body::All(b) => b,
+            }
+        }
+    }
+
+    impl<V> Default for Body<V> {
+        fn default() -> Self {
+            Body::All(Default::default())
+        }
+    }
+
+    impl<V> Deref for Body<V> {
+        type Target = [Val<V>];
+
+        fn deref(&self) -> &Self::Target {
+            match self {
+                Body::Any(b) => &b[..],
+                Body::All(b) => &b[..],
+            }
+        }
+    }
+
+    impl<V> Body<V> {
+        fn push(&mut self, item: Val<V>) {
+            match self {
+                Body::Any(b) => b.push(item),
+                Body::All(b) => b.push(item),
+            }
+        }
+
+        fn append(&mut self, rhs: &mut Vec<Val<V>>) {
+            match self {
+                Body::Any(b) => b.append(rhs),
+                Body::All(b) => b.append(rhs),
+            }
+        }
+    }
+
     /// What processes and labeled relationships between them
     /// are we depicting?
     #[derive(Clone, Debug)]
@@ -492,7 +566,7 @@ pub mod eval {
             /// Maybe this process has a label?
             label: Option<V>,
             /// Maybe this process has nested parts?
-            body: Option<Vec<Self>>,
+            body: Option<Body<V>>,
             /// Maybe there are nested parts accessible by name?
             name_to_part: Option<BTreeMap<V, usize>>,
             /// Maybe there are annotations?
@@ -531,25 +605,30 @@ pub mod eval {
             }
         }
 
-        pub fn set_name(self, name: V) -> Self {
+        pub fn set_name(&mut self, name: V) -> &mut Self {
             match self {
-                Val::Ref { name: _ } => Val::Ref{ 
-                    name 
-                },
-                Val::Process { name: _, label, body, name_to_part, notes } => Val::Process{
-                    name: Some(name), 
-                    label, 
-                    body,
-                    name_to_part,
-                    notes, 
-                },
-                Val::Chain { name: _, rel, path, labels } => Val::Chain {
-                    name: Some(name),
-                    rel,
-                    path,
-                    labels,
-                },
+                Val::Ref { name: n } => { *n = name; },
+                Val::Process { name: n, .. } => { *n = Some(name); },
+                Val::Chain { name: n, .. } => { *n = Some(name); },
             }
+            self
+        }
+
+        pub fn label(&self) -> Option<&V> {
+            match self {
+                Val::Ref { .. } => None, // really?
+                Val::Process { label, .. } => label.as_ref(),
+                Val::Chain { .. } => None,
+            }
+        }
+
+        pub fn set_label(&mut self, label: Option<V>) -> &mut Self {
+            match self {
+                Val::Ref { .. } => unreachable!(),
+                Val::Process { label: l, .. } => { *l = label; },
+                Val::Chain { .. } => unreachable!(),
+            }
+            self
         }
     }
 
@@ -626,19 +705,104 @@ pub mod eval {
         }
     }
 
+    fn eval_seq<'s, 't>(ls: &'t [Item<'s>]) -> Option<Body<Cow<'s, str>>> {
+        let mut body: Option<Body<_>> = None;
+
+        if ls.iter().all(|l| matches!(l, Item::Text(_) | Item::Seq(_))) {
+            body.get_or_insert_with(Default::default).push(Val::Chain{
+                name: None,
+                rel: eval_rel(&ls[..]),
+                path: eval_path(&ls[..]),
+                labels: vec![],
+            });
+            return body;
+        }
+        if ls.len() == 2 {
+            if let Item::Text(label) = &ls[0] {
+                match &ls[1] {
+                    Item::Sq(nest) | Item::Br(nest) => {
+                        if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
+                            let nest_val = if matches!(ls[1], Item::Sq(_)) { 
+                                Body::All(nest_val.into()) 
+                            } else { 
+                                Body::Any(nest_val.into()) 
+                            };
+                            body.get_or_insert_with(Default::default).push(Val::Process{
+                                name: None,
+                                label: Some(label.clone()),
+                                body: Some(nest_val),
+                                name_to_part: None,
+                                notes: None,
+                            });
+                            return body;
+                        }
+                    },
+                    _ => {},
+                }
+            }
+        }
+        for expr in ls {
+            match expr {
+                Item::Sq(nest) | Item::Br(nest) => {
+                    if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
+                        let nest_val = if matches!(expr, Item::Sq(_)) { 
+                            Body::All(nest_val.into()) 
+                        } else { 
+                            Body::Any(nest_val.into()) 
+                        };
+                        body.get_or_insert_with(Default::default).push(Val::Process{
+                            name: None,
+                            label: None,
+                            body: Some(nest_val),
+                            name_to_part: None,
+                            notes: None,
+                        });
+                    }
+                },
+                Item::Text(s) => {
+                    body.get_or_insert_with(Default::default).push(Val::Process{
+                        name: None, 
+                        label: Some(s.clone()), 
+                        body: None, 
+                        name_to_part: None, 
+                        notes: None
+                    })
+                },
+                _ => {},
+            }
+        }
+
+        body
+    }
+
     /// What depiction do the given depict-expressions denote?
     pub fn eval<'s, 't>(exprs: &'t [Item<'s>]) -> Val<Cow<'s, str>> {
         // let mut body: Option<Vec<Val<Cow<'s, str>>>> = None;
-        let mut body: Option<Vec<_>> = None;
+        let mut body: Option<Body<_>> = None;
 
         for expr in exprs {
             let _: &'t Item<'s> = expr;
             match expr {
                 Item::Colon(l, r) => {
                     if l.len() == 1 && matches!(l[0], Item::Text(..)){
-                        let process = eval(&r[..]);
-                        if let (Item::Text(name), mut process@Val::Process{..}) = (&l[0], process) {
-                            process = process.set_name(name.clone());
+                        let rbody = eval_seq(&r[..]);
+                        if let Item::Text(name) = &l[0] {
+                            let sublabel = if let Some(rbody) = rbody {
+                                match &rbody[..] {
+                                    [Val::Process{label, ..}, ..] => { label.as_ref().cloned() },
+                                    _ => {None},
+                                }
+                            } else { 
+                                None 
+                            };
+                            let label = if sublabel.is_some() { None } else { Some(name.clone()) };
+                            let process = Val::Process {
+                                name: Some(name.clone()),
+                                label,
+                                body: eval_seq(&r[..]),
+                                name_to_part: None,
+                                notes: None,
+                            };
                             body.get_or_insert_with(Default::default).push(process);
                         }
                     } else {
@@ -651,12 +815,25 @@ pub mod eval {
                     }
                 },
                 Item::Seq(ls) | Item::Comma(ls) => {
-                    body.get_or_insert_with(Default::default).push(Val::Chain{
-                        name: None,
-                        rel: eval_rel(&ls[..]),
-                        path: eval_path(&ls[..]),
-                        labels: vec![],
-                    });
+                    if let Some(seq_body) = eval_seq(ls) {
+                        body.get_or_insert_with(Default::default).append(&mut seq_body.into());
+                    }
+                }
+                Item::Sq(nest) | Item::Br(nest) => {
+                    if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
+                        let nest_val = if matches!(expr, Item::Sq(_)) { 
+                            Body::All(nest_val.into()) 
+                        } else { 
+                            Body::Any(nest_val.into()) 
+                        };
+                        body.get_or_insert_with(Default::default).push(Val::Process{
+                            name: None,
+                            label: None,
+                            body: Some(nest_val),
+                            name_to_part: None,
+                            notes: None,
+                        });
+                    }
                 }
                 Item::Text(s) => {
                     body.get_or_insert_with(Default::default).push(Val::Process{
