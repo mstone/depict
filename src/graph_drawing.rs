@@ -795,7 +795,7 @@ pub mod eval {
                             } else { 
                                 None 
                             };
-                            let label = if sublabel.is_some() { None } else { Some(name.clone()) };
+                            let label = sublabel.or_else(|| Some(name.clone()));
                             let process = Val::Process {
                                 name: Some(name.clone()),
                                 label,
