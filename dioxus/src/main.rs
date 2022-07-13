@@ -133,7 +133,8 @@ fn draw(data: String) -> Result<Drawing, Error> {
                     .and_then(|rels| rels.get(ew)))
                 .map(|v| v.join("\n"));
 
-            let hops = &hops_by_edge[&(vl.clone(), wl.clone())];
+            let hops = hops_by_edge.get(&(vl.clone(), wl.clone()));
+            let hops = if let Some(hops) = hops { hops } else { continue; };
             // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
 
             let offset = match ew { 
@@ -251,7 +252,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
             let label_text = forward.join("\n");
             let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
-            let label = if !forward.is_empty() { 
+            let label = if !forward.is_empty() {
                 Some(Label{text: label_text, hpos: rl, width: label_width, vpos: vposl })
             } else {
                 None
@@ -416,10 +417,13 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
 }
 
 const PLACEHOLDER: &str = indoc!("
-person microwave food: open, start, stop / beep : heat
-person food: stir
-LEFT test person: aaaaaaaaaa / bbbbbbb
+a [ b c ]
 ");
+
+// person microwave food: open, start, stop / beep : heat
+// person food: stir
+// LEFT test person: aaaaaaaaaa / bbbbbbb
+// ");
 // driver wheel car: turn / wheel angle
 // driver accel car: accelerate / pedal position
 // driver brakes car: brake /  pedal position
