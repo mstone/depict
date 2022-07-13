@@ -1335,7 +1335,7 @@ pub mod layout {
     use typed_index_collections::TiVec;
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
-    use crate::graph_drawing::eval::{Val, self};
+    use crate::graph_drawing::eval::{Val, self, Body};
     use crate::graph_drawing::graph::roots;
 
     #[derive(Clone, Debug, Default)]
@@ -1357,46 +1357,78 @@ pub mod layout {
         }
     }
 
-    pub fn calculate_hcg<'s, 't>(process: &'t Val<Cow<'s, str>>) -> Result<Hcg<Cow<'s, str>>, Error> {
-        let mut hcg = Hcg::default();
-        if let Val::Process{body, ..} = process {
-            for part in body.iter().flatten() {
-                if let Val::Chain{rel, path, labels, ..} = part {
-                    if *rel == Rel::Horizontal {
-                        for n in 0..path.len()-1 {
-                            if let Val::Process{label: Some(al), ..} = &path[n] {
-                                if let Val::Process{label: Some(bl), ..} = &path[n+1] {
-                                    hcg.constraints.insert(
-                                        HorizontalConstraint{
-                                            a: al.clone(), 
-                                            b: bl.clone()
-                                        }
-                                    );
-                                    if let Some(level) = labels.get(n) {
-                                        let eval::Level{forward, reverse} = level.clone();
-                                        let hlvl = hcg.labels.entry((al.clone(), bl.clone()))
-                                            .or_insert(eval::Level{forward: None, reverse: None});
-                                        // if hf.is_none() then forward else hf.map()
-                                        match (&mut hlvl.forward, forward) {
-                                            (Some(f1), Some(mut f2)) => { f1.append(&mut f2); }
-                                            (Some(_), None) => {},
-                                            (None, Some(f2)) => { hlvl.forward.replace(f2); },
-                                            _ => {},
-                                        };
-                                        match (&mut hlvl.reverse, reverse) {
-                                            (Some(r1), Some(mut r2)) => { r1.append(&mut r2); }
-                                            (Some(_), None) => {},
-                                            (None, Some(r2)) => { hlvl.reverse.replace(r2); },
-                                            _ => {},
-                                        };
-                                    }
+    fn calculate_hcg_chain<'s, 't>(
+        hcg: &'t mut Hcg<Cow<'s, str>>,
+        chain: &'t Val<Cow<'s, str>>,
+    ) -> Result<(), Error> {
+        if let Val::Chain{rel, path, labels, ..} = chain {
+            if *rel == Rel::Horizontal {
+                for n in 0..path.len()-1 {
+                    if let Val::Process{label: Some(al), ..} = &path[n] {
+                        if let Val::Process{label: Some(bl), ..} = &path[n+1] {
+                            hcg.constraints.insert(
+                                HorizontalConstraint{
+                                    a: al.clone(), 
+                                    b: bl.clone()
                                 }
+                            );
+                            if let Some(level) = labels.get(n) {
+                                let eval::Level{forward, reverse} = level.clone();
+                                let hlvl = hcg.labels.entry((al.clone(), bl.clone()))
+                                    .or_insert(eval::Level{forward: None, reverse: None});
+                                // if hf.is_none() then forward else hf.map()
+                                match (&mut hlvl.forward, forward) {
+                                    (Some(f1), Some(mut f2)) => { f1.append(&mut f2); }
+                                    (Some(_), None) => {},
+                                    (None, Some(f2)) => { hlvl.forward.replace(f2); },
+                                    _ => {},
+                                };
+                                match (&mut hlvl.reverse, reverse) {
+                                    (Some(r1), Some(mut r2)) => { r1.append(&mut r2); }
+                                    (Some(_), None) => {},
+                                    (None, Some(r2)) => { hlvl.reverse.replace(r2); },
+                                    _ => {},
+                                };
                             }
                         }
                     }
                 }
             }
         }
+        Ok(())
+    }
+
+    fn calculate_hcg_helper<'s, 't>(
+        hcg: &'t mut Hcg<Cow<'s, str>>,
+        process: &'t Val<Cow<'s, str>>,
+    ) -> Result<(), Error> {
+        match process { 
+            Val::Chain{..} => {
+                calculate_hcg_chain(hcg, process)?;
+            },
+            Val::Process{body, ..} => {
+                for part in body.iter().flatten() {
+                    match part {
+                        Val::Chain{..} => {
+                            calculate_hcg_chain(hcg, part)?;
+                        }
+                        Val::Process{body, ..} => {
+                            for part in body.iter().flatten() {
+                                calculate_hcg_helper(hcg, part)?;
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn calculate_hcg<'s, 't>(process: &'t Val<Cow<'s, str>>) -> Result<Hcg<Cow<'s, str>>, Error> {
+        let mut hcg = Hcg::default();
+        calculate_hcg_helper(&mut hcg, process)?;
         Ok(hcg)
     }
     
@@ -1533,6 +1565,27 @@ pub mod layout {
         }
     }
 
+    fn walk_body<'s, 't, 'u>(
+        queue: &'u mut Vec<(&'s Vec<Val<Cow<'t, str>>>, &'s Rel, &'s Vec<eval::Level<Cow<'t, str>>>)>,
+        vcg: &mut Vcg<Cow<'t, str>, Cow<'t, str>>,
+        body: &'s Body<Cow<'t, str>>,
+    ) {
+        for chain in body {
+            if let Val::Process{label: Some(node), body, ..} = &chain {
+                if body.is_none() {
+                    or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
+                    vcg.vert_node_labels.insert(node.clone(), node.clone().into());
+                    continue;
+                } else {
+                    let body = body.as_ref().unwrap();
+                    walk_body(queue, vcg, body);
+                }
+            }
+            let (path, rel, labels_by_level) = if let Val::Chain{path, rel, labels, ..} = &chain { (path, rel, labels) } else { continue; };
+            queue.push((path, rel, labels_by_level));
+        }
+    }
+
     pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
         let vert = Graph::<Cow<str>, Cow<str>>::new();
         let vert_vxmap = HashMap::<Cow<str>, NodeIndex>::new();
@@ -1542,13 +1595,11 @@ pub mod layout {
 
         let body = if let Val::Process{body: Some(body), ..} = process { body } else { unreachable!(); };
 
-        for chain in body {
-            if let Val::Process{label: Some(node), ..} = &chain {
-                or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
-                vcg.vert_node_labels.insert(node.clone(), node.clone().into());
-                continue;
-            }
-            let (path, rel, labels_by_level) = if let Val::Chain{path, rel, labels, ..} = &chain { (path, rel, labels) } else { continue; };
+        let mut queue = vec![];
+
+        walk_body(&mut queue, &mut vcg, body);
+
+        for (path, rel, labels_by_level) in queue {
             for node in path {
                 let node = if let eval::Val::Process{label: Some(label), ..} = node { label } else { continue; };
                 or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
