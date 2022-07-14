@@ -76,6 +76,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let width_by_hop = &depiction.geometry_problem.width_by_hop;
     let crossing_number = depiction.layout_solution.crossing_number;
     let condensed = &depiction.cvcg.condensed;
+    let containers = &depiction.vcg.containers;
 
     let height_scale = 80.0;
     let vpad = 50.0;
@@ -95,21 +96,38 @@ fn draw(data: String) -> Result<Drawing, Error> {
         let lpos = ls[n];
         let rpos = rs[n];
 
-        let vpos = height_scale * ((*ovr-1).0 as f64) + vpad + ts[*ovr] * line_height;
+        let vpos = height_scale * ((*ovr-1).0 as f64) + vpad + ts.get(*ovr).unwrap_or(&0.) * line_height;
         let width = (rpos - lpos).round();
         let hpos = lpos.round();
 
         if let Loc::Node(vl) = node {
-            let key = vl.to_string();
-            let label = vert_node_labels
-                .get(vl)
-                .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
-                .clone();
-            // if !label.is_screaming_snake_case() {
-            //     label = label.to_title_case();
-            // }
+            if !containers.contains(vl) {
+                let key = vl.to_string();
+                let label = vert_node_labels
+                    .get(vl)
+                    .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
+                    .clone();
+                // if !label.is_screaming_snake_case() {
+                //     label = label.to_title_case();
+                // }
+                let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
+                texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
+            } else {
+                let key = vl.to_string();
+                // let label = vert_node_labels
+                //     .get(vl)
+                //     .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
+                //     .clone();
+                let label = format!("{}1", vl);
+                let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
+                texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
+            }
+        }
+        if let Loc::Border(border) = node {
+            let Border{vl, ovr, ohr, pair} = border;
+            let key = format!("{}_{}_{}_{}", vl.to_string(), ovr, ohr, pair);
             let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
-            texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
+            texts.push(Node::Div{key, label: format!("{}2", vl), hpos, vpos, width, loc: n, estimated_width});
         }
     }
 

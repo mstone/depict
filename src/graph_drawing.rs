@@ -1807,7 +1807,7 @@ pub mod layout {
 
     use crate::graph_drawing::index::{OriginalHorizontalRank, VerticalRank};
 
-    /// Methods for graph vertices and edges.
+    /// Methods for graph vertices and edges.f
     pub trait Graphic: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd {}
 
     impl <T: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd> Graphic for T {}
@@ -2000,18 +2000,19 @@ pub mod layout {
                 Some(el.clone())
             });
             let subroots = roots(&subdag)?;
+            let is_container = |er: &EdgeReference<E, DefaultIx>| containers.contains(subdag.node_weight(er.source()).unwrap());
             let subpaths_by_rank = rank(&subdag, &subroots, is_container)?;
             let depth = std::cmp::max(1, subpaths_by_rank.len());
-            for vr in ovr.0..(ovr.0+depth) {
-                let vr = VerticalRank(vr);
+            for vr in 0..depth {
+                let vr = VerticalRank(ovr.0 + vr);
                 let mhr = locs_by_level.get(&vr).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
+                locs_by_level.entry(vr.clone()).or_default().push(mhr);
                 if vr > ovr {
                     ohr = locs_by_level.get(&vr).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
                     locs_by_level.entry(vr.clone()).or_default().push(ohr);
-                    loc_to_node.insert((vr, ohr), Loc::Border(Border{ vl: vl.clone(), ovr, ohr: mhr, pair: ohr }));
+                    loc_to_node.insert((vr, ohr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr: mhr, pair: ohr }));
                 }
-                locs_by_level.entry(vr.clone()).or_default().push(mhr);
-                loc_to_node.insert((vr, mhr), Loc::Border(Border{ vl: vl.clone(), ovr, ohr, pair: mhr }));
+                loc_to_node.insert((vr, mhr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr, pair: mhr }));
                 container_borders.entry(vl.clone()).or_default().push((vr, (ohr, mhr)));
             }
 
@@ -2019,7 +2020,8 @@ pub mod layout {
             eprintln!("SUBROOTS {subroots:#?}");
             eprintln!("SUBDAG {subdag:#?}");
             eprintln!("SUBPATHS {subpaths_by_rank:#?}");
-            eprintln!("VERTICAL RANK SPAN: {depth}");
+            eprintln!("DEPTH {depth}");
+            eprintln!("VERTICAL RANK SPAN: {:?}", ovr.0..(ovr.0+depth));
             eprintln!("CONTAINER BORDERS: {container_borders:#?}");
             eprintln!("LOCS_BY_LEVEL V3: {locs_by_level:#?}");
         }
@@ -2224,10 +2226,11 @@ pub mod layout {
             c as usize
         }
 
-        fn conforms<V: Graphic>(layout_problem: &LayoutProblem<V>, p: &mut [&mut [usize]]) -> bool {
-            let LayoutProblem{node_to_loc, hcg, ..} = layout_problem;
+        fn conforms<V: Graphic, E: Graphic>(vcg: &Vcg<V, E>, layout_problem: &LayoutProblem<V>, p: &mut [&mut [usize]]) -> bool {
+            let Vcg{nodes_by_container, ..} = vcg;
+            let LayoutProblem{loc_to_node, node_to_loc, hcg, container_borders, ..} = layout_problem;
 
-            hcg.iter().all(|constraint| {
+            let hcg_satisfied = hcg.iter().all(|constraint| {
                 let HorizontalConstraint{a, b} = constraint;
                 let an = if let Some(an) = node_to_loc.get(&Loc::Node(a.clone())) { an } else { return true; };
                 let bn = if let Some(bn) = node_to_loc.get(&Loc::Node(b.clone())) { bn } else { return true; };
@@ -2239,7 +2242,53 @@ pub mod layout {
                 let bshr = p[bovr][bohr];
                 // for now, only constrain nodes on the same vertical rank
                 (aovr == bovr && ashr < bshr) || ashr <= bshr
-            })
+            });
+
+            let nesting_satisfied = container_borders.iter().all(|(container, borders)| {
+                let all_contents_allowed = borders.iter().all(|border| {
+                    let (ovr, (ohr, mhr)) = border;
+                    let covr = ovr.0;
+                    let cohr1 = ohr.0;
+                    let cohr2 = mhr.0;
+                    let cshr1 = p[covr][cohr1];
+                    let cshr2 = p[covr][cohr2];
+                    let clshr = std::cmp::min(cshr1, cshr2);
+                    let crshr = std::cmp::max(cshr1, cshr2);
+                    (clshr+1..crshr).all(|mid_shr| {
+                        let mid_ohr = p[covr].iter().position(|shr| *shr == mid_shr).unwrap();
+                        let mid_loc = &loc_to_node[&(*ovr, OriginalHorizontalRank(mid_ohr))];
+                        match mid_loc {
+                            Loc::Node(ml) => {
+                                nodes_by_container[container].contains(&ml)
+                            },
+                            Loc::Hop(mvr, mvl, mwl) => {
+                                nodes_by_container[container].contains(&mvl) || nodes_by_container[container].contains(&mwl)
+                            },
+                            Loc::Border(mb) => {
+                                nodes_by_container[container].contains(&mb.vl)
+                            },
+                        }
+                    })
+                });
+                let all_contents_present = nodes_by_container[container].iter().all(|mvl| {
+                    let (ovr, ohr) = node_to_loc[&Loc::Node(mvl.clone())];
+                    borders.iter().filter(|(bovr, _)| ovr == *bovr).all(|(_, (bohr1, bohr2))| {
+                        let movr = ovr.0;
+                        let mohr = ohr.0;
+                        let mshr = p[movr][mohr];
+                        let bohr10 = bohr1.0;
+                        let bohr20 = bohr2.0;
+                        let bshr1 = p[movr][bohr10];
+                        let bshr2 = p[movr][bohr20];
+                        let blshr = std::cmp::min(bshr1, bshr2);
+                        let brshr = std::cmp::max(bshr1, bshr2);
+                        blshr < mshr && mshr < brshr
+                    })
+                });
+                all_contents_allowed && all_contents_present
+            });
+
+            hcg_satisfied && nesting_satisfied
         }
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
@@ -2292,7 +2341,7 @@ pub mod layout {
                         }
                     }
                 }
-                if cn < crossing_number && conforms(&layout_problem, p) {
+                if cn < crossing_number && conforms(vcg, &layout_problem, p) {
                     crossing_number = cn;
                     solution = Some(p.iter().map(|q| q.to_vec()).collect());
                 }
@@ -2641,6 +2690,8 @@ pub mod geometry {
                         *height_max = max(*height_max, max(0, (edge_labels as i32) - 1) as usize);
                     } 
                 }
+            } else {
+                edge_label_heights.entry(*ovr).or_default();
             }
         }
         let mut row_height_offsets = BTreeMap::<VerticalRank, f64>::new();
@@ -3182,6 +3233,8 @@ pub mod frontend {
         let hcg = &layout_problem.hcg;
         let condensed = &cvcg.condensed;
         let condensed_vxmap = &cvcg.condensed_vxmap;
+
+        eprintln!("LOC_TO_NODE WIDTHS: {loc_to_node:#?}");
         
         for (loc, node) in loc_to_node.iter() {
             let (ovr, ohr) = loc;
