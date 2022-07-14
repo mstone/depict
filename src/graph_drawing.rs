@@ -3172,6 +3172,7 @@ pub mod geometry {
         // eprintln!("R: {:.2?}\n", rv);
         // eprintln!("S: {:.2?}\n", sv);
         let ts = row_height_offsets.values().copied().collect::<TiVec<VerticalRank, _>>();
+        eprintln!("ts: {ts:?}");
 
         let mut ls = v.iter()
             .filter_map(|(sol, var)| {

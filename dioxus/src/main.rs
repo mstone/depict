@@ -148,7 +148,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             let vpos = 
                 height_scale * ((*ovr-1).0 as f64) + 
                 vpad + 
-                ts.get(*ovr).unwrap_or(&0.) * line_height + 
+                ts[*ovr-1] * line_height + 
                 nesting_depth * nesting_padding;
             let width = (rpos - lpos).round();
             let depth = container_depths[container] as f64;
@@ -158,7 +158,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 depth * height_scale 
                 // - nesting_depth * nesting_padding 
                 // - nesting_depth * nesting_bottom_padding
-                + (ts.get(*ovr + container_depths[container]).unwrap_or(&0.) - ts.get(*ovr).unwrap_or(&0.))
+                + (ts[*ovr - 1 + container_depths[container]] - ts[*ovr-1]) * line_height
                 + inner_depth * (nesting_padding + nesting_bottom_padding);
 
             let key = format!("{}_{}_{}_{}", container, ovr, ohr, pair);
