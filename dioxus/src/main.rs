@@ -34,8 +34,8 @@ pub struct Label {
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Node {
-  Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, loc: LocSol, estimated_width: f64 },
-  Svg { key: String, path: String, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_width: (f64,f64) },
+  Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: LocSol, estimated_width: f64 },
+  Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_width: (f64,f64) },
 }
 
 #[derive(Clone, Debug)]
@@ -79,12 +79,16 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let containers = &depiction.vcg.containers;
     let container_borders = &depiction.layout_problem.container_borders;
     let container_depths = &depiction.layout_problem.container_depths;
+    let nesting_depths = &depiction.vcg.nesting_depths;
+    let nesting_depth_by_container = &depiction.vcg.nesting_depth_by_container;
     let solved_locs = &depiction.layout_solution.solved_locs;
 
     let height_scale = 80.0;
     let vpad = 50.0;
     let line_height = 20.0;
     let char_width = 9.0;
+    let nesting_padding = 40.;
+    let nesting_bottom_padding = 10.;
 
     let mut texts = vec![];
 
@@ -94,18 +98,26 @@ fn draw(data: String) -> Result<Drawing, Error> {
     for (loc, node) in loc_to_node.iter() {
         let (ovr, ohr) = loc;
         if (*ovr, *ohr) == (VerticalRank(0), OriginalHorizontalRank(0)) { continue; }
-        let n = sol_by_loc[&(*ovr, *ohr)];
-
-        let lpos = ls[n];
-        let rpos = rs[n];
-
-        let vpos = height_scale * ((*ovr-1).0 as f64) + vpad + ts.get(*ovr).unwrap_or(&0.) * line_height;
-        let width = (rpos - lpos).round();
-        let hpos = lpos.round();
-        let height = line_height;
 
         if let Loc::Node(vl) = node {
             if !containers.contains(vl) {
+                let n = sol_by_loc[&(*ovr, *ohr)];
+
+                let lpos = ls[n];
+                let rpos = rs[n];
+
+                let nesting_depth = nesting_depths[vl] as f64;
+                let z_index = nesting_depths[vl];
+
+                let vpos = 
+                    height_scale * ((*ovr-1).0 as f64) + 
+                    vpad + 
+                    ts.get(*ovr).unwrap_or(&0.) * line_height + 
+                    nesting_depth * nesting_padding;
+                let width = (rpos - lpos).round();
+                let hpos = lpos.round();
+                let height = line_height + 6.;
+                
                 let key = vl.to_string();
                 let label = vert_node_labels
                     .get(vl)
@@ -115,7 +127,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 //     label = label.to_title_case();
                 // }
                 let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
-                texts.push(Node::Div{key, label, hpos, vpos, width, height, loc: n, estimated_width});
+                texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: n, estimated_width});
             } 
         }
     }
@@ -131,11 +143,23 @@ fn draw(data: String) -> Result<Drawing, Error> {
             let rn = sol_by_loc[&(*ovr, *rohr)];
             let lpos = ls[ln];
             let rpos = rs[rn];
-            let vpos = height_scale * ((*ovr-1).0 as f64) + vpad + ts.get(*ovr).unwrap_or(&0.) * line_height;
+            let nesting_depth = nesting_depths[container] as f64;
+            let z_index = nesting_depths[container];
+            let vpos = 
+                height_scale * ((*ovr-1).0 as f64) + 
+                vpad + 
+                ts.get(*ovr).unwrap_or(&0.) * line_height + 
+                nesting_depth * nesting_padding;
             let width = (rpos - lpos).round();
             let depth = container_depths[container] as f64;
+            let inner_depth = nesting_depth_by_container[container] as f64;
             let hpos = lpos.round();
-            let height = depth * height_scale;
+            let height = 
+                depth * height_scale 
+                // - nesting_depth * nesting_padding 
+                // - nesting_depth * nesting_bottom_padding
+                + (ts.get(*ovr + container_depths[container]).unwrap_or(&0.) - ts.get(*ovr).unwrap_or(&0.))
+                + inner_depth * (nesting_padding + nesting_bottom_padding);
 
             let key = format!("{}_{}_{}_{}", container, ovr, ohr, pair);
             let mut label = vert_node_labels
@@ -145,7 +169,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             if label == "_" { label = String::new(); };
             
             let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
-            texts.push(Node::Div{key, label, hpos, vpos, width, height, loc: ln, estimated_width});
+            texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: ln, estimated_width});
         }
     }
 
@@ -181,6 +205,8 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 _ => 0.0,
             };
 
+            let z_index = std::cmp::max(nesting_depths[vl], nesting_depths[wl]) + 1;
+
             let mut path = vec![];
             let mut label_hpos = None;
             let mut label_width = None;
@@ -189,6 +215,9 @@ fn draw(data: String) -> Result<Drawing, Error> {
             // let mut rng = rand::thread_rng();
             let mut hn0 = vec![];
             let mut estimated_width0 = None;
+
+            let ndv = nesting_depths[vl] as f64;
+            let ndw = nesting_depths[wl] as f64;
 
             for (n, hop) in hops.iter().enumerate() {
                 let (lvl, (mhr, nhr)) = hop;
@@ -199,8 +228,8 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 let sposd = ss[hnd];
                 let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
                 let hposd = (sposd + offset).round();
-                let vpos = ((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height;
-                let mut vpos2 = (lvl.0 as f64) * height_scale + vpad + ts[(*lvl+1)] * line_height;
+                let vpos = ((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height + ndv * nesting_padding;
+                let mut vpos2 = (lvl.0 as f64) * height_scale + vpad + ts[(*lvl+1)] * line_height + ndw * nesting_padding;
 
                 if n == 0 {
                     hn0.push(hn);
@@ -230,7 +259,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
                             // ls[n]
                             hposd
                         },
-                        _ => hposd
+                        _ => hposd + 9.
                     });
                     label_width = Some(match ew {
                         x if x == "senses" => {
@@ -243,7 +272,10 @@ fn draw(data: String) -> Result<Drawing, Error> {
                         },
                         _ => rs[n] - ls[n]
                     });
-                    label_vpos = Some(((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height);
+                    label_vpos = Some(match ew {
+                        x if x == "fake" => vpos + 40.,
+                        _ => vpos,
+                    });
                 }
 
                 if n < hops.len() - 1 {
@@ -266,13 +298,18 @@ fn draw(data: String) -> Result<Drawing, Error> {
             if let (Some(label_text), Some(label_hpos), Some(label_width), Some(label_vpos)) = (label_text, label_hpos, label_width, label_vpos) {
                 label = Some(Label{text: label_text, hpos: label_hpos, width: label_width, vpos: label_vpos})
             }
-            arrows.push(Node::Svg{key, path, rel: ew.to_string(), label, hops: hn0, estimated_width: estimated_width0.unwrap()});
+            arrows.push(Node::Svg{key, path, z_index, rel: ew.to_string(), label, hops: hn0, estimated_width: estimated_width0.unwrap()});
         }
     }
     let forward_voffset = 6.;
     let reverse_voffset = 20.;
 
     for (m, ((vl, wl), lvl)) in hcg.labels.iter().enumerate() {
+
+        let z_index = std::cmp::max(nesting_depths[vl], nesting_depths[wl]) + 1;
+        let ndv = nesting_depths[vl] as f64;
+        let ndw = nesting_depths[vl] as f64;
+
         if let Some(forward) = &lvl.forward {
             let key = format!("{vl}_{wl}_forward_{m}");
             let locl = &node_to_loc[&Loc::Node(vl.clone())];
@@ -283,8 +320,8 @@ fn draw(data: String) -> Result<Drawing, Error> {
             let rl = ls[nr] - 7.;
             let wl = width_by_loc[locl].right;
             let wr = width_by_loc[locr].left;
-            let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] * line_height + forward_voffset;
-            let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] * line_height + forward_voffset;
+            let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] * line_height + forward_voffset + ndv * nesting_padding;
+            let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] * line_height + forward_voffset + ndw * nesting_padding;
             let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
             let label_text = forward.join("\n");
             let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
@@ -293,7 +330,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
             } else {
                 None
             };
-            arrows.push(Node::Svg{key, path, label, rel: "forward".into(), hops: vec![], estimated_width: (wl, wr) });
+            arrows.push(Node::Svg{key, path, z_index, label, rel: "forward".into(), hops: vec![], estimated_width: (wl, wr) });
         }
         if let Some(reverse) = &lvl.reverse {
             let key = format!("{vl}_{wl}_reverse_{m}");
@@ -305,8 +342,8 @@ fn draw(data: String) -> Result<Drawing, Error> {
             let rl = ls[nr];
             let wl = width_by_loc[locl].right;
             let wr = width_by_loc[locr].left;
-            let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] * line_height + reverse_voffset;
-            let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] * line_height + reverse_voffset;
+            let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] * line_height + reverse_voffset + ndv * nesting_padding;
+            let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] * line_height + reverse_voffset + ndw * nesting_padding;
             let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
             let label_text = reverse.join("\n");
             let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
@@ -315,14 +352,19 @@ fn draw(data: String) -> Result<Drawing, Error> {
             } else {
                 None
             };
-            arrows.push(Node::Svg{key, path, label, rel: "reverse".into(), hops: vec![], estimated_width: (wl, wr) });
+            arrows.push(Node::Svg{key, path, z_index, label, rel: "reverse".into(), hops: vec![], estimated_width: (wl, wr) });
         }
     }
 
-    let nodes = texts
+    let mut nodes = texts
         .into_iter()
         .chain(arrows.into_iter())
         .collect::<Vec<_>>();
+    
+    nodes.sort_by_key(|node| match node {
+        Node::Div{z_index, ..} => *z_index,
+        Node::Svg{z_index, ..} => *z_index,
+    });
 
     event!(Level::TRACE, %root_width, ?nodes, "NODES");
     // println!("NODES: {nodes:#?}");
@@ -342,7 +384,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
     nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
     for node in nodes {
         match node {
-            Node::Div{key, label, hpos, vpos, width, height, ..} => {
+            Node::Div{key, label, hpos, vpos, width, height, z_index, ..} => {
                 children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
@@ -351,13 +393,14 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                         left: "{hpos}px",
                         width: "{width}px",
                         height: "{height}px",
+                        z_index: "{z_index}",
                         span {
                             "{label}"
                         }
                     }
                 }));
             },
-            Node::Svg{key, path, rel, label, ..} => {
+            Node::Svg{key, path, z_index, rel, label, ..} => {
                 let marker_id = if rel == "actuates" || rel == "forward" { "arrowhead" } else { "arrowheadrev" };
                 let marker_orient = if rel == "actuates" || rel == "forward" { "auto" } else { "auto-start-reverse" };
                 let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
@@ -366,6 +409,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                     div {
                         key: "{key}",
                         style: "position: absolute;",
+                        z_index: "{z_index}",
                         svg {
                             fill: "none",
                             stroke: "{stroke_color}",

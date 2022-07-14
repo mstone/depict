@@ -1483,6 +1483,12 @@ pub mod layout {
 
         /// nodes_by_container maps container-nodes to their contents, transitively.
         pub nodes_by_container: HashMap<V, HashSet<V>>,
+
+        /// nesting_depths records how deeply nested each item is.
+        pub nesting_depths: HashMap<V, usize>,
+
+        /// nesting_depth_by_container records how many levels of nesting each container contains
+        pub nesting_depth_by_container: HashMap<V, usize>,
     }
 
     pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V) -> NodeIndex where V: Eq + Hash + Clone {
@@ -1582,7 +1588,8 @@ pub mod layout {
         body: &'s Body<Cow<'t, str>>,
         parent: &'s Option<Cow<'t, str>>,
         mut parents: Vec<Cow<'t, str>>,
-    ) -> Vec<Cow<'t, str>> {
+        mut max_depth: usize,
+    ) -> (Vec<Cow<'t, str>>, usize) {
         if let Some(parent) = parent {
             parents.push(parent.clone());
         }
@@ -1594,6 +1601,7 @@ pub mod layout {
                     for p in parents.iter() {
                         vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
                     }
+                    vcg.nesting_depths.insert(node.clone(), parents.len());
                 },
                 Val::Process{label, body: Some(body), ..} => {
                     if let (Some(parent), Some(label)) = (parent.as_ref(), label.as_ref()) {
@@ -1601,11 +1609,14 @@ pub mod layout {
                     }
                     // BUG: need to debruijn-number unlabeled containers
                     if let Some(node) = label.as_ref() {
+                        vcg.nesting_depths.insert(node.clone(), parents.len());
                         for p in parents.iter() {
                             vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
                         }
                     }
-                    parents = walk_body(queue, vcg, body, label, parents);
+                    let (new_parents, new_max_depth) = walk_body(queue, vcg, body, label, parents, 0);
+                    parents = new_parents;
+                    max_depth = std::cmp::max(max_depth, new_max_depth);
                 },
                 Val::Chain{path, rel, labels, ..} => {
                     queue.push((path, rel, labels, parent));
@@ -1614,16 +1625,19 @@ pub mod layout {
                             for p in parents.iter() {
                                 vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
                             }
+                            vcg.nesting_depths.insert(node.clone(), parents.len());
                         }
                     }
                 },
                 _ => {},
             }
         }
-        if parent.is_some() {
+        if let Some(parent) = parent {
+            vcg.nesting_depth_by_container.insert(parent.clone(), max_depth);
+            max_depth += 1;
             parents.pop();
         }
-        parents
+        (parents, max_depth)
     }
 
     pub fn add_contains_edge<'s, 't>(vcg: &'t mut Vcg<Cow<'s, str>, Cow<'s, str>>, parent: &'t Cow<'s, str>, node: &'t Cow<'s, str>) {
@@ -1648,13 +1662,17 @@ pub mod layout {
         let vert_edge_labels = HashMap::new();
         let containers = HashSet::new();
         let nodes_by_container = HashMap::new();
-        let mut vcg = Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels, containers, nodes_by_container};
+        let nesting_depth_by_container = HashMap::new();
+        let nesting_depths: HashMap<Cow<str>, usize> = HashMap::new();
+        let mut vcg = Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels, containers, nodes_by_container, nesting_depths, nesting_depth_by_container};
 
         let body = if let Val::Process{body: Some(body), ..} = process { body } else { unreachable!(); };
 
         let mut queue = vec![];
 
-        walk_body(&mut queue, &mut vcg, body, &None, vec![]);
+        walk_body(&mut queue, &mut vcg, body, &None, vec![], 0);
+
+        eprintln!("NESTING DEPTH BY CONTAINER: {:#?}", &vcg.nesting_depth_by_container);
 
         eprintln!("QUEUE: {queue:#?}");
 
