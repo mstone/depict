@@ -112,22 +112,34 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 // }
                 let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
                 texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
-            } else {
-                let key = vl.to_string();
-                // let label = vert_node_labels
-                //     .get(vl)
-                //     .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
-                //     .clone();
-                let label = format!("{}1", vl);
-                let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
-                texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
-            }
+            } 
         }
-        if let Loc::Border(border) = node {
+    }
+
+    for container in containers {
+        for border in container_borders[container] {
             let Border{vl, ovr, ohr, pair} = border;
-            let key = format!("{}_{}_{}_{}", vl.to_string(), ovr, ohr, pair);
+            let shr1 = solved_locs[ovr][ohr];
+            let shr2 = solved_locs[ovr][pair];
+            let lohr = if shr1 < shr2 { ohr } else { pair };
+            let rohr = if shr1 < shr2 { pair } else { ohr };
+            let ln = sol_by_loc[&(ovr, lohr)];
+            let rn = sol_by_loc[&(ovr, rohr)];
+            let lpos = ls[ln];
+            let rpos = rs[rn];
+            let vpos = height_scale * ((*ovr-1).0 as f64) + vpad + ts.get(*ovr).unwrap_or(&0.) * line_height;
+            let width = (rpos - lpos).round();
+            let hpos = lpos.round();
+
+            let key = vl.to_string();
+            let mut label = vert_node_labels
+                .get(vl)
+                .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
+                .clone();
+            if label == "_" { label = String::new(); };
+            
             let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
-            texts.push(Node::Div{key, label: format!("{}2", vl), hpos, vpos, width, loc: n, estimated_width});
+            texts.push(Node::Div{key, label, hpos, vpos, width, loc: ln, estimated_width});
         }
     }
 
