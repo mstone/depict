@@ -34,7 +34,7 @@ pub struct Label {
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Node {
-  Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, loc: LocSol, estimated_width: f64 },
+  Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, loc: LocSol, estimated_width: f64 },
   Svg { key: String, path: String, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_width: (f64,f64) },
 }
 
@@ -77,6 +77,9 @@ fn draw(data: String) -> Result<Drawing, Error> {
     let crossing_number = depiction.layout_solution.crossing_number;
     let condensed = &depiction.cvcg.condensed;
     let containers = &depiction.vcg.containers;
+    let container_borders = &depiction.layout_problem.container_borders;
+    let container_depths = &depiction.layout_problem.container_depths;
+    let solved_locs = &depiction.layout_solution.solved_locs;
 
     let height_scale = 80.0;
     let vpad = 50.0;
@@ -99,6 +102,7 @@ fn draw(data: String) -> Result<Drawing, Error> {
         let vpos = height_scale * ((*ovr-1).0 as f64) + vpad + ts.get(*ovr).unwrap_or(&0.) * line_height;
         let width = (rpos - lpos).round();
         let hpos = lpos.round();
+        let height = line_height;
 
         if let Loc::Node(vl) = node {
             if !containers.contains(vl) {
@@ -111,35 +115,37 @@ fn draw(data: String) -> Result<Drawing, Error> {
                 //     label = label.to_title_case();
                 // }
                 let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
-                texts.push(Node::Div{key, label, hpos, vpos, width, loc: n, estimated_width});
+                texts.push(Node::Div{key, label, hpos, vpos, width, height, loc: n, estimated_width});
             } 
         }
     }
 
     for container in containers {
-        for border in container_borders[container] {
-            let Border{vl, ovr, ohr, pair} = border;
+        for border in container_borders[container].first().iter() {
+            let (ovr, (ohr, pair)) = border;
             let shr1 = solved_locs[ovr][ohr];
             let shr2 = solved_locs[ovr][pair];
             let lohr = if shr1 < shr2 { ohr } else { pair };
             let rohr = if shr1 < shr2 { pair } else { ohr };
-            let ln = sol_by_loc[&(ovr, lohr)];
-            let rn = sol_by_loc[&(ovr, rohr)];
+            let ln = sol_by_loc[&(*ovr, *lohr)];
+            let rn = sol_by_loc[&(*ovr, *rohr)];
             let lpos = ls[ln];
             let rpos = rs[rn];
             let vpos = height_scale * ((*ovr-1).0 as f64) + vpad + ts.get(*ovr).unwrap_or(&0.) * line_height;
             let width = (rpos - lpos).round();
+            let depth = container_depths[container] as f64;
             let hpos = lpos.round();
+            let height = depth * height_scale;
 
-            let key = vl.to_string();
+            let key = format!("{}_{}_{}_{}", container, ovr, ohr, pair);
             let mut label = vert_node_labels
-                .get(vl)
-                .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
+                .get(container)
+                .or_err(Kind::KeyNotFoundError{key: container.to_string()})?
                 .clone();
             if label == "_" { label = String::new(); };
             
             let estimated_width = width_by_loc[&(*ovr, *ohr)].width;
-            texts.push(Node::Div{key, label, hpos, vpos, width, loc: ln, estimated_width});
+            texts.push(Node::Div{key, label, hpos, vpos, width, height, loc: ln, estimated_width});
         }
     }
 
@@ -336,7 +342,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
     nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
     for node in nodes {
         match node {
-            Node::Div{key, label, hpos, vpos, width, ..} => {
+            Node::Div{key, label, hpos, vpos, width, height, ..} => {
                 children.push(cx.render(rsx! {
                     div {
                         key: "{key}",
@@ -344,6 +350,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                         top: "{vpos}px",
                         left: "{hpos}px",
                         width: "{width}px",
+                        height: "{height}px",
                         span {
                             "{label}"
                         }

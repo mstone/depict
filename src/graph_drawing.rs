@@ -1871,6 +1871,7 @@ pub mod layout {
         pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>>,
         pub node_to_loc: HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>,
         pub container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>>,
+        pub container_depths: HashMap<V, usize>,
         pub hcg: Hcg<V>,  
     }
 
@@ -1988,6 +1989,7 @@ pub mod layout {
         event!(Level::DEBUG, ?hops_by_level, "HOPS_BY_LEVEL");
 
         let mut container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>> = HashMap::new();
+        let mut container_depths: HashMap<V, usize> = HashMap::new();
         for vl in containers.iter() {
             let (ovr, mut ohr) = node_to_loc[&Loc::Node(vl.clone())];
             let subdag = dag.filter_map(|_nx, nl| {
@@ -2003,6 +2005,7 @@ pub mod layout {
             let is_container = |er: &EdgeReference<E, DefaultIx>| containers.contains(subdag.node_weight(er.source()).unwrap());
             let subpaths_by_rank = rank(&subdag, &subroots, is_container)?;
             let depth = std::cmp::max(1, subpaths_by_rank.len());
+            container_depths.insert(vl.clone(), depth);
             for vr in 0..depth {
                 let vr = VerticalRank(ovr.0 + vr);
                 let mhr = locs_by_level.get(&vr).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
@@ -2038,7 +2041,7 @@ pub mod layout {
         let g_hops_dot = Dot::new(&g_hops);
         event!(Level::DEBUG, ?g_hops_dot, "HOPS GRAPH");
 
-        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders, hcg})
+        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders, container_depths, hcg})
     }
 
     pub mod sol {
