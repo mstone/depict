@@ -1327,7 +1327,7 @@ pub mod layout {
     use petgraph::EdgeDirection::Outgoing;
     use petgraph::algo::floyd_warshall;
     use petgraph::dot::Dot;
-    use petgraph::graph::{Graph, NodeIndex};
+    use petgraph::graph::{Graph, NodeIndex, EdgeReference, DefaultIx};
     use petgraph::visit::{EdgeRef, IntoNodeReferences};
     use sorted_vec::SortedVec;
     use tracing::{event, Level};
@@ -1477,6 +1477,12 @@ pub mod layout {
     
         /// vert_edge_labels maps (v,w,rel) node weight pairs to display edge labels.
         pub vert_edge_labels: HashMap<V, HashMap<V, HashMap<V, Vec<E>>>>,
+
+        /// containers identifies which nodes are parents of contained nodes
+        pub containers: HashSet<V>,
+
+        /// nodes_by_container maps container-nodes to their contents, transitively.
+        pub nodes_by_container: HashMap<V, HashSet<V>>,
     }
 
     pub fn or_insert<V, E>(g: &mut Graph<V, E>, h: &mut HashMap<V, NodeIndex>, v: V) -> NodeIndex where V: Eq + Hash + Clone {
@@ -1575,25 +1581,49 @@ pub mod layout {
         vcg: &mut Vcg<Cow<'t, str>, Cow<'t, str>>,
         body: &'s Body<Cow<'t, str>>,
         parent: &'s Option<Cow<'t, str>>,
-    ) {
+        mut parents: Vec<Cow<'t, str>>,
+    ) -> Vec<Cow<'t, str>> {
+        if let Some(parent) = parent {
+            parents.push(parent.clone());
+        }
         for chain in body {
             match chain {
-                Val::Process{label: Some(node), body, ..} if body.is_none() => {
+                Val::Process{label: Some(node), body: None, ..} => {
                     or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
                     vcg.vert_node_labels.insert(node.clone(), node.clone().into());
+                    for p in parents.iter() {
+                        vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
+                    }
                 },
                 Val::Process{label, body: Some(body), ..} => {
                     if let (Some(parent), Some(label)) = (parent.as_ref(), label.as_ref()) {
                         add_contains_edge(vcg, parent, label);
                     }
-                    walk_body(queue, vcg, body, label);
+                    // BUG: need to debruijn-number unlabeled containers
+                    if let Some(node) = label.as_ref() {
+                        for p in parents.iter() {
+                            vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
+                        }
+                    }
+                    parents = walk_body(queue, vcg, body, label, parents);
                 },
                 Val::Chain{path, rel, labels, ..} => {
                     queue.push((path, rel, labels, parent));
+                    for val in path {
+                        if let Val::Process{label: Some(node), ..} = val {
+                            for p in parents.iter() {
+                                vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
+                            }
+                        }
+                    }
                 },
                 _ => {},
             }
         }
+        if parent.is_some() {
+            parents.pop();
+        }
+        parents
     }
 
     pub fn add_contains_edge<'s, 't>(vcg: &'t mut Vcg<Cow<'s, str>, Cow<'s, str>>, parent: &'t Cow<'s, str>, node: &'t Cow<'s, str>) {
@@ -1607,6 +1637,8 @@ pub mod layout {
 
         let rels = vcg.vert_edge_labels.entry(parent.clone()).or_default().entry(node.clone()).or_default();
         rels.entry("contains".into()).or_default();
+
+        vcg.containers.insert(parent.clone());
     }
 
     pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
@@ -1614,13 +1646,15 @@ pub mod layout {
         let vert_vxmap = HashMap::<Cow<str>, NodeIndex>::new();
         let vert_node_labels = HashMap::new();
         let vert_edge_labels = HashMap::new();
-        let mut vcg = Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels};
+        let containers = HashSet::new();
+        let nodes_by_container = HashMap::new();
+        let mut vcg = Vcg{vert, vert_vxmap, vert_node_labels, vert_edge_labels, containers, nodes_by_container};
 
         let body = if let Val::Process{body: Some(body), ..} = process { body } else { unreachable!(); };
 
         let mut queue = vec![];
 
-        walk_body(&mut queue, &mut vcg, body, &None);
+        walk_body(&mut queue, &mut vcg, body, &None, vec![]);
 
         eprintln!("QUEUE: {queue:#?}");
 
@@ -1721,25 +1755,12 @@ pub mod layout {
         Ok(Cvcg{condensed, condensed_vxmap})
     }
 
-    pub trait Contains {
-        fn contains(&self, s: &str) -> bool;
-    }
-
-    impl<V: Graphic, E: Graphic + std::cmp::PartialEq<str>> Contains for SortedVec<(V, V, E)> {
-        fn contains(&self, s: &str) -> bool {
-            self.iter().any(|(_, _, e)| e == s)
-        }
-    }
-
     /// Rank a `dag`, starting from `roots`, by finding longest paths
     /// from the roots to each node, e.g., using Floyd-Warshall with
     /// negative weights.
-    pub fn rank<'s, V: Clone + Debug + Ord, E: Contains>(dag: &'s Graph<V, E>, roots: &'s SortedVec<V>) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
+    pub fn rank<'s, V: Clone + Debug + Ord, E>(dag: &'s Graph<V, E>, roots: &'s SortedVec<V>, is_container: impl Fn(&EdgeReference<E>) -> bool) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
         let paths_fw = floyd_warshall(&dag, |ex| {
-            match ex.weight() {
-                w if w.contains("contains") => 0,
-                _ => -1,
-            }
+            if is_container(&ex) { 0 } else { -1 }
         })
             .map_err(|cycle| 
                 Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
@@ -1829,6 +1850,12 @@ pub mod layout {
     }
 
     #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub enum Node {
+        Point(OriginalHorizontalRank),
+        Interval(OriginalHorizontalRank, OriginalHorizontalRank),
+    }
+
+    #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     pub struct Border<V: Graphic> {
         pub vl: V,
         pub ovr: VerticalRank,
@@ -1843,6 +1870,7 @@ pub mod layout {
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
         pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>>,
         pub node_to_loc: HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>,
+        pub container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>>,
         pub hcg: Hcg<V>,  
     }
 
@@ -1859,22 +1887,29 @@ pub mod layout {
         model: &'s Val<V>,
         dag: &'s Graph<V, E>, 
         paths_by_rank: &'s RankedPaths<V>,
+        vcg: &Vcg<V, V>,
         hcg: Hcg<V>,
     ) -> Result<LayoutProblem<V>, Error>
             where 
         V: Display + Graphic, 
-        E: Graphic + Contains
+        E: Graphic
     {
+        let Vcg{containers, nodes_by_container, ..} = vcg;
+
         // Rank vertices by the length of the longest path reaching them.
         let mut vx_rank = HashMap::new();
         let mut hx_rank = HashMap::new();
         for (rank, paths) in paths_by_rank.iter() {
-            for (n, (_vx, wx)) in paths.iter().enumerate() {
+            for (n, (_vx, wx)) in paths.iter().enumerate() 
+            {
                 let n = OriginalHorizontalRank(n);
                 vx_rank.insert(wx.clone(), *rank);
                 hx_rank.insert(wx.clone(), n);
             }
         }
+
+        eprintln!("PATHS_BY_RANK 0: {paths_by_rank:#?}");
+        eprintln!("VX_RANK {vx_rank:#?}");
 
         let mut loc_to_node = HashMap::new();
         let mut node_to_loc = HashMap::new();
@@ -1894,11 +1929,11 @@ pub mod layout {
         }
 
         event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V1");
-
+        let is_container = |er: &EdgeReference<E, DefaultIx>| containers.contains(dag.node_weight(er.source()).unwrap());
         let sorted_condensed_edges = SortedVec::from_unsorted(
             dag
                 .edge_references()
-                .filter(|er| !er.weight().contains("contains"))
+                .filter(|x| !is_container(x))
                 .map(|er| {
                     let (vx, wx) = (er.source(), er.target());
                     let vl = dag.node_weight(vx).or_err(Kind::IndexingError{})?;
@@ -1952,6 +1987,43 @@ pub mod layout {
 
         event!(Level::DEBUG, ?hops_by_level, "HOPS_BY_LEVEL");
 
+        let mut container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>> = HashMap::new();
+        for vl in containers.iter() {
+            let (ovr, mut ohr) = node_to_loc[&Loc::Node(vl.clone())];
+            let subdag = dag.filter_map(|_nx, nl| {
+                if nodes_by_container[vl].contains(nl) {
+                    Some(nl)
+                } else { 
+                    None
+                }
+            }, |_ex, el|{
+                Some(el.clone())
+            });
+            let subroots = roots(&subdag)?;
+            let subpaths_by_rank = rank(&subdag, &subroots, is_container)?;
+            let depth = std::cmp::max(1, subpaths_by_rank.len());
+            for vr in ovr.0..(ovr.0+depth) {
+                let vr = VerticalRank(vr);
+                let mhr = locs_by_level.get(&vr).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
+                if vr > ovr {
+                    ohr = locs_by_level.get(&vr).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
+                    locs_by_level.entry(vr.clone()).or_default().push(ohr);
+                    loc_to_node.insert((vr, ohr), Loc::Border(Border{ vl: vl.clone(), ovr, ohr: mhr, pair: ohr }));
+                }
+                locs_by_level.entry(vr.clone()).or_default().push(mhr);
+                loc_to_node.insert((vr, mhr), Loc::Border(Border{ vl: vl.clone(), ovr, ohr, pair: mhr }));
+                container_borders.entry(vl.clone()).or_default().push((vr, (ohr, mhr)));
+            }
+
+            eprintln!("CONTAINER {vl}");
+            eprintln!("SUBROOTS {subroots:#?}");
+            eprintln!("SUBDAG {subdag:#?}");
+            eprintln!("SUBPATHS {subpaths_by_rank:#?}");
+            eprintln!("VERTICAL RANK SPAN: {depth}");
+            eprintln!("CONTAINER BORDERS: {container_borders:#?}");
+            eprintln!("LOCS_BY_LEVEL V3: {locs_by_level:#?}");
+        }
+
         let mut g_hops = Graph::<(VerticalRank, OriginalHorizontalRank), (VerticalRank, V, V)>::new();
         let mut g_hops_vx = HashMap::new();
         for (_rank, hops) in hops_by_level.iter() {
@@ -1964,7 +2036,7 @@ pub mod layout {
         let g_hops_dot = Dot::new(&g_hops);
         event!(Level::DEBUG, ?g_hops_dot, "HOPS GRAPH");
 
-        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, hcg})
+        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders, hcg})
     }
 
     pub mod sol {
@@ -2062,13 +2134,11 @@ pub mod layout {
         use std::collections::{BTreeMap};
         use std::fmt::{Display};
 
-        use tracing::{event, Level};
-
         use crate::graph_drawing::error::{Error, LayoutError, OrErrExt};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
         use crate::graph_drawing::layout::{Hop};
         
-        use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Loc};
+        use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Loc, Vcg};
 
         #[inline]
         pub fn is_odd(x: usize) -> bool {
@@ -2175,31 +2245,28 @@ pub mod layout {
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
         #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
+            vcg: &Vcg<V, V>,
             layout_problem: &LayoutProblem<V>
         ) -> Result<LayoutSolution, Error> where
             V: Display + Graphic
         {
-            let LayoutProblem{locs_by_level, hops_by_level, ..} = layout_problem;
+            let Vcg{containers, ..} = vcg;
+            let LayoutProblem{locs_by_level, hops_by_level, container_borders, ..} = layout_problem;
+
+            eprintln!("HOPS_BY_LEVEL: {hops_by_level:#?}");
             
             if hops_by_level.is_empty() {
                 return Ok(LayoutSolution{crossing_number: 0, solved_locs: BTreeMap::new()});
             }
-            if hops_by_level.iter().all(|(_lvl, hops)| hops.iter().count() <= 1) {
-                let mut solved_locs = BTreeMap::new();
-                for (lvl, locs) in locs_by_level.iter() {
-                    for (n, _) in locs.iter().enumerate() {
-                        solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
-                    }
-                }
-                return Ok(LayoutSolution{crossing_number: 0, solved_locs})
-            }
-            #[allow(clippy::unwrap_used)]
-            let max_level = *hops_by_level.keys().max().unwrap();
-            #[allow(clippy::unwrap_used)]
-            let max_width = hops_by_level.values().map(|paths| paths.len()).max().unwrap();
-
-            event!(Level::DEBUG, %max_level, %max_width, "max_level, max_width");
-
+            // if hops_by_level.iter().all(|(_lvl, hops)| hops.iter().count() <= 1) {
+            //     let mut solved_locs = BTreeMap::new();
+            //     for (lvl, locs) in locs_by_level.iter() {
+            //         for (n, _) in locs.iter().enumerate() {
+            //             solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
+            //         }
+            //     }
+            //     return Ok(LayoutSolution{crossing_number: 0, solved_locs})
+            // }
 
             let mut shrs = vec![];
             for (_rank, locs) in locs_by_level.iter() {
@@ -2207,6 +2274,7 @@ pub mod layout {
                 let shrs_lvl = (0..n).collect::<Vec<_>>();
                 shrs.push(shrs_lvl);
             }
+
             let mut shrs_ref = vec![];
             for shrs_lvl in shrs.iter_mut() {
                 shrs_ref.push(&mut shrs_lvl[..]);
@@ -2352,11 +2420,10 @@ pub mod geometry {
 
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::visit::EdgeRef;
-    use tracing::{event, Level, instrument, span};
+    use tracing::{event, Level, instrument};
     use tracing_error::InstrumentError;
     use typed_index_collections::TiVec;
 
-    use crate::graph_drawing::error::{Kind, OrErrExt};
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples};
 
     use super::error::{LayoutError};
@@ -2451,6 +2518,14 @@ pub mod geometry {
         let LayoutProblem{loc_to_node, hops_by_level, hops_by_edge, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = layout_solution;
 
+        eprintln!("SOLVED_LOCS {solved_locs:#?}");
+        let sorted_loc_to_node = loc_to_node.iter()
+            .map(|(loc, node)| 
+                ((loc.0, loc.1), node)
+            )
+            .collect::<BTreeMap<(VerticalRank, OriginalHorizontalRank), _>>();
+        eprintln!("LOC_TO_NODE CALC: {sorted_loc_to_node:#?}");
+
         let all_locs = solved_locs
             .iter()
             .flat_map(|(ovr, nodes)| nodes
@@ -2459,6 +2534,8 @@ pub mod geometry {
             .enumerate()
             .map(|(n, (ovr, ohr, shr, loc))| LocRow{ovr, ohr, shr, loc: loc.clone(), n: LocSol(n)})
             .collect::<Vec<_>>();
+
+        eprintln!("ALL_LOCS {all_locs:#?}");
     
         let mut sol_by_loc = HashMap::new();
         let mut sol_by_loc2 = HashMap::<LocIx, Vec<_>>::new();
@@ -2586,6 +2663,8 @@ pub mod geometry {
         let l = AnySol::L;
         let r = AnySol::R;
         let s = AnySol::S;
+
+        eprintln!("SOL_BY_LOC: {sol_by_loc:#?}");
         
         let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
         // q[r[root_n]] = 1  <-- obj += r[root_n]
@@ -3072,12 +3151,13 @@ pub mod frontend {
     use std::{fmt::Display, borrow::Cow};
 
     use logos::Logos;
+    use petgraph::{graph::EdgeReference, visit::EdgeRef};
     use self_cell::self_cell;
     use sorted_vec::SortedVec;
     use tracing::{event, Level};
     use tracing_error::InstrumentResult;
 
-    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeWidth}, error::{Error, Kind, OrErrExt}, eval::Val};
 
@@ -3129,6 +3209,11 @@ pub mod frontend {
                     right: char_width * right as f64,
                 };
                 width_by_loc.insert((*ovr, *ohr), width);
+            }
+            if let Loc::Border(border) = node {
+                let Border{vl, ovr, ohr, pair, ..} = border;
+                width_by_loc.insert((*ovr, *ohr), NodeWidth{width: 10., left: 0., right: 0.});
+                width_by_loc.insert((*ovr, *pair), NodeWidth{width: 10., left: 0., right: 0.});
             }
         }
     
@@ -3236,22 +3321,24 @@ pub mod frontend {
             event!(Level::TRACE, ?val, "HCG");
             eprintln!("HCG {hcg:#?}");
     
-            let Vcg{vert, ..} = &vcg;
+            let Vcg{vert, containers, nodes_by_container, ..} = &vcg;
     
             let cvcg = condense(vert)?;
             let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
     
             let roots = crate::graph_drawing::graph::roots(condensed)?;
+
+            let is_container = |er: &EdgeReference<_>| containers.contains(condensed.node_weight(er.source()).unwrap());
     
-            let mut paths_by_rank = rank(condensed, &roots)?;
+            let mut paths_by_rank = rank(condensed, &roots, is_container)?;
 
             fixup_hcg_rank(&hcg, &mut paths_by_rank);
     
-            let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, hcg)?;
+            let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, hcg)?;
 
             // ... adjust problem for horizontal edges
     
-            let layout_solution = minimize_edge_crossing(&layout_problem)?;
+            let layout_solution = minimize_edge_crossing(&vcg, &layout_problem)?;
     
             let mut geometry_problem = calculate_sols(&layout_problem, &layout_solution);
     
