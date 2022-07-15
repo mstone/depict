@@ -2871,8 +2871,6 @@ pub mod geometry {
         eprintln!("SOL_BY_LOC: {sol_by_loc:#?}");
         
         let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
-        // q[r[root_n]] = 1  <-- obj += r[root_n]
-        // obj = add(obj, r.get(root_n)?)?;
         q.push(v.get(r(root_n)));
 
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -2901,15 +2899,6 @@ pub mod geometry {
                 let dst_sol = sol_by_hop[&(lvl1, *nhr, vl.clone(), wl.clone())];
                 level_to_object.entry(*lvl).or_default().entry(shr).or_default().insert(Loc2::Hop{vl, wl, loc: (*lvl, *mhr), shr, sol: src_sol, pshr: None});
                 level_to_object.entry(lvl1).or_default().entry(shrd).or_default().insert(Loc2::Hop{vl, wl, loc: (lvl1, *nhr), shr: shrd, sol: dst_sol, pshr: Some(shr)});
-                // let vxh = format!("{vl} {wl} {lvl},{shr}"));
-                // let wxh = format!("{vl} {wl} {lvl1},{shrd}");
-                // layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
-                // if n == 0 {
-                //     layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
-                // }
-                // if n == hops.len()-1 {
-                //     layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
-                // }
             }
         }
         event!(Level::TRACE, ?level_to_object, "LEVEL TO OBJECT");
@@ -2942,9 +2931,6 @@ pub mod geometry {
             event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
             c.leqc(&mut v, l(n), r(n), min_width as f64);
 
-            // WIDTH
-            // BUG! WHY DOES THIS MATTER???????
-            // obj = add(obj, sub(r.get(n)?, l.get(n)?)?)?;
             if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
                 let np = sol_by_loc[&(ovr, ohrp)];
                 let shrp = locs[&ohrp];
@@ -3000,10 +2986,6 @@ pub mod geometry {
 
             event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
             if let Some(Loc2::Node{sol: nd, ..}) = node {
-                // Sn >= Lnd + sep + aw
-                // Lnd + sep + aw <= Sn
-                // Lnd <= Sn-sep-aw
-                eprintln!("XXXX POS HOP CONSTR L{nd} <= S{n} <= R{nd}");
                 c.geqc(&mut v, s(n), l(*nd), sep + action_width);
                 c.leqc(&mut v, s(n), r(*nd), sep + percept_width);
 
@@ -3029,18 +3011,10 @@ pub mod geometry {
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
                                 c.leqc(&mut v, s(*onl), s(*on), sep + owidth_l.1 + owidth.0);
-                                // C.sym(&mut V, &mut Pd, S(*on), S(*onl));
-                            }
-                            else {
-                                // C.sym(&mut V, &mut Pd, L(*nd), S(*on));
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
                                 c.leqc(&mut v, s(*on), s(*onr), sep + owidth_r.0 + owidth.1);
-                                // C.sym(&mut V, &mut Pd, S(*onr), S(*on));
-                            }
-                            else {
-                                // C.sym(&mut V, &mut Pd, R(*nd), S(*on));
                             }
                         }
                     }
@@ -3057,7 +3031,7 @@ pub mod geometry {
                             let (hvr, (_hmhr, hnhr)) = hops_by_edge[&((*hvl).clone(), (*hwl).clone())].iter().next().unwrap();
                             solved_locs[&(*hvr+1)][hnhr]
                         } else {
-                            unreachable!();
+                            unreachable!()
                         }
                     });
                     
@@ -3069,17 +3043,10 @@ pub mod geometry {
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
                                 let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
                                 c.leqc(&mut v, s(*onl), s(*on), sep + owidth_l.1 + owidth.0);
-                                // C.sym(&mut V, &mut Pd, S(*on), S(*onl));
-                            } else {
-                                // C.sym(&mut V, &mut Pd, L(*nd), S(*on));
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
                                 let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
                                 c.leqc(&mut v, s(*on), s(*onr), sep + owidth_r.0 + owidth.1);
-                                // C.sym(&mut V, &mut Pd, S(*onr), S(*on));
-                            }
-                            else {
-                                // C.sym(&mut V, &mut Pd, R(*nd), S(*on));
                             }
                         }
                     }
@@ -3132,13 +3099,6 @@ pub mod geometry {
 
 
         let n = v.len();
-        // eprintln!("VARS: {V:#?}");
-        // let nnz = Pd.iter().filter(|v| v.coeff != 0.).count();
-        // P, q, A, l, u.
-        // conceptually, we walk over the columns, then the rows, 
-        // recording each non-zero value + its row index, and 
-        // as we finish each column, the current data length.
-        // let P = osqp::CscMatrix::from(&[[4., 1.], [1., 0.]]).into_upper_tri();
 
         let sparse_pd = &pd[..];
         eprintln!("sparsePd: {sparse_pd:?}");
@@ -3168,15 +3128,6 @@ pub mod geometry {
         eprintln!("L2[{}]: {l2:?}", l2.len());
         eprintln!("U2[{}]: {u2:?}", u2.len());
         eprintln!("A2[{},{}]: {a2:?}", a2.nrows, a2.ncols);
-        
-        // let q = &[1., 1.];
-        // let A = &[
-        //     [1., 1.],
-        //     [1., 0.],
-        //     [0., 1.],
-        // ];
-        // let l = &[0., 0., 0.];
-        // let u = &[1., 1., 1.];
 
         let settings = osqp::Settings::default()
             .adaptive_rho(false)
@@ -3190,7 +3141,6 @@ pub mod geometry {
             // .polish(true)
             .verbose(true);
 
-        // let mut prob = Problem::new(P, q, A, l, u, &settings)
         let mut prob = osqp::Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], &settings)
             .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
         
