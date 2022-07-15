@@ -274,8 +274,8 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                 }));
             },
             Node::Svg{key, path, z_index, rel, label, ..} => {
-                let marker_id = if rel == "actuates" { "arrowhead" } else { "arrowheadrev" };
-                let marker_orient = if rel == "actuates" { "auto" } else { "auto-start-reverse" };
+                let marker_id = if rel == "actuates" || rel == "forward" { "arrowhead" } else { "arrowheadrev" };
+                let marker_orient = if rel == "actuates" || rel == "forward" { "auto" } else { "auto-start-reverse" };
                 let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
                 let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
                 children.push(cx.render(rsx!{
@@ -307,13 +307,13 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                             }
                             { 
                                 match rel.as_str() {
-                                    "actuates" => {
+                                    "actuates" | "forward" => {
                                         rsx!(path {
                                             d: "{path}",
                                             marker_end: "url(#arrowhead)",
                                         })
                                     },
-                                    "senses" => {
+                                    "senses" | "reverse" => {
                                         rsx!(path {
                                             d: "{path}",
                                             "marker-start": "url(#arrowheadrev)",
@@ -331,10 +331,16 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                         }
                         {match label { 
                             Some(Label{text, hpos, width: _, vpos}) => {
-                                let translate = if rel == "actuates" { 
-                                    "translate(calc(-100% - 1.5ex))"
-                                } else { 
-                                    "translate(1.5ex)"
+                                let translate = match &rel[..] {
+                                    "actuates" | "forward" => "translate(calc(-100% - 1.5ex))",
+                                    "senses" | "reverse" => "translate(1.5ex)",
+                                    _ => "translate(0px, 0px)",
+                                };
+                                let offset = match &rel[..] {
+                                    "actuates" | "senses" => "40px",
+                                    "forward" => "-24px",
+                                    "reverse" => "4px",
+                                    _ => "0px",
                                 };
                                 // let border = match rel.as_str() { 
                                 //     // "actuates" => "border border-red-300",
@@ -345,7 +351,7 @@ pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
                                     style: "position: absolute;",
                                     left: "{hpos}px",
                                     // width: "{width}px",
-                                    top: "calc({vpos}px + 40px)",
+                                    top: "calc({vpos}px + {offset})",
                                     div {
                                         style: "white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
                                         transform: "{translate}",
