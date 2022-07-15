@@ -433,7 +433,7 @@ pub mod index {
 pub mod eval {
     //! The main "value" type of depiction parts.
 
-    use std::{collections::BTreeMap, borrow::{Cow}, vec::IntoIter, ops::Deref, slice::Iter};
+    use std::{collections::{BTreeMap, HashMap}, borrow::{Cow}, vec::IntoIter, ops::Deref, slice::Iter};
 
     use crate::{parser::Item};
     
@@ -773,6 +773,109 @@ pub mod eval {
         }
 
         body
+    }
+
+    pub fn index<'s, 't, 'u>(
+        val: &'t Val<Cow<'s, str>>,
+        current_scope: &'u mut Vec<Cow<'s, str>>,
+        scopes: &'u mut HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
+    ) {
+        match val {
+            Val::Ref { name } => {},
+            Val::Process { name, body, .. } => {
+                if let Some(name) = name {
+                    current_scope.push(name.clone());
+                    scopes.insert(current_scope.clone(), &val);
+                }
+                if let Some(body) = body {
+                    for val in body.iter() {
+                        index(val, current_scope, scopes);
+                    }
+                }
+                if let Some(name) = name {
+                    current_scope.pop();
+                }
+            },
+            Val::Chain { name, rel, path, labels } => {
+                if let Some(name) = name {
+                    current_scope.push(name.clone());
+                    scopes.insert(current_scope.clone(), &val);
+                    for val in path.iter() {
+                        index(val, current_scope, scopes);
+                    }
+                    current_scope.pop();
+                }
+            },
+        }
+    }
+
+    pub fn resolve<'s, 't, 'u>(
+        val: &'t mut Val<Cow<'s, str>>,
+        current_path: &'u mut Vec<Cow<'s, str>>,
+        scopes: &'u HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
+    ) {
+        eprintln!("RESOLVE {current_path:?}");
+        let mut resolution = None;
+        match val {
+            Val::Ref { name } => {
+                todo!()
+            },
+            Val::Process { name, body, label, .. } => {
+                if let Some(name) = name {
+                    current_path.push(name.clone());
+                }
+                if name.is_none() && body.is_none() {
+                    if let Some(label) = label {
+                        eprintln!("RESOLVE {current_path:?} found reference: {label}");
+                        let label = label.to_string();
+                        let mut base_path = current_path.clone();
+                        let path = label.split(".").map(|s| s.to_string()).map(Cow::Owned).collect::<Vec<Cow<'s, str>>>();
+                        while !base_path.is_empty() {
+                            let mut test_path = base_path.clone();
+                            test_path.append(&mut path.clone());
+                            eprintln!("RESOLVE test path: {test_path:?}");
+                            if let Some(val) = scopes.get(&test_path).copied() {
+                                resolution = Some(val.clone());
+                                break
+                            }
+                            base_path.pop();
+                        }
+                        if resolution.is_none() {
+                            if let Some(val) = scopes.get(&path).copied() {
+                                resolution = Some(val.clone())
+                            }
+                        }
+                    }
+                }
+                if let Some(body) = body {
+                    let bs = match body {
+                        Body::Any(bs) => bs,
+                        Body::All(bs) => bs,
+                    };
+                    for val in bs.iter_mut() {
+                        resolve(val, current_path, scopes);
+                    }
+                }
+                if let Some(name) = name {
+                    current_path.pop();
+                }
+            },
+            Val::Chain { name, rel, path, labels } => {
+                if let Some(name) = name {
+                    current_path.push(name.clone());
+                }
+                for val in path.iter_mut() {
+                    resolve(val, current_path, scopes);
+                }
+                if let Some(name) = name {
+                    current_path.pop();
+                }
+            },
+        }
+        eprintln!("RESOLVE resolution: {resolution:?}");
+        if let Some(resolution) = resolution {
+            *val = resolution;   
+        }
     }
 
     /// What depiction do the given depict-expressions denote?
@@ -3217,7 +3320,7 @@ pub mod geometry {
 }
 
 pub mod frontend {
-    use std::{fmt::Display, borrow::Cow};
+    use std::{fmt::Display, borrow::Cow, collections::HashMap};
 
     use logos::Logos;
     use petgraph::{graph::EdgeReference, visit::EdgeRef};
@@ -3226,7 +3329,7 @@ pub mod frontend {
     use tracing::{event, Level};
     use tracing_error::InstrumentResult;
 
-    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::eval, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeWidth}, error::{Error, Kind, OrErrExt}, eval::Val};
 
@@ -3381,10 +3484,18 @@ pub mod frontend {
             event!(Level::TRACE, ?items, "PARSE");
             eprintln!("PARSE {items:#?}");
     
-            let val = eval(&items[..]);
+            let mut val = eval(&items[..]);
 
             event!(Level::TRACE, ?val, "EVAL");
             eprintln!("EVAL {val:#?}");
+
+            let mut scopes = HashMap::new();
+            let val2 = val.clone();
+            index(&val2, &mut vec![], &mut scopes);
+            resolve(&mut val, &mut vec![], &scopes);
+
+            eprintln!("SCOPES: {scopes:#?}");
+            eprintln!("RESOLVE: {val:#?}");
     
             let vcg = calculate_vcg(&val)?;
             let hcg = calculate_hcg(&val)?;
