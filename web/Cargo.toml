@@ -10,7 +10,7 @@ repository = "https://github.com/mstone/depict"
 
 [dependencies]
 console_error_panic_hook = "0.1"
-depict = { path = "..", version = "0.2", default-features = false, features = [ "client", "osqp-rust" ] }
+depict = { path = "..", version = "0.2", default-features = false, features = [ "client", "dioxus", "osqp-rust" ] }
 dioxus = { version = "0.2", features = ["fermi", "web"] }
 futures = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
@@ -23,7 +23,6 @@ petgraph = { version = "0.6", features = ["serde-1"] }
 printf-compat = "0.1"
 serde = "1"
 serde_json = "1"
-svg = "0.10"
 tracing = "0.1"
 wasm-bindgen = { version = "0.2", features = [ "serde-serialize" ] }
 wasm-logger = "0.2.0"

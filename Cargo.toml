@@ -20,8 +20,8 @@ client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 proptest = "1"
 
 [dependencies]
-self_cell = "0.10.2"
 derive_more = "0.99"
+dioxus = { version = "0.2", optional = true }
 enum-kinds = "0.5.1"
 include_dir = "0.7"
 itertools = "0.10"
@@ -29,7 +29,9 @@ logos = "0.12"
 miette = { version = "4", features = [ "fancy" ] }
 petgraph = "0.6"
 pomelo = { version = "0.1" }
+self_cell = "0.10.2"
 sorted-vec = "0.7"
+svg = "0.10"
 thiserror = "1.0"
 tracing = "0.1"
 tracing-error = { version = "0.2", features = [ "traced-error" ] }

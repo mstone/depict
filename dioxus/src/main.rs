@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::io::{self, BufWriter};
+use std::io::{self};
 use std::panic::catch_unwind;
 
 use depict::graph_drawing::error::{Error, OrErrExt, Kind};
 use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
 use depict::graph_drawing::frontend::dom::{draw, Drawing, Label, Node};
+use depict::graph_drawing::frontend::dioxus::{render, as_data_svg};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
 
@@ -23,127 +24,6 @@ use indoc::indoc;
 use tracing::{instrument, event, Level};
 use tracing_error::{ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
-    let viewbox_width = drawing.viewbox_width;
-    let mut nodes = drawing.nodes;
-    let viewbox_height = 768;
-    let mut children = vec![];
-    nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    for node in nodes {
-        match node {
-            Node::Div{key, label, hpos, vpos, width, height, z_index, ..} => {
-                children.push(cx.render(rsx! {
-                    div {
-                        key: "{key}",
-                        style: "position: absolute; padding-top: 3px; padding-bottom: 3px; box-sizing: border-box; border: 1px solid black; text-align: center; z-index: 10; background-color: #fff;", // bg-opacity-50
-                        top: "{vpos}px",
-                        left: "{hpos}px",
-                        width: "{width}px",
-                        height: "{height}px",
-                        z_index: "{z_index}",
-                        span {
-                            "{label}"
-                        }
-                    }
-                }));
-            },
-            Node::Svg{key, path, z_index, rel, label, ..} => {
-                let marker_id = if rel == "actuates" || rel == "forward" { "arrowhead" } else { "arrowheadrev" };
-                let marker_orient = if rel == "actuates" || rel == "forward" { "auto" } else { "auto-start-reverse" };
-                let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
-                let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
-                children.push(cx.render(rsx!{
-                    div {
-                        key: "{key}",
-                        style: "position: absolute;",
-                        z_index: "{z_index}",
-                        svg {
-                            fill: "none",
-                            stroke: "{stroke_color}",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            stroke_width: "1",
-                            view_box: "0 0 {viewbox_width} {viewbox_height}",
-                            width: "{viewbox_width}px",
-                            height: "{viewbox_height}px",
-                            marker {
-                                id: "{marker_id}",
-                                markerWidth: "7",
-                                markerHeight: "10",
-                                refX: "0",
-                                refY: "5",
-                                orient: "{marker_orient}",
-                                view_box: "0 0 10 10",
-                                path {
-                                    d: "M 0 0 L 10 5 L 0 10 z",
-                                    fill: "#000",
-                                }
-                            }
-                            { 
-                                match rel.as_str() {
-                                    "actuates" | "forward" => {
-                                        rsx!(path {
-                                            d: "{path}",
-                                            marker_end: "url(#arrowhead)",
-                                        })
-                                    },
-                                    "senses" | "reverse" => {
-                                        rsx!(path {
-                                            d: "{path}",
-                                            "marker-start": "url(#arrowheadrev)",
-                                            // marker_start: "url(#arrowhead)", // BUG: should work, but doesn't.
-                                        })
-                                    },
-                                    _ => {
-                                        rsx!(path {
-                                            d: "{path}",
-                                            stroke_dasharray: "{stroke_dasharray}",
-                                        })
-                                    }
-                                }
-                            }
-                        }
-                        {match label { 
-                            Some(Label{text, hpos, width: _, vpos}) => {
-                                let translate = match &rel[..] {
-                                    "actuates" | "forward" => "translate(calc(-100% - 1.5ex))",
-                                    "senses" | "reverse" => "translate(1.5ex)",
-                                    _ => "translate(0px, 0px)",
-                                };
-                                let offset = match &rel[..] {
-                                    "actuates" | "senses" => "40px",
-                                    "forward" => "-24px",
-                                    "reverse" => "4px",
-                                    _ => "0px",
-                                };
-                                // let border = match rel.as_str() { 
-                                //     // "actuates" => "border border-red-300",
-                                //     // "senses" => "border border-blue-300",
-                                //     _ => "",
-                                // };
-                                rsx!(div {
-                                    style: "position: absolute;",
-                                    left: "{hpos}px",
-                                    // width: "{width}px",
-                                    top: "calc({vpos}px + {offset})",
-                                    div {
-                                        style: "white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
-                                        transform: "{translate}",
-                                        "{text}"
-                                    }
-                                })
-                            },
-                            _ => rsx!(div {}),
-                        }}
-                    }
-                }));
-            },
-        }
-    }
-    // dbg!(cx.render(rsx!(children)))
-    cx.render(rsx!(children))
-}
 
 const PLACEHOLDER: &str = indoc!("
 a [ b c ]
@@ -164,115 +44,6 @@ pub struct AppProps {
     model_sender: Option<UnboundedSender<String>>,
     #[allow(clippy::type_complexity)]
     drawing_receiver: Cell<Option<UnboundedReceiver<Drawing>>>,
-}
-
-use svg::{Document, node::{element::{Group, Marker, Path, Rectangle, Text as TextElt}, Node as _, Text}};
-
-pub fn as_data_svg(drawing: Drawing) -> String {
-    let viewbox_width = drawing.viewbox_width;
-    let mut nodes = drawing.nodes;
-    let viewbox_height = 768f64;
-
-    let mut svg = Document::new()
-        .set("viewBox", (0f64, 0f64, viewbox_width, viewbox_height))
-        .set("text-depiction", "optimizeLegibility");
-
-    svg.append(Marker::new()
-        .set("id", "arrowhead")
-        .set("markerWidth", 7)
-        .set("markerHeight", 10)
-        .set("refX", 0)
-        .set("refY", 5)
-        .set("orient", "auto")
-        .set("viewBox", "0 0 10 10")
-        .add(Path::new()
-            .set("d", "M 0 0 L 10 5 L 0 10 z")
-            .set("fill", "black")
-        )
-    );
-    svg.append(Marker::new()
-        .set("id", "arrowheadrev")
-        .set("markerWidth", 7)
-        .set("markerHeight", 10)
-        .set("refX", 0)
-        .set("refY", 5)
-        .set("orient", "auto-start-reverse")
-        .set("viewBox", "0 0 10 10")
-        .add(Path::new()
-            .set("d", "M 0 0 L 10 5 L 0 10 z")
-            .set("fill", "black")
-        )
-    );
-
-    nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    for node in nodes {
-        match node {
-            Node::Div{label, hpos, vpos, width, ..} => {
-                    svg.append(Group::new()
-                        .set("transform", format!("translate({hpos}, {vpos})"))
-                        .add(Rectangle::new()
-                            .set("width", width)
-                            .set("height", 26f64)
-                            .set("stroke", "black")
-                            .set("fill", "none"))
-                        .add(TextElt::new()
-                            .set("text-anchor", "middle")
-                            .set("transform", format!("translate({}, {})", width / 2., 16.))
-                            .set("font-family", "serif") // 'Times New Roman', Times, serif
-                            .set("fill", "black")
-                            .set("stroke", "none")
-                            .add(Text::new(label)))
-                    );
-            },
-            Node::Svg{path, rel, label, ..} => {
-                
-                let mut path_elt = Path::new()
-                    .set("d", path)
-                    .set("stroke", "black");
-                
-                match rel.as_str() {
-                    "actuates" | "forward" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
-                    "senses" | "reverse" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
-                    _ => {},
-                };
-
-                if let Some(Label{text, hpos, width: _, vpos, ..}) = label {
-                    for (lineno, line) in text.lines().enumerate() {
-                        let translate = if rel == "actuates" { 
-                            format!("translate({}, {})", hpos-12., vpos + 56. + (20. * lineno as f64))
-                        } else { 
-                            format!("translate({}, {})", hpos+12., vpos + 56. + (20. * lineno as f64))
-                        };
-                        let anchor = if rel == "actuates" {
-                            "end"
-                        } else {
-                            "start"
-                        };
-                        svg.append(Group::new()
-                            .add(TextElt::new()
-                                .set("font-family", "ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace")
-                                .set("fill", "black")
-                                .set("stroke", "none")
-                                .set("transform", translate)
-                                .set("text-anchor", anchor)
-                                .add(Text::new(line))
-                            )
-                        );
-                    }
-                }
-
-                svg.append(Group::new()
-                    .add(path_elt)
-                );
-            },
-        }
-    }
-
-    let mut buf = BufWriter::new(Vec::new());
-    svg::write(&mut buf, &svg).unwrap();
-    let bytes = buf.into_inner().unwrap();
-    let svg_str = String::from_utf8(bytes).unwrap();
-    format!("data:image/svg+xml;utf8,{svg_str}")
 }
 
 pub fn app(cx: Scope<AppProps>) -> Element {

@@ -625,6 +625,7 @@ name = "depict"
 version = "0.2.0"
 dependencies = [
  "derive_more",
+ "dioxus",
  "enum-kinds",
  "include_dir",
  "itertools 0.10.3",
@@ -639,6 +640,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sorted-vec",
+ "svg",
  "thiserror",
  "tracing",
  "tracing-error",
@@ -658,7 +660,6 @@ dependencies = [
  "petgraph",
  "serde",
  "serde_json",
- "svg",
  "tao",
  "tokio",
  "tracing",
@@ -746,7 +747,6 @@ dependencies = [
  "printf-compat",
  "serde",
  "serde_json",
- "svg",
  "tracing",
  "wasm-bindgen",
  "wasm-logger",
