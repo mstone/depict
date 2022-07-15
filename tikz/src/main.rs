@@ -78,6 +78,9 @@ pub fn render<'s>(data: String) -> Result<(), Error> {
                     \node[](aux_{}_{}) at ({}, {}) {{}};"#), 
                     hpos, vpos, ovr, ohr, hpos, vpos);
             },
+            Loc::Border(border) => {
+                todo!()
+            }
         }
     }
 
@@ -208,10 +211,12 @@ pub fn render<'s>(data: String) -> Result<(), Error> {
         let loc_color = match loc {
             Loc::Node(_) => "red",
             Loc::Hop(_, _, _) => "blue",
+            Loc::Border(_) => "pink"
         };
         let loc_str = match loc {
             Loc::Node(vl) => vl.to_string(),
             Loc::Hop(_, vl, wl) => format!("{}{}", vl.chars().next().unwrap(), wl.chars().next().unwrap()),
+            Loc::Border(border) => todo!(),
         };
 
         println!(indoc!(r#"%\draw [{}] ({}, {}) circle (1pt);"#), loc_color, hpos, vpos);
