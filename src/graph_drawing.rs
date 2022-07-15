@@ -2715,6 +2715,108 @@ pub mod geometry {
         pub ts: TiVec<VerticalRank, f64>,
     }
 
+    fn update_min_width<V: Graphic + Display, E: Graphic>(
+        vcg: &Vcg<V, E>, 
+        layout_problem: &LayoutProblem<V>,
+        layout_solution: &LayoutSolution,
+        geometry_problem: &GeometryProblem<V>, 
+        min_width: &mut usize, 
+        vl: &V
+    ) -> Result<(), Error> {
+        let Vcg{vert: dag, vert_vxmap: dag_map, ..} = vcg;
+        let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
+        let LayoutSolution{solved_locs, ..} = layout_solution;
+        let GeometryProblem{width_by_hop, ..} = geometry_problem;
+        let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
+        let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
+        let mut v_dsts = v_ers
+            .iter()
+            .map(|er| { 
+                dag
+                    .node_weight(er.target())
+                    .map(Clone::clone)
+                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.in_current_span().into())
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut w_srcs = w_ers
+            .iter()
+            .map(|er| { 
+                dag
+                    .node_weight(er.source())
+                    .map(Clone::clone)
+                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.in_current_span().into())
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+
+        v_dsts.sort(); v_dsts.dedup();
+        v_dsts.sort_by_key(|dst| {
+            let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
+            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+            (shr, -(svr.0 as i32))
+        });
+        let v_outs = v_dsts
+            .iter()
+            .map(|dst| { (vl.clone(), dst.clone()) })
+            .collect::<Vec<_>>();
+
+        w_srcs.sort(); w_srcs.dedup();
+        w_srcs.sort_by_key(|src| {
+            let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
+            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+            (shr, -(svr.0 as i32))
+        });
+        let w_ins = w_srcs
+            .iter()
+            .map(|src| { (src.clone(), vl.clone()) })
+            .collect::<Vec<_>>();
+
+        let v_out_first_hops = v_outs
+            .iter()
+            .filter_map(|(vl, wl)| {
+                hops_by_edge.get(&(vl.clone(), wl.clone()))
+                    .and_then(|hops| hops.iter().next())
+                    .and_then(|(lvl, (mhr, _nhr))| 
+                        Some((*lvl, *mhr, vl.clone(), wl.clone())))
+            })
+            .collect::<Vec<_>>();
+        let w_in_last_hops = w_ins
+            .iter()
+            .filter_map(|(vl, wl)| {
+                hops_by_edge.get(&(vl.clone(), wl.clone()))
+                    .and_then(|hops| hops.iter().rev().next())
+                    .and_then(|(lvl, (mhr, _nhr))|
+                        Some((*lvl, *mhr, vl.clone(), wl.clone()))
+                    )
+            })
+            .collect::<Vec<_>>();
+        
+        let out_width: f64 = v_out_first_hops
+            .iter()
+            .map(|idx| {
+                let widths = width_by_hop[idx];
+                widths.0 + widths.1
+            })
+            .sum();
+        let in_width: f64 = w_in_last_hops
+            .iter()
+            .map(|idx| {
+                let widths = width_by_hop[idx];
+                widths.0 + widths.1
+            })
+            .sum();
+
+        let in_width = in_width.round() as usize;
+        let out_width = out_width.round() as usize;
+        let orig_width = *min_width;
+        // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
+        *min_width = max(orig_width, max(in_width, out_width));
+        event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
+        // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
+        Ok(())
+    }
+
     #[instrument]
     pub fn position_sols<'s, V, E>(
         vcg: &'s Vcg<V, E>,
@@ -2725,7 +2827,7 @@ pub mod geometry {
         V: Display + Graphic,
         E: Graphic
     {
-        let Vcg{vert: dag, vert_vxmap: dag_map, vert_node_labels: _, vert_edge_labels: dag_edge_labels, ..} = vcg;
+        let Vcg{vert_node_labels: _, vert_edge_labels: dag_edge_labels, ..} = vcg;
         let LayoutProblem{hops_by_edge, node_to_loc, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = &layout_solution;
         let GeometryProblem{all_locs, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop, ..} = geometry_problem;
@@ -2824,93 +2926,7 @@ pub mod geometry {
             let mut min_width = node_width.width.round() as usize;
 
             if let Loc::Node(vl) = loc {
-                let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
-                let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
-                let mut v_dsts = v_ers
-                    .iter()
-                    .map(|er| { 
-                        dag
-                            .node_weight(er.target())
-                            .map(Clone::clone)
-                            .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.in_current_span().into())
-                    })
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()?;
-                let mut w_srcs = w_ers
-                    .iter()
-                    .map(|er| { 
-                        dag
-                            .node_weight(er.source())
-                            .map(Clone::clone)
-                            .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.in_current_span().into())
-                    })
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                v_dsts.sort(); v_dsts.dedup();
-                v_dsts.sort_by_key(|dst| {
-                    let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
-                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                    (shr, -(svr.0 as i32))
-                });
-                let v_outs = v_dsts
-                    .iter()
-                    .map(|dst| { (vl.clone(), dst.clone()) })
-                    .collect::<Vec<_>>();
-
-                w_srcs.sort(); w_srcs.dedup();
-                w_srcs.sort_by_key(|src| {
-                    let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
-                    let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-                    (shr, -(svr.0 as i32))
-                });
-                let w_ins = w_srcs
-                    .iter()
-                    .map(|src| { (src.clone(), vl.clone()) })
-                    .collect::<Vec<_>>();
-
-                let v_out_first_hops = v_outs
-                    .iter()
-                    .filter_map(|(vl, wl)| {
-                        hops_by_edge.get(&(vl.clone(), wl.clone()))
-                            .and_then(|hops| hops.iter().next())
-                            .and_then(|(lvl, (mhr, _nhr))| 
-                                Some((*lvl, *mhr, vl.clone(), wl.clone())))
-                    })
-                    .collect::<Vec<_>>();
-                let w_in_last_hops = w_ins
-                    .iter()
-                    .filter_map(|(vl, wl)| {
-                        hops_by_edge.get(&(vl.clone(), wl.clone()))
-                            .and_then(|hops| hops.iter().rev().next())
-                            .and_then(|(lvl, (mhr, _nhr))|
-                                Some((*lvl, *mhr, vl.clone(), wl.clone()))
-                            )
-                    })
-                    .collect::<Vec<_>>();
-                
-                let out_width: f64 = v_out_first_hops
-                    .iter()
-                    .map(|idx| {
-                        let widths = width_by_hop[idx];
-                        widths.0 + widths.1
-                    })
-                    .sum();
-                let in_width: f64 = w_in_last_hops
-                    .iter()
-                    .map(|idx| {
-                        let widths = width_by_hop[idx];
-                        widths.0 + widths.1
-                    })
-                    .sum();
-
-                let in_width = in_width.round() as usize;
-                let out_width = out_width.round() as usize;
-                let orig_width = min_width;
-                // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
-                min_width = max(orig_width, max(in_width, out_width));
-                event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
-                // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
+                update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut min_width, vl)?;
             }
 
             if let Loc::Hop(_lvl, vl, wl) = loc {
