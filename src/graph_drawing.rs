@@ -781,7 +781,7 @@ pub mod eval {
         scopes: &'u mut HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
     ) {
         match val {
-            Val::Ref { name } => {},
+            Val::Ref { name: _ } => {},
             Val::Process { name, body, .. } => {
                 if let Some(name) = name {
                     current_scope.push(name.clone());
@@ -792,11 +792,11 @@ pub mod eval {
                         index(val, current_scope, scopes);
                     }
                 }
-                if let Some(name) = name {
+                if let Some(_name) = name {
                     current_scope.pop();
                 }
             },
-            Val::Chain { name, rel, path, labels } => {
+            Val::Chain { name, path, .. } => {
                 if let Some(name) = name {
                     current_scope.push(name.clone());
                     scopes.insert(current_scope.clone(), &val);
@@ -817,7 +817,7 @@ pub mod eval {
         eprintln!("RESOLVE {current_path:?}");
         let mut resolution = None;
         match val {
-            Val::Ref { name } => {
+            Val::Ref { name: _ } => {
                 todo!()
             },
             Val::Process { name, body, label, .. } => {
@@ -856,18 +856,18 @@ pub mod eval {
                         resolve(val, current_path, scopes);
                     }
                 }
-                if let Some(name) = name {
+                if let Some(_name) = name {
                     current_path.pop();
                 }
             },
-            Val::Chain { name, rel, path, labels } => {
+            Val::Chain { name, path, .. } => {
                 if let Some(name) = name {
                     current_path.push(name.clone());
                 }
                 for val in path.iter_mut() {
                     resolve(val, current_path, scopes);
                 }
-                if let Some(name) = name {
+                if let Some(_name) = name {
                     current_path.pop();
                 }
             },
@@ -888,37 +888,36 @@ pub mod eval {
             match expr {
                 Item::Colon(l, r) => {
                     if l.len() == 1 && matches!(l[0], Item::Text(..)){
-                        let rbody = eval_seq(&r[..]);
+                        let mut rbody = eval(&r[..]);
                         if let Item::Text(name) = &l[0] {
-                            let sublabel = if let Some(ref rbody) = rbody {
-                                match &rbody[..] {
-                                    [Val::Process{label, ..}, ..] => { label.as_ref().cloned() },
-                                    _ => {None},
-                                }
-                            } else { 
-                                None 
+                            let sublabel = match &rbody {
+                                Val::Ref { .. } => None,
+                                Val::Process { label, body, .. } => {
+                                    if label.is_some() { 
+                                        label.as_ref().cloned()
+                                    } else {
+                                        if let Some(body) = body {
+                                            match &body[..] {
+                                                [Val::Process{label, ..}, ..] => { label.as_ref().cloned() },
+                                                _ => {None},
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                },
+                                Val::Chain { name, rel, path, labels } => None,
                             };
                             let label = sublabel.or_else(|| Some(name.clone()));
-                            let process = Val::Process {
-                                name: Some(name.clone()),
-                                label,
-                                body: if let Some(Body::All(rb)) = &rbody {
-                                    if rb.len() == 1 {
-                                        if let Val::Process{body: b, ..} = &rb[0] {
-                                            b.clone()
-                                        } else {
-                                            rbody
-                                        }
-                                    } else { 
-                                        rbody
-                                    }
-                                } else { 
-                                    rbody 
+                            rbody = match rbody {
+                                Val::Process { body: Some(Body::All(bs)), .. } if bs.len() == 1 && matches!(bs[0], Val::Process{..}) => {
+                                    bs[0].clone()
                                 },
-                                name_to_part: None,
-                                notes: None,
+                                _ => rbody,
                             };
-                            body.get_or_insert_with(Default::default).push(process);
+                            rbody.set_name(name.clone());
+                            rbody.set_label(label.clone());
+                            body.get_or_insert_with(Default::default).push(rbody);
                         }
                     } else {
                         body.get_or_insert_with(Default::default).push(Val::Chain{
