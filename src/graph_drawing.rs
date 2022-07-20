@@ -2626,7 +2626,7 @@ pub mod layout {
                         vs2.push(&mut v[..]);
                     }
                     let mut ps = vec![];
-                    multisearch(&mut vs2, |p| ps.push(p.iter().map(|q| q.to_vec()).collect::<Vec<_>>()));
+                    multisearch(&mut vs2, |p| { ps.push(p.iter().map(|q| q.to_vec()).collect::<Vec<_>>()); false });
                     eprintln!("ps.len {}", ps.len());
                     for (n, p) in ps.iter().enumerate() {
                         eprintln!("n: {}, p: {:?}", n, p);
@@ -4357,7 +4357,7 @@ mod tests {
         let vcg = calculate_vcg(&val)?;
         let hcg = calculate_hcg(&val)?;
 
-        let Vcg{vert, vert_vxmap, containers, nodes_by_container, ..} = vcg;
+        let Vcg{vert, vert_vxmap, containers, nodes_by_container, container_depths, ..} = &vcg;
         let vx = vert_vxmap["e"];
         let wx = vert_vxmap["af"];
         assert_eq!(vert.node_weight(vx), Some(&Cow::from("e")));
@@ -4371,10 +4371,10 @@ mod tests {
 
         let roots = roots(&condensed)?;
 
-        let paths_by_rank = rank(&condensed, &roots, containers, nodes_by_container)?;
+        let paths_by_rank = rank(&condensed, &roots, &containers, &nodes_by_container, &container_depths)?;
         assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("af")));
 
-        let layout_problem = calculate_locs_and_hops(&condensed, &paths_by_rank, hcg)?;
+        let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg)?;
         let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
         let nv: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("e"));
         let nw: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("af"));
@@ -4400,8 +4400,9 @@ mod tests {
         assert_eq!(np2, &np);
         assert_eq!(nq2, &nq);
         
-        let LayoutSolution{crossing_number, solved_locs} = minimize_edge_crossing(&layout_problem)?;
-        assert_eq!(crossing_number, 0);
+        let layout_solution = minimize_edge_crossing(&vcg, &layout_problem)?;
+        let LayoutSolution{crossing_number, solved_locs} = &layout_solution;
+        assert_eq!(*crossing_number, 0);
         // let sv = solved_locs[&2][&1];
         // let sw = solved_locs[&3][&0];
         // let sp = solved_locs[&2][&0];
@@ -4417,7 +4418,7 @@ mod tests {
         assert_eq!(sv, sw); // uncrossing happened
         assert_eq!(sp, sq);
 
-        let geometry_problem = calculate_sols(&solved_locs, loc_to_node, hops_by_level, hops_by_edge);
+        let geometry_problem = calculate_sols(&layout_problem, &layout_solution);
         let all_locs = &geometry_problem.all_locs;
         let lrv = all_locs.iter().find(|lr| lr.loc == nv).unwrap();
         let lrw = all_locs.iter().find(|lr| lr.loc == nw).unwrap();
