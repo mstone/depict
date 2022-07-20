@@ -299,24 +299,54 @@ pub mod index {
     //! 
     //! This module collects the types of indices that may be used to index
     //! these typed collections.
-    use std::{ops::{Add, Sub}, fmt::Display};
+    use std::{ops::{Add, Sub}, fmt::{Debug, Display}};
 
     use derive_more::{From, Into};
 
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
     pub struct VerticalRank(pub usize);
 
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
     pub struct OriginalHorizontalRank(pub usize);
 
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
     pub struct SolvedHorizontalRank(pub usize);
 
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
     pub struct LocSol(pub usize);
 
-    #[derive(Clone, Copy, Debug, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
     pub struct HopSol(pub usize);
+
+    impl Debug for VerticalRank {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}_vr", self.0)
+        }
+    }
+
+    impl Debug for OriginalHorizontalRank {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}_ohr", self.0)
+        }
+    }
+
+    impl Debug for SolvedHorizontalRank {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}_shr", self.0)
+        }
+    }
+
+    impl Debug for LocSol {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}_ls", self.0)
+        }
+    }
+
+    impl Debug for HopSol {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}_hs", self.0)
+        }
+    }
 
     impl Add<usize> for VerticalRank {
         type Output = Self;
@@ -1434,7 +1464,6 @@ pub mod layout {
     use sorted_vec::SortedVec;
     use tracing::{event, Level};
     use tracing_error::InstrumentError;
-    use typed_index_collections::TiVec;
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::eval::{Val, self, Body};
@@ -1992,14 +2021,24 @@ pub mod layout {
     impl <T: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd> Graphic for T {}
 
     /// A graphical object to be positioned relative to other objects
-    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone)]
-    pub enum Loc<V: Graphic, E: Graphic> {
+    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+    pub enum Loc<V: Graphic + Display, E: Graphic + Display> {
         /// A "box"
         Node(V),
         /// One hop of an "arrow"
         Hop(VerticalRank, E, E),
         /// A vertical border of a nested system of boxes
         Border(Border<V>)
+    }
+
+    impl<V: Graphic + Display, E: Graphic + Display> Debug for Loc<V, E> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Node(arg0) => write!(f, "Node({})", arg0),
+                Self::Hop(arg0, arg1, arg2) => write!(f, "Hop({}, {}, {})", arg0, arg1, arg2),
+                Self::Border(arg0) => write!(f, "Border({})", arg0),
+            }
+        }
     }
 
     /// A numeric representation of a hop.
@@ -2035,16 +2074,22 @@ pub mod layout {
     }
 
     #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub struct Border<V: Graphic> {
+    pub struct Border<V: Graphic + Display> {
         pub vl: V,
         pub ovr: VerticalRank,
         pub ohr: OriginalHorizontalRank,
         pub pair: OriginalHorizontalRank,
     }
+
+    impl<V: Graphic + Display> Display for Border<V> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Border({}, {}, {}, {})", self.vl, self.ovr, self.ohr, self.pair)
+        }
+    }
     
     #[derive(Clone, Debug, Default)]
-    pub struct LayoutProblem<V: Graphic> {
-        pub locs_by_level: BTreeMap<VerticalRank, TiVec<OriginalHorizontalRank, OriginalHorizontalRank>>, 
+    pub struct LayoutProblem<V: Graphic + Display> {
+        pub locs_by_level: BTreeMap<VerticalRank, usize>, 
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
         pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>>,
@@ -2077,13 +2122,11 @@ pub mod layout {
 
         // Rank vertices by the length of the longest path reaching them.
         let mut vx_rank = HashMap::new();
-        let mut hx_rank = HashMap::new();
         for (rank, paths) in paths_by_rank.iter() {
             for (n, (_vx, wx)) in paths.iter().enumerate() 
             {
                 let n = OriginalHorizontalRank(n);
                 vx_rank.insert(wx.clone(), *rank);
-                hx_rank.insert(wx.clone(), n);
             }
         }
 
@@ -2101,9 +2144,9 @@ pub mod layout {
             // let mhr = OriginalHorizontalRank(mhr);
             let level = locs_by_level
                 .entry(*rank)
-                .or_insert_with(TiVec::new);
-            let mhr = OriginalHorizontalRank(level.len());
-            level.push(mhr);
+                .or_insert(0);
+            let mhr = OriginalHorizontalRank(*level);
+            *level += 1;
             if let Some(old) = loc_to_node.insert((*rank, mhr), Loc::Node(wl.clone())) {
                 panic!("loc_to_node.insert({rank}, {mhr}) -> {:?}", old);
             };
@@ -2135,16 +2178,17 @@ pub mod layout {
         let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
         for (vl, wl, _) in sorted_condensed_edges.iter() {
-            let vvr = *vx_rank.get(vl).unwrap() + container_depths.get(vl).copied().map(|d| d-1).unwrap_or(0);
-            let wvr = *vx_rank.get(wl).unwrap();
-            let vhr = *hx_rank.get(vl).unwrap();
-            let whr = *hx_rank.get(wl).unwrap();
+            let (vvr, vhr) = node_to_loc[&Loc::Node(vl.clone())].clone();
+            let (wvr, whr) = node_to_loc[&Loc::Node(wl.clone())].clone();
+            // let vvr = *vx_rank.get(vl).unwrap() + container_depths.get(vl).copied().map(|d| d-1).unwrap_or(0);
+            // let wvr = *vx_rank.get(wl).unwrap();
             
             let mut mhrs = vec![vhr];
             for mid_level in (vvr+1).0..(wvr.0) {
                 let mid_level = VerticalRank(mid_level); // pending https://github.com/rust-lang/rust/issues/42168
-                let mhr = locs_by_level.get(&mid_level).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
-                locs_by_level.entry(mid_level).or_insert_with(TiVec::<OriginalHorizontalRank, OriginalHorizontalRank>::new).push(mhr);
+                let mut num_mhrs = locs_by_level.entry(mid_level).or_insert(0);
+                let mhr = OriginalHorizontalRank(*num_mhrs);
+                *num_mhrs += 1;
                 if let Some(old) = loc_to_node.insert((mid_level, mhr), Loc::Hop(mid_level, vl.clone(), wl.clone())) {
                     panic!("loc_to_node.insert({mid_level}, {mhr}) -> {:?}", old);
                 };
@@ -2182,11 +2226,12 @@ pub mod layout {
             let depth = container_depths[vl];
             for vr in 0..depth {
                 let vr = VerticalRank(ovr.0 + vr);
-                let mhr = locs_by_level.get(&vr).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
-                locs_by_level.entry(vr.clone()).or_default().push(mhr);
+                let num_mhrs = locs_by_level.entry(vr).or_insert(0);
+                let mhr = OriginalHorizontalRank(*num_mhrs);
+                *num_mhrs += 1;
                 if vr > ovr {
-                    ohr = locs_by_level.get(&vr).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
-                    locs_by_level.entry(vr.clone()).or_default().push(ohr);
+                    ohr = OriginalHorizontalRank(*num_mhrs);
+                    *num_mhrs += 1;
                     if let Some(old) = loc_to_node.insert((vr, ohr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr: mhr, pair: ohr })) {
                         panic!("loc_to_node.insert({vr}, {ohr}) -> {:?}", old);
                     };
@@ -2201,6 +2246,8 @@ pub mod layout {
             eprintln!("CONTAINER BORDERS: {vl}: {container_borders:#?}");
             eprintln!("LOCS_BY_LEVEL V3: {vl}: {locs_by_level:#?}");
         }
+
+        eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
 
         let mut g_hops = Graph::<(VerticalRank, OriginalHorizontalRank), (VerticalRank, V, V)>::new();
         let mut g_hops_vx = HashMap::new();
@@ -2384,7 +2431,7 @@ pub mod layout {
             }
         }
 
-        fn crosses<V: Graphic>(h1: &Hop<V>, h2: &Hop<V>, p1: &[usize], p2: &[usize]) -> usize {
+        fn crosses<V: Graphic + Display>(h1: &Hop<V>, h2: &Hop<V>, p1: &[usize], p2: &[usize]) -> usize {
             // imagine we have permutations p1, p2 of horizontal ranks for levels l1 and l2
             // and a set of hops spanning l1-l2.
             // we want to know how many of these hops cross.
@@ -2394,6 +2441,9 @@ pub mod layout {
             let h12 = h1.nhr;
             let h21 = h2.mhr;
             let h22 = h2.nhr;
+            // if h11 == h21 || h12 == h22 {
+            //     return 0
+            // }
             let u1 = p1[h11.0];
             let u2 = p2[h12.0];
             let v1 = p1[h21.0];
@@ -2403,10 +2453,27 @@ pub mod layout {
             let x221 = v2 < u2;
             let x212 = u2 < v2;
             let c = (x121 && x212) || (x112 && x221);
+            
+            let lvl = h1.lvl;
+            let vl1 = &h1.vl;
+            let wl1 = &h1.wl;
+            let vl2 = &h2.vl;
+            let wl2 = &h2.wl;
+            eprintln!("CROSSES: {h1:?}, {h2:?}, {lvl}, {vl1}->{wl1} X {vl2}->{wl2}, ({h11},{h12}) X ({h21},{h22}) -> ({u1},{u2}) X ({v1},{v2}) -> {c}");
+            if x121 {
+                eprintln!("{vl2} {vl1}");
+            } else {
+                eprintln!("{vl1} {vl2}");
+            }
+            if x221 {
+                eprintln!("{wl2} {wl1}");
+            } else {
+                eprintln!("{wl1} {wl2}");
+            }
             c as usize
         }
 
-        fn conforms<V: Graphic, E: Graphic>(
+        fn conforms<V: Graphic + Display, E: Graphic>(
             vcg: &Vcg<V, E>, 
             layout_problem: &LayoutProblem<V>, 
             locs_by_level2: &Vec<Vec<&Loc<V, V>>>, 
@@ -2511,7 +2578,7 @@ pub mod layout {
 
             let mut shrs = vec![];
             for (_rank, locs) in locs_by_level.iter() {
-                let n = locs.len();
+                let n = *locs;
                 let shrs_lvl = (0..n).collect::<Vec<_>>();
                 shrs.push(shrs_lvl);
             }
@@ -2523,7 +2590,7 @@ pub mod layout {
 
             let mut locs_by_level2 = vec![];
             for (ovr, locs) in locs_by_level.iter() {
-                let n = locs.len();
+                let n = *locs;
                 let level = (0..n).map(|ohr| { 
                     loc_to_node
                         .get(&(*ovr, OriginalHorizontalRank(ohr)))
@@ -2543,26 +2610,35 @@ pub mod layout {
             let mut crossing_number = usize::MAX;
             let mut solution: Option<Vec<Vec<usize>>> = None;
             multisearch(&mut shrs_ref, |p| {
-                    let mut cn = 0;
-                    for (rank, hops) in hops_by_level.iter() {
-                        for h1 in hops.iter() {
-                            for h2 in hops.iter() {
+                eprintln!("HEAPS PROCESS: ");
+                for (n, s) in p.iter().enumerate() {
+                    eprintln!("{n}: {s:?}");
+                }
+                let mut cn = 0;
+                for (rank, hops) in hops_by_level.iter() {
+                    for h1i in 0..hops.len() {
+                        for h2i in 0..hops.len() {
+                            if h2i < h1i {
                                 // eprintln!("hop: {h1} {h2} -> {}", crosses(h1, h2, p[rank.0], p[rank.0+1]));
+                                let h1 = &hops[h1i];
+                                let h2 = &hops[h2i];
                                 cn += crosses(h1, h2, p[rank.0], p[rank.0+1]);
-                            }
+                            }   
                         }
                     }
-                    if cn < crossing_number {
-                        if conforms(vcg, &layout_problem, &locs_by_level2, &nodes_by_container2, p) {
-                            crossing_number = cn;
-                            solution = Some(p.iter().map(|q| q.to_vec()).collect());
-                            if crossing_number == 0 {
-                                return true;
-                            }
+                }
+                eprintln!("CN: {cn}");
+                if cn < crossing_number {
+                    if conforms(vcg, &layout_problem, &locs_by_level2, &nodes_by_container2, p) {
+                        crossing_number = cn;
+                        solution = Some(p.iter().map(|q| q.to_vec()).collect());
+                        if crossing_number == 0 {
+                            return true;
                         }
                     }
-                    false
-                    // eprintln!("P cn: {cn}: p: {p:?}");
+                }
+                false
+                // eprintln!("P cn: {cn}: p: {p:?}");
             });
 
             let solution = solution.or_err(LayoutError::HeapsError{error: "no solution found".into()})?;
@@ -2577,9 +2653,11 @@ pub mod layout {
                 solved_locs.insert(VerticalRank(lvl), shrs
                     .iter()
                     .enumerate()
-                    .map(|(a, b)| (OriginalHorizontalRank(a), SolvedHorizontalRank(*b)))
+                    .map(|(a, b)| (OriginalHorizontalRank(a), SolvedHorizontalRank(*b))) // needs mutation testing
                     .collect::<BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>());
             }
+
+            eprintln!("SOLVED_LOCS: {solved_locs:#?}");
 
             Ok(LayoutSolution{crossing_number, solved_locs})
         }
@@ -4328,14 +4406,14 @@ mod tests {
     use std::borrow::Cow;
 
     use super::{error::Error};
-    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, graph::roots, index::VerticalRank, geometry::calculate_sols, error::Kind, eval}};
+    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, graph::roots, index::{VerticalRank, OriginalHorizontalRank}, geometry::calculate_sols, error::Kind, eval}};
     use tracing_error::InstrumentResult;
     use logos::Logos;
 
     #[test]
     #[allow(clippy::unwrap_used)]    
     pub fn no_swaps() -> Result<(), Error> {
-        let data = "A c q: y / z\nd e af: w / x";
+        let data = "Aa Ab Ac: y / z\nXx Xy Xz: w / x";
         let mut p = Parser::new();
         let mut lex = Token::lexer(data);
         while let Some(tk) = lex.next() {
@@ -4358,47 +4436,85 @@ mod tests {
         let hcg = calculate_hcg(&val)?;
 
         let Vcg{vert, vert_vxmap, containers, nodes_by_container, container_depths, ..} = &vcg;
-        let vx = vert_vxmap["e"];
-        let wx = vert_vxmap["af"];
-        assert_eq!(vert.node_weight(vx), Some(&Cow::from("e")));
-        assert_eq!(vert.node_weight(wx), Some(&Cow::from("af")));
+        let vx = vert_vxmap["Ab"];
+        let wx = vert_vxmap["Ac"];
+        assert_eq!(vert.node_weight(vx), Some(&Cow::from("Ab")));
+        assert_eq!(vert.node_weight(wx), Some(&Cow::from("Ac")));
 
         let Cvcg{condensed, condensed_vxmap} = condense(&vert)?;
-        let cvx = condensed_vxmap["e"];
-        let cwx = condensed_vxmap["af"];
-        assert_eq!(condensed.node_weight(cvx), Some(&Cow::from("e")));
-        assert_eq!(condensed.node_weight(cwx), Some(&Cow::from("af")));
+        let cvx = condensed_vxmap["Ab"];
+        let cwx = condensed_vxmap["Ac"];
+        assert_eq!(condensed.node_weight(cvx), Some(&Cow::from("Ab")));
+        assert_eq!(condensed.node_weight(cwx), Some(&Cow::from("Ac")));
 
         let roots = roots(&condensed)?;
 
         let paths_by_rank = rank(&condensed, &roots, &containers, &nodes_by_container, &container_depths)?;
-        assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("af")));
+        assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("Ac")));
 
         let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg)?;
         let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
-        let nv: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("e"));
-        let nw: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("af"));
-        let np: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("c"));
-        let nq: Loc<Cow<'_, str>, Cow<'_, str>> = Loc::Node(Cow::from("q"));
-        let lv = node_to_loc[&nv];
-        let lw = node_to_loc[&nw];
-        let lp = node_to_loc[&np];
-        let lq = node_to_loc[&nq];
+        let nAa = Loc::Node(Cow::from("Aa"));
+        let nAb = Loc::Node(Cow::from("Ab"));
+        let nAc = Loc::Node(Cow::from("Ac"));
+        let nXx = Loc::Node(Cow::from("Xx"));
+        let nXy = Loc::Node(Cow::from("Xy"));
+        let nXz = Loc::Node(Cow::from("Xz"));
+        let lAa = node_to_loc[&nAa];
+        let lAb = node_to_loc[&nAb];
+        let lAc = node_to_loc[&nAc];
+        let lXx = node_to_loc[&nXx];
+        let lXy = node_to_loc[&nXy];
+        let lXz = node_to_loc[&nXz];
         // assert_eq!(lv, (2, 1));
         // assert_eq!(lw, (3, 0));
         // assert_eq!(lp, (2, 0));
         // assert_eq!(lq, (3, 1));
-        assert_eq!(lv.1.0 + lw.1.0, 1); // lv.1 != lw.1
-        assert_eq!(lp.1.0 + lq.1.0, 1); // lp.1 != lq.1
+        // assert_eq!(lv.1.0 + lw.1.0, 1); // lv.1 != lw.1
+        // assert_eq!(lp.1.0 + lq.1.0, 1); // lp.1 != lq.1
 
-        let nv2 = &loc_to_node[&lv];
-        let nw2 = &loc_to_node[&lw];
-        let np2 = &loc_to_node[&lp];
-        let nq2 = &loc_to_node[&lq];
-        assert_eq!(nv2, &nv);
-        assert_eq!(nw2, &nw);
-        assert_eq!(np2, &np);
-        assert_eq!(nq2, &nq);
+        let nAa2 = &loc_to_node[&lAa];
+        let nAb2 = &loc_to_node[&lAb];
+        let nAc2 = &loc_to_node[&lAc];
+        let nXx2 = &loc_to_node[&lXx];
+        let nXy2 = &loc_to_node[&lXy];
+        let nXz2 = &loc_to_node[&lXz];
+        assert_eq!(nAa2, &nAa);
+        assert_eq!(nAb2, &nAb);
+        assert_eq!(nAc2, &nAc);
+        assert_eq!(nXx2, &nXx);
+        assert_eq!(nXy2, &nXy);
+        assert_eq!(nXz2, &nXz);
+
+
+        assert_eq!(hops_by_level.len(), 3);
+        let h0 = &hops_by_level[&VerticalRank(0)];
+        let h1 = &hops_by_level[&VerticalRank(1)];
+        let h2 = &hops_by_level[&VerticalRank(2)];
+        let ohr = OriginalHorizontalRank;
+        let vr = VerticalRank;
+        let lRr = &node_to_loc[&Loc::Node("root".into())];
+        let h0A: Hop<Cow<str>> = Hop { mhr: lRr.1, nhr: lAa.1, vl: "root".into(), wl: "Aa".into(), lvl: lRr.0 };
+        let h0X: Hop<Cow<str>> = Hop { mhr: lRr.1, nhr: lXx.1, vl: "root".into(), wl: "Xx".into(), lvl: lRr.0 };
+        let h1A: Hop<Cow<str>> = Hop { mhr: lAa.1, nhr: lAb.1, vl: "Aa".into(), wl: "Ab".into(), lvl: lAa.0 };
+        let h1X: Hop<Cow<str>> = Hop { mhr: lXx.1, nhr: lXy.1, vl: "Xx".into(), wl: "Xy".into(), lvl: lXx.0 };
+        let h2A: Hop<Cow<str>> = Hop { mhr: lAb.1, nhr: lAc.1, vl: "Ab".into(), wl: "Ac".into(), lvl: lAb.0 };
+        let h2X: Hop<Cow<str>> = Hop { mhr: lXy.1, nhr: lXz.1, vl: "Xy".into(), wl: "Xz".into(), lvl: lXy.0 };
+        let mut s0 = vec![h0A.clone(), h0X.clone()];
+        let mut s1 = vec![h1A.clone(), h1X.clone()];
+        let mut s2 = vec![h2A.clone(), h2X.clone()];
+        s0.sort();
+        s1.sort();
+        s2.sort();
+        let mut h0 = h0.iter().cloned().collect::<Vec<_>>();
+        h0.sort();
+        let mut h1 = h1.iter().cloned().collect::<Vec<_>>();
+        h1.sort();
+        let mut h2 = h2.iter().cloned().collect::<Vec<_>>();
+        h2.sort();
+        assert_eq!(&h0[..], &s0[..]);
+        assert_eq!(&h1[..], &s1[..]);
+        assert_eq!(&h2[..], &s2[..]);
         
         let layout_solution = minimize_edge_crossing(&vcg, &layout_problem)?;
         let LayoutSolution{crossing_number, solved_locs} = &layout_solution;
@@ -4407,35 +4523,42 @@ mod tests {
         // let sw = solved_locs[&3][&0];
         // let sp = solved_locs[&2][&0];
         // let sq = solved_locs[&3][&1];
-        let sv = solved_locs[&lv.0][&lv.1];
-        let sw = solved_locs[&lw.0][&lw.1];
-        let sp = solved_locs[&lp.0][&lp.1];
-        let sq = solved_locs[&lq.0][&lq.1];
+        let sAa = solved_locs[&lAa.0][&lAa.1];
+        let sAb = solved_locs[&lAb.0][&lAb.1];
+        let sAc = solved_locs[&lAc.0][&lAc.1];
+        let sXx = solved_locs[&lXx.0][&lXx.1];
+        let sXy = solved_locs[&lXy.0][&lXy.1];
+        let sXz = solved_locs[&lXz.0][&lXz.1];
+        eprintln!("{:<2}: lv0: {}, lv1: {}, sv: {}", "Ab", &lAb.0, &lAb.1, sAb);
+        eprintln!("{:<2}: lw0: {}, lw1: {}, sw: {}", "Ac", &lAc.0, &lAc.1, sAc);
         // assert_eq!(sv, 1);
         // assert_eq!(sw, 1);
         // assert_eq!(sp, 0);
         // assert_eq!(sq, 0);
-        assert_eq!(sv, sw); // uncrossing happened
-        assert_eq!(sp, sq);
+        assert_eq!(sAa, sAb);
+        assert_eq!(sAb, sAc); // uncrossing happened
+        assert_eq!(sXx, sXy);
+        assert_eq!(sXy, sXz);
+        
 
         let geometry_problem = calculate_sols(&layout_problem, &layout_solution);
         let all_locs = &geometry_problem.all_locs;
-        let lrv = all_locs.iter().find(|lr| lr.loc == nv).unwrap();
-        let lrw = all_locs.iter().find(|lr| lr.loc == nw).unwrap();
-        let lrp = all_locs.iter().find(|lr| lr.loc == np).unwrap();
-        let lrq = all_locs.iter().find(|lr| lr.loc == nq).unwrap();
-        assert_eq!(lrv.ovr, lv.0);
-        assert_eq!(lrw.ovr, lw.0);
-        assert_eq!(lrp.ovr, lp.0);
-        assert_eq!(lrq.ovr, lq.0);
-        assert_eq!(lrv.ohr, lv.1);
-        assert_eq!(lrw.ohr, lw.1);
-        assert_eq!(lrp.ohr, lp.1);
-        assert_eq!(lrq.ohr, lq.1);
-        assert_eq!(lrv.shr, sv);
-        assert_eq!(lrw.shr, sw);
-        assert_eq!(lrp.shr, sp);
-        assert_eq!(lrq.shr, sq);
+        let lrAb = all_locs.iter().find(|lr| lr.loc == nAb).unwrap();
+        let lrAc = all_locs.iter().find(|lr| lr.loc == nAc).unwrap();
+        let lrXy = all_locs.iter().find(|lr| lr.loc == nXy).unwrap();
+        let lrXz = all_locs.iter().find(|lr| lr.loc == nXz).unwrap();
+        assert_eq!(lrAb.ovr, lAb.0);
+        assert_eq!(lrAc.ovr, lAc.0);
+        assert_eq!(lrXy.ovr, lXy.0);
+        assert_eq!(lrXz.ovr, lXz.0);
+        assert_eq!(lrAb.ohr, lAb.1);
+        assert_eq!(lrAc.ohr, lAc.1);
+        assert_eq!(lrXy.ohr, lXy.1);
+        assert_eq!(lrXz.ohr, lXz.1);
+        assert_eq!(lrAb.shr, sAb);
+        assert_eq!(lrAc.shr, sAc);
+        assert_eq!(lrXy.shr, sXy);
+        assert_eq!(lrXz.shr, sXz);
 
         Ok(())
     }
