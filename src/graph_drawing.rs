@@ -2095,15 +2095,18 @@ pub mod layout {
         let mut locs_by_level = BTreeMap::new();
 
         for (wl, rank) in vx_rank.iter() {
-            let paths = &paths_by_rank[rank];
-            let mhr = paths.iter().position(|e| e.1 == *wl)
-                .or_err(Kind::IndexingError{})?;
-            let mhr = OriginalHorizontalRank(mhr);
-            locs_by_level
+            // let paths = &paths_by_rank[rank];
+            // let mhr = paths.iter().position(|e| e.1 == *wl)
+            //     .or_err(Kind::IndexingError{})?;
+            // let mhr = OriginalHorizontalRank(mhr);
+            let level = locs_by_level
                 .entry(*rank)
-                .or_insert_with(TiVec::new)
-                .push(mhr);
-            loc_to_node.insert((*rank, mhr), Loc::Node(wl.clone()));
+                .or_insert_with(TiVec::new);
+            let mhr = OriginalHorizontalRank(level.len());
+            level.push(mhr);
+            if let Some(old) = loc_to_node.insert((*rank, mhr), Loc::Node(wl.clone())) {
+                panic!("loc_to_node.insert({rank}, {mhr}) -> {:?}", old);
+            };
             node_to_loc.insert(Loc::Node(wl.clone()), (*rank, mhr));
         }
 
@@ -2132,7 +2135,7 @@ pub mod layout {
         let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
         for (vl, wl, _) in sorted_condensed_edges.iter() {
-            let vvr = *vx_rank.get(vl).unwrap();
+            let vvr = *vx_rank.get(vl).unwrap() + container_depths.get(vl).copied().map(|d| d-1).unwrap_or(0);
             let wvr = *vx_rank.get(wl).unwrap();
             let vhr = *hx_rank.get(vl).unwrap();
             let whr = *hx_rank.get(wl).unwrap();
@@ -2142,7 +2145,9 @@ pub mod layout {
                 let mid_level = VerticalRank(mid_level); // pending https://github.com/rust-lang/rust/issues/42168
                 let mhr = locs_by_level.get(&mid_level).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
                 locs_by_level.entry(mid_level).or_insert_with(TiVec::<OriginalHorizontalRank, OriginalHorizontalRank>::new).push(mhr);
-                loc_to_node.insert((mid_level, mhr), Loc::Hop(mid_level, vl.clone(), wl.clone()));
+                if let Some(old) = loc_to_node.insert((mid_level, mhr), Loc::Hop(mid_level, vl.clone(), wl.clone())) {
+                    panic!("loc_to_node.insert({mid_level}, {mhr}) -> {:?}", old);
+                };
                 node_to_loc.insert(Loc::Hop(mid_level, vl.clone(), wl.clone()), (mid_level, mhr)); // BUG: what about the endpoints?
                 mhrs.push(mhr);
             }
@@ -2182,9 +2187,13 @@ pub mod layout {
                 if vr > ovr {
                     ohr = locs_by_level.get(&vr).map_or(OriginalHorizontalRank(0), |v| OriginalHorizontalRank(v.len()));
                     locs_by_level.entry(vr.clone()).or_default().push(ohr);
-                    loc_to_node.insert((vr, ohr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr: mhr, pair: ohr }));
+                    if let Some(old) = loc_to_node.insert((vr, ohr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr: mhr, pair: ohr })) {
+                        panic!("loc_to_node.insert({vr}, {ohr}) -> {:?}", old);
+                    };
                 }
-                loc_to_node.insert((vr, mhr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr, pair: mhr }));
+                if let Some(old) = loc_to_node.insert((vr, mhr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr, pair: mhr })) {
+                    panic!("loc_to_node.insert({vr}, {mhr}) -> {:?}", old);
+                };
                 container_borders.entry(vl.clone()).or_default().push((vr, (ohr, mhr)));
             }
             
@@ -2303,7 +2312,7 @@ pub mod layout {
         use std::collections::{BTreeMap, HashMap};
         use std::fmt::{Display};
 
-        use crate::graph_drawing::error::{Error, LayoutError, OrErrExt};
+        use crate::graph_drawing::error::{Error, LayoutError, OrErrExt, Kind};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
         use crate::graph_drawing::layout::{Hop};
         
@@ -2480,7 +2489,12 @@ pub mod layout {
             let Vcg{nodes_by_container, ..} = vcg;
             let LayoutProblem{loc_to_node, node_to_loc, locs_by_level, hops_by_level, ..} = layout_problem;
 
+            eprintln!("MINIMIZE");
+            eprintln!("LOCS_BY_LEVEL: {locs_by_level:#?}");
             eprintln!("HOPS_BY_LEVEL: {hops_by_level:#?}");
+            let mut l2n = loc_to_node.iter().collect::<Vec<_>>();
+            l2n.sort();
+            eprintln!("LOC_TO_NODE: {l2n:#?}");
             
             if hops_by_level.is_empty() {
                 return Ok(LayoutSolution{crossing_number: 0, solved_locs: BTreeMap::new()});
@@ -2510,7 +2524,13 @@ pub mod layout {
             let mut locs_by_level2 = vec![];
             for (ovr, locs) in locs_by_level.iter() {
                 let n = locs.len();
-                let level = (0..n).map(|ohr| { &loc_to_node[&(*ovr, OriginalHorizontalRank(ohr))]}).collect::<Vec<_>>();
+                let level = (0..n).map(|ohr| { 
+                    loc_to_node
+                        .get(&(*ovr, OriginalHorizontalRank(ohr)))
+                        .or_err(
+                            Kind::KeyNotFoundError{key: format!("{ovr}, {ohr}")}
+                        )
+                }).collect::<Result<Vec<_>, _>>()?;
                 locs_by_level2.push(level);
             }
 
@@ -2744,6 +2764,10 @@ pub mod geometry {
         pub sol_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol>,
         pub width_by_loc: HashMap<LocIx, NodeWidth>,
         pub width_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), (f64, f64)>,
+        pub height_scale: Option<f64>,
+        pub line_height: Option<f64>,
+        pub nesting_top_padding: Option<f64>,
+        pub nesting_bottom_padding: Option<f64>,
     }
     
     /// ovr, ohr
@@ -2849,8 +2873,25 @@ pub mod geometry {
     
         let width_by_loc = HashMap::new();
         let width_by_hop = HashMap::new();
+
+        let height_scale = None;
+        let line_height = None;
+        let nesting_top_padding = None;
+        let nesting_bottom_padding = None;
     
-        GeometryProblem{all_locs, all_hops0, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop}
+        GeometryProblem{
+            all_locs, 
+            all_hops0, 
+            all_hops, 
+            sol_by_loc, 
+            sol_by_hop, 
+            width_by_loc, 
+            width_by_hop, 
+            height_scale,
+            line_height, 
+            nesting_top_padding, 
+            nesting_bottom_padding
+        }
     }
     
     #[derive(Debug, Default)]
@@ -2973,10 +3014,33 @@ pub mod geometry {
         V: Display + Graphic,
         E: Graphic
     {
-        let Vcg{vert_node_labels: _, vert_edge_labels: dag_edge_labels, ..} = vcg;
+        let Vcg{
+            vert_edge_labels: dag_edge_labels, 
+            containers,
+            nesting_depth_by_container,
+            container_depths,
+            ..
+        } = vcg;
         let LayoutProblem{hops_by_edge, node_to_loc, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = &layout_solution;
-        let GeometryProblem{all_locs, all_hops, sol_by_loc, sol_by_hop, width_by_loc, width_by_hop, ..} = geometry_problem;
+        let GeometryProblem{
+            all_locs, 
+            all_hops, 
+            sol_by_loc, 
+            sol_by_hop, 
+            width_by_loc, 
+            width_by_hop,
+            height_scale,
+            line_height,
+            nesting_top_padding,
+            nesting_bottom_padding,
+            ..
+        } = geometry_problem;
+
+        let height_scale = height_scale.unwrap_or(100.);
+        let line_height = line_height.unwrap_or(20.);
+        let nesting_top_padding = nesting_top_padding.unwrap_or(40.);
+        let nesting_bottom_padding = nesting_bottom_padding.unwrap_or(10.);
     
         let mut edge_label_heights = BTreeMap::<VerticalRank, usize>::new();
         for (node, loc) in node_to_loc.iter() {
@@ -2985,7 +3049,13 @@ pub mod geometry {
                 let height_max = edge_label_heights.entry(*ovr).or_default();
                 for (vl2, dsts) in dag_edge_labels.iter() {
                     if vl == vl2 {
-                        let edge_labels = dsts.iter().flat_map(|(_, rels)| rels.iter().map(|(_, labels)| labels.len())).max().unwrap_or(1);
+                        let edge_labels = dsts
+                            .iter()
+                            .flat_map(|(_, rels)| rels
+                                .iter()
+                                .map(|(_, labels)| labels.len()))
+                            .max()
+                            .unwrap_or(1);
                         *height_max = max(*height_max, max(0, (edge_labels as i32) - 1) as usize);
                     } 
                 }
@@ -2993,13 +3063,40 @@ pub mod geometry {
                 edge_label_heights.entry(*ovr).or_default();
             }
         }
+        // in each row, if there are containers, then there is a biggest container
+        let mut span_heights = BTreeMap::<VerticalRank, usize>::new();
+        let mut padding_heights = BTreeMap::<VerticalRank, f64>::new();
+        for container in containers.iter() {
+            let (ovr, ohr) = node_to_loc[&Loc::Node(container.clone())];
+            let rank_span = container_depths[container];
+            let nesting_depth = nesting_depth_by_container[container];
+            let container_padding = (nesting_top_padding + nesting_bottom_padding) * nesting_depth as f64;
+
+            let span_height_max = span_heights.entry(ovr).or_insert(0);
+            *span_height_max = max(*span_height_max, rank_span);
+
+            let padding_height_max = padding_heights.entry(ovr).or_insert(0.);
+            *padding_height_max = max_by(*padding_height_max, container_padding, f64::total_cmp);
+        }
         let mut row_height_offsets = BTreeMap::<VerticalRank, f64>::new();
         let mut cumulative_offset = 0.0;
-        for (lvl, max_height) in edge_label_heights {
+        let max_lvl = max(
+            edge_label_heights.keys().max().copied().unwrap_or(VerticalRank(0)),
+            max(
+                span_heights.keys().max().copied().unwrap_or(VerticalRank(0)),
+                padding_heights.keys().max().copied().unwrap_or(VerticalRank(0))
+            )
+        );
+        for lvl in 0..=max_lvl.0 {
+            let lvl = VerticalRank(lvl);
+            let elh = edge_label_heights.get(&lvl).copied().unwrap_or(0);
+            let sh = span_heights.get(&lvl).copied().unwrap_or(0);
+            let ph = padding_heights.get(&lvl).copied().unwrap_or(0.);
             row_height_offsets.insert(lvl, cumulative_offset);
-            cumulative_offset += max_height as f64;
+            cumulative_offset += max_by(elh as f64 * line_height, ph, f64::total_cmp);
         }
         event!(Level::TRACE, ?row_height_offsets, "ROW HEIGHT OFFSETS");
+        eprintln!("ROW HEIGHT OFFSETS {row_height_offsets:#?}");
         event!(Level::TRACE, ?width_by_hop, "WIDTH BY HOP");
         
     
@@ -3652,7 +3749,7 @@ pub mod frontend {
             let nesting_depth_by_container = &depiction.vcg.nesting_depth_by_container;
             let solved_locs = &depiction.layout_solution.solved_locs;
 
-            let height_scale = 80.0;
+            let height_scale = 100.0;
             let vpad = 50.0;
             let line_height = 20.0;
             let char_width = 9.0;
@@ -3681,7 +3778,7 @@ pub mod frontend {
                         let vpos = 
                             height_scale * ((*ovr-1).0 as f64) + 
                             vpad + 
-                            ts.get(*ovr).unwrap_or(&0.) * line_height + 
+                            ts.get(*ovr).unwrap_or(&0.) + 
                             nesting_depth * nesting_padding;
                         let width = (rpos - lpos).round();
                         let hpos = lpos.round();
@@ -3717,18 +3814,20 @@ pub mod frontend {
                     let vpos = 
                         height_scale * ((*ovr-1).0 as f64) + 
                         vpad + 
-                        ts[*ovr-1] * line_height + 
+                        ts[*ovr-1] + 
                         nesting_depth * nesting_padding;
                     let width = (rpos - lpos).round();
                     let depth = container_depths[container] as f64;
                     let inner_depth = nesting_depth_by_container[container] as f64;
                     let hpos = lpos.round();
                     let height = 
-                        depth * height_scale 
+                        depth * height_scale
                         // - nesting_depth * nesting_padding 
                         // - nesting_depth * nesting_bottom_padding
-                        + (ts[*ovr - 1 + container_depths[container]] - ts[*ovr-1]) * line_height
-                        + inner_depth * (nesting_padding + nesting_bottom_padding);
+                        + (ts[*ovr - 1 + container_depths[container]] - ts[*ovr-1])
+                        + inner_depth * (nesting_padding + nesting_bottom_padding)
+                        - 20.;
+                    eprintln!("HEIGHT: {container} {height}");
 
                     let key = format!("{}_{}_{}_{}", container, ovr, ohr, pair);
                     let mut label = vert_node_labels
@@ -3788,6 +3887,25 @@ pub mod frontend {
                     let ndv = nesting_depths[vl] as f64;
                     let ndw = nesting_depths[wl] as f64;
 
+                    let container_offset = if containers.contains(vl) {
+                        let (ovr, ohr) = &node_to_loc[&Loc::Node(vl.clone())];
+                        let depth = container_depths[vl];
+                        // let inner_depth = nesting_depth_by_container[vl] as f64;
+                        (depth-1) as f64 * height_scale - 26. - 20.
+                        // (nesting_padding + nesting_bottom_padding)
+                        
+                        // 0.
+                        // (depth-1) as f64 * height_scale
+                        // 0.
+                    } else {
+                        0.
+                    };
+                    let container_offset2 = if containers.contains(vl) {
+                        10.
+                    } else {
+                        0.
+                    };
+
                     for (n, hop) in hops.iter().enumerate() {
                         let (lvl, (mhr, nhr)) = hop;
                         // let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
@@ -3796,9 +3914,21 @@ pub mod frontend {
                         let hnd = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
                         let sposd = ss[hnd];
                         let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
-                        let hposd = (sposd + offset).round();
-                        let vpos = ((*lvl-1).0 as f64) * height_scale + vpad + ts[*lvl] * line_height + ndv * nesting_padding;
-                        let mut vpos2 = (lvl.0 as f64) * height_scale + vpad + ts[(*lvl+1)] * line_height + ndw * nesting_padding;
+                        let hposd = (sposd + offset).round() + 10. * lvl.0 as f64;
+                        eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {} {}", ts[*lvl], ndv, container_offset);
+                        let lvl_offset = container_depths.get(vl).copied().map(|d| d-2).unwrap_or(0);
+                        let vpos = 
+                            ((*lvl+lvl_offset-1).0 as f64) * height_scale 
+                            + vpad 
+                            + ts[*lvl]
+                            + ndv * nesting_padding
+                            + container_offset;
+                        let mut vpos2 = 
+                            ((*lvl+lvl_offset).0 as f64) * height_scale 
+                            + vpad 
+                            + ts[(*lvl+1)] 
+                            + ndw * nesting_padding;
+                            // + container_offset2;
 
                         if n == 0 {
                             hn0.push(hn);
@@ -3842,13 +3972,20 @@ pub mod frontend {
                                 _ => rs[n] - ls[n]
                             });
                             label_vpos = Some(match ew {
-                                x if x == "fake" => vpos + 40.,
+                                x if x == "fake" => {
+                                    if containers.contains(vl) {
+                                        vpos + 26.
+                                    } else {
+                                        vpos + 40.
+                                    }
+                                },
                                 _ => vpos,
                             });
                         }
 
                         if n < hops.len() - 1 {
-                            vpos2 += 26.0;
+                            // vpos2 += 26.0;
+                            vpos2 += 26. + container_offset2;
                         }
 
                         if n == hops.len() - 1 && *ew == "actuates" { 
@@ -3889,8 +4026,8 @@ pub mod frontend {
                     let rl = ls[nr] - 7.;
                     let wl = width_by_loc[locl].right;
                     let wr = width_by_loc[locr].left;
-                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] * line_height + forward_voffset + ndv * nesting_padding;
-                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] * line_height + forward_voffset + ndw * nesting_padding;
+                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] + forward_voffset + ndv * nesting_padding;
+                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] + forward_voffset + ndw * nesting_padding;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = forward.join("\n");
                     let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
@@ -3911,8 +4048,8 @@ pub mod frontend {
                     let rl = ls[nr];
                     let wl = width_by_loc[locl].right;
                     let wr = width_by_loc[locr].left;
-                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] * line_height + reverse_voffset + ndv * nesting_padding;
-                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] * line_height + reverse_voffset + ndw * nesting_padding;
+                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] + reverse_voffset + ndv * nesting_padding;
+                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] + reverse_voffset + ndw * nesting_padding;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = reverse.join("\n");
                     let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;

@@ -27,6 +27,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PLACEHOLDER: &str = indoc!("
 a [ b c ]
+a d
+p q r
 ");
 
 // person microwave food: open, start, stop / beep : heat
