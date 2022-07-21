@@ -3039,7 +3039,8 @@ pub mod geometry {
         v: &Vars<S>,
         c: &Constraints<S>, 
         pd: &Vec<Monomial<S>>, 
-        q: &Vec<Monomial<S>>
+        q: &Vec<Monomial<S>>,
+        settings: &osqp::Settings,
     ) -> Result<Vec<(Var<S>, f64)>, Error> {
         let n = v.len();
 
@@ -3071,19 +3072,7 @@ pub mod geometry {
         eprintln!("U2[{}]: {u2:?}", u2.len());
         eprintln!("A2[{},{}]: {a2:?}", a2.nrows, a2.ncols);
 
-        let settings = osqp::Settings::default()
-            // .adaptive_rho(false)
-            // .check_termination(Some(200))
-            // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
-            // .adaptive_rho_interval(Some(25))
-            .eps_abs(1e-1)
-            .eps_rel(1e-1)
-            .max_iter(128_000)
-            // .max_iter(400)
-            // .polish(true)
-            .verbose(true);
-
-        let mut prob = osqp::Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], &settings)
+        let mut prob = osqp::Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], settings)
             .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
         
         let result = prob.solve();
@@ -3289,17 +3278,19 @@ pub mod geometry {
                 event!(Level::TRACE, ?loc, %n, %min_width, "X3: l{n} <= s{ns} <= r{n}");
             }
         
-            ch.leq(&mut vh, l(root_n), l(n));
-            ch.leq(&mut vh, r(n), r(root_n));
+            if n != root_n {
+                ch.leq(&mut vh, l(root_n), l(n));
+                ch.leq(&mut vh, r(n), r(root_n));
 
-            cv.leq(&mut vv, t(root_n), t(n));
-            cv.leq(&mut vv, b(n), b(root_n));
-
+                // cv.leq(&mut vv, t(root_n), t(n));
+                // cv.leq(&mut vv, b(n), b(root_n));
+            }
             event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
             ch.leqc(&mut vh, l(n), r(n), min_width as f64);
 
             // c.leqc(&mut v, t(n), b(n), min_height as f64);
             cv.leqc(&mut vv, t(n), b(n), 26.);
+            // cv.sym(&mut vv, &mut pdv, t(n), b(n));
 
             if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
                 let np = sol_by_loc[&(ovr, ohrp)];
@@ -3318,6 +3309,7 @@ pub mod geometry {
                 event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, %gap, "X2: r{n} <= l{nn} - ε")
             }
         }
+        let mut already_seen = HashSet::new();
         for hop_row in all_hops.iter() {
             let HopRow{lvl, mhr, nhr, vl, wl, ..} = &hop_row;
 
@@ -3354,7 +3346,15 @@ pub mod geometry {
             ch.leqc(&mut vh, l(root_n), s(n), action_width);
             ch.leqc(&mut vh, s(n), r(root_n), percept_width);
 
-            cv.leqc(&mut vv, b(vn), t(wn), min_hop_height);
+            if !already_seen.contains(&(vn, wn)) {
+                cv.leqc(&mut vv, b(vn), t(wn), 50.);
+                already_seen.insert((vn, wn));
+            }
+            
+            // cv.leqc(&mut vv, t(vn), t(wn), 26.);
+            // qv.push(10. * vv.get(t(wn)));
+            cv.sym(&mut vv, &mut pdv, b(wn), t(vn));
+            
 
             if !terminal {
                 let nd = sol_by_hop[&((*lvl+1), *nhr, (*vl).clone(), (*wl).clone())];
@@ -3473,17 +3473,38 @@ pub mod geometry {
                 ch.push((0., vec![var.into()], f64::INFINITY));
             }
         }
-        for (sol, var) in vv.iter() {
+        for (n, (sol, var)) in vv.iter().enumerate() {
             if !matches!(sol, AnySol::F(_)) {
                 cv.push((0., vec![var.into()], f64::INFINITY));
+                // qv.push(((n+1) as f64) * <&Var<AnySol> as Into<Monomial<AnySol>>>::into(var));
             }
         }
 
         eprintln!("SOLVE HORIZONTAL");
-        let solutions_h = solve_problem(&vh, &ch, &pdh, &qh)?;
+        let solutions_h = solve_problem(&vh, &ch, &pdh, &qh, &osqp::Settings::default()
+        // .adaptive_rho(false)
+        // .check_termination(Some(200))
+        // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
+        // .adaptive_rho_interval(Some(25))
+        .eps_abs(1e-1)
+        .eps_rel(1e-1)
+        .max_iter(128_000)
+        // .max_iter(400)
+        // .polish(true)
+        .verbose(true))?;
 
         eprintln!("SOLVE VERTICAL");
-        let solutions_v = solve_problem(&vv, &cv, &pdv, &qv)?;
+        let solutions_v = solve_problem(&vv, &cv, &pdv, &qv, &osqp::Settings::default()
+        // .adaptive_rho(false)
+        // .check_termination(Some(200))
+        // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
+        // .adaptive_rho_interval(Some(25))
+        // .eps_abs(1e-4)
+        // .eps_rel(1e-4)
+        // .max_iter(128_000)
+        // .max_iter(400)
+        // .polish(true)
+        .verbose(true))?;
 
         let ls = extract_variable(&vh, &solutions_h, AnySolKind::L, "ls".into(), |s| { 
             if let AnySol::L(l) = s { l } else { panic!() }
@@ -3834,7 +3855,7 @@ pub mod frontend {
                         let vpos = ts[n];
                         let width = (rpos - lpos).round();
                         let hpos = lpos.round();
-                        let height = bs.get(n).zip(ts.get(n)).and_then(|(b, t)| Some(b - t)).unwrap_or(26.);
+                        let height = bs[n] - ts[n];
                         
                         let key = vl.to_string();
                         let label = vert_node_labels
@@ -3939,12 +3960,10 @@ pub mod frontend {
                     } else {
                         hops.iter().skip(fs).collect::<Vec<_>>()
                     };
+                    let vmin = bs[sol_by_loc[&node_to_loc[&Loc::Node(vl.clone())]]];
+                    let vmax = ts[sol_by_loc[&node_to_loc[&Loc::Node(wl.clone())]]];
                     let fh = hops.iter().next().unwrap();
                     let lh = hops.iter().rev().next().unwrap();
-                    let ffn = sol_by_loc[&(*fh.0, fh.1.0)];
-                    let ln = sol_by_loc[&(*lh.0, lh.1.0)];
-                    let vmin = bs[ffn];
-                    let vmax = ts[ln];
                     let nh = hops.len();
                     let vs = (0..=nh).map(|lvl|  {
                         let fraction = lvl as f64 / nh as f64;
@@ -3975,9 +3994,9 @@ pub mod frontend {
                             estimated_width0 = Some(width_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())]);
                             let mut vpos = vpos;
                             if *ew == "senses" {
-                                vpos += 33.0; // box height + arrow length
+                                vpos += 7.0; // box height + arrow length
                             } else {
-                                vpos += 26.0;
+                                // vpos += 26.0;
                             }
                             path.push(format!("M {hpos} {vpos}"));
                         }
@@ -4010,18 +4029,18 @@ pub mod frontend {
                             label_vpos = Some(match ew {
                                 x if x == "fake" => {
                                     if containers.contains(vl) {
-                                        vpos + 25.
+                                        vpos - 1.
                                     } else {
-                                        vpos + 40.
+                                        vpos + 14.
                                     }
                                 },
                                 _ => vpos,
                             });
                         }
 
-                        if n < hops.len() - 1 {
-                            vpos2 += 26.;
-                        }
+                        // if n < hops.len() - 1 {
+                        //     vpos2 += 26.;
+                        // }
 
                         if n == hops.len() - 1 && *ew == "actuates" { 
                             vpos2 -= 7.0; // arrowhead length
