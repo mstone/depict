@@ -3063,11 +3063,11 @@ pub mod geometry {
         let nesting_top_padding = nesting_top_padding.unwrap_or(40.);
         let nesting_bottom_padding = nesting_bottom_padding.unwrap_or(10.);
     
-        let mut edge_label_heights = BTreeMap::<VerticalRank, usize>::new();
+        let mut max_edge_label_height_by_rank = BTreeMap::<VerticalRank, usize>::new();
         for (node, loc) in node_to_loc.iter() {
             let (ovr, _ohr) = loc;
             if let Loc::Node(vl) = node {
-                let height_max = edge_label_heights.entry(*ovr).or_default();
+                let height_max = max_edge_label_height_by_rank.entry(*ovr).or_default();
                 for (vl2, dsts) in dag_edge_labels.iter() {
                     if vl == vl2 {
                         let edge_labels = dsts
@@ -3081,43 +3081,47 @@ pub mod geometry {
                     } 
                 }
             } else {
-                edge_label_heights.entry(*ovr).or_default();
+                max_edge_label_height_by_rank.entry(*ovr).or_default();
             }
         }
         // in each row, if there are containers, then there is a biggest container
-        let mut span_heights = BTreeMap::<VerticalRank, usize>::new();
-        let mut padding_heights = BTreeMap::<VerticalRank, f64>::new();
+        let mut max_nesting_span_by_rank = BTreeMap::<VerticalRank, usize>::new();
+        let mut max_nesting_depth_by_rank = BTreeMap::<VerticalRank, usize>::new();
         for container in containers.iter() {
             let (ovr, ohr) = node_to_loc[&Loc::Node(container.clone())];
-            let rank_span = container_depths[container];
-            let nesting_depth = nesting_depth_by_container[container];
-            let container_padding = (nesting_top_padding + nesting_bottom_padding) * nesting_depth as f64;
+            let nesting_span = container_depths[container];
+            let nesting_depth = nesting_depth_by_container[container] + 1;
 
-            let span_height_max = span_heights.entry(ovr).or_insert(0);
-            *span_height_max = max(*span_height_max, rank_span);
+            let max_span = max_nesting_span_by_rank.entry(ovr).or_default();
+            *max_span = max(*max_span, nesting_span);
 
-            let padding_height_max = padding_heights.entry(ovr).or_insert(0.);
-            *padding_height_max = max_by(*padding_height_max, container_padding, f64::total_cmp);
+            let max_depth = max_nesting_depth_by_rank.entry(ovr).or_default();
+            *max_depth = max(*max_depth, nesting_depth);
         }
         let mut row_height_offsets = BTreeMap::<VerticalRank, f64>::new();
         let mut cumulative_offset = 0.0;
-        let max_lvl = max(
-            edge_label_heights.keys().max().copied().unwrap_or(VerticalRank(0)),
-            max(
-                span_heights.keys().max().copied().unwrap_or(VerticalRank(0)),
-                padding_heights.keys().max().copied().unwrap_or(VerticalRank(0))
-            )
-        );
+        let max_lvl = *solved_locs.keys().max().unwrap() + 1;
         for lvl in 0..=max_lvl.0 {
             let lvl = VerticalRank(lvl);
-            let elh = edge_label_heights.get(&lvl).copied().unwrap_or(0);
-            let sh = span_heights.get(&lvl).copied().unwrap_or(0);
-            let ph = padding_heights.get(&lvl).copied().unwrap_or(0.);
+            let elh = max_edge_label_height_by_rank.get(&lvl).copied().unwrap_or(0);
+            let sh = max_nesting_span_by_rank.get(&lvl).and_then(|s| s.checked_sub(1)).unwrap_or(0);
+            let dh = max_nesting_depth_by_rank.get(&lvl).copied().unwrap_or(0);
             row_height_offsets.insert(lvl, cumulative_offset);
-            cumulative_offset += max_by(elh as f64 * line_height, ph, f64::total_cmp);
+            cumulative_offset += max_by(
+                elh as f64 * line_height, 
+                max_by(
+                    sh as f64 * height_scale, 
+                    dh as f64 * (nesting_top_padding + nesting_bottom_padding),
+                    f64::total_cmp
+                )
+                , f64::total_cmp
+            );
         }
         event!(Level::TRACE, ?row_height_offsets, "ROW HEIGHT OFFSETS");
         eprintln!("ROW HEIGHT OFFSETS {row_height_offsets:#?}");
+        eprintln!("EDGE LABEL HEIGHTS {max_edge_label_height_by_rank:#?}");
+        eprintln!("SPAN HEIGHTS {max_nesting_span_by_rank:#?}");
+        eprintln!("PADDING HEIGHTS {max_nesting_depth_by_rank:#?}");
         event!(Level::TRACE, ?width_by_hop, "WIDTH BY HOP");
         
     
@@ -3908,17 +3912,6 @@ pub mod frontend {
                     let ndv = nesting_depths[vl] as f64;
                     let ndw = nesting_depths[wl] as f64;
 
-                    let container_offset = if containers.contains(vl) {
-                        nesting_top_padding + nesting_bottom_padding + 5.
-                    } else {
-                        0.
-                    };
-                    let container_offset2 = if containers.contains(vl) {
-                        10.
-                    } else {
-                        0.
-                    };
-
                     let fs = container_depths.get(vl).copied().and_then(|d| d.checked_sub(1)).unwrap_or(0);
                     let hops = if fs == 0 {
                         hops.iter().collect::<Vec<_>>()
@@ -3929,15 +3922,17 @@ pub mod frontend {
                     let lh = hops.iter().rev().next().unwrap();
                     let fl = *fh.0 - 1;
                     let ll = *lh.0;
-                    let vmin = fl.0 as f64 * height_scale + vpad + ts[fl] + ndv * nesting_top_padding + container_offset ;
-                    let vmax = ll.0 as f64 * height_scale + vpad + ts[ll] + ndw * nesting_top_padding;
+                    let ft = ts[fl+2];
+                    let lt = ts[ll+2];
+                    let vmin = fl.0 as f64 * height_scale + vpad + ft + ndv * nesting_top_padding;
+                    let vmax = ll.0 as f64 * height_scale + vpad + lt + ndw * nesting_top_padding;
                     let nh = hops.len();
                     let vs = (0..=nh).map(|lvl|  {
                         let fraction = lvl as f64 / nh as f64;
                         vmin + fraction * (vmax - vmin)
                     })
                         .collect::<Vec<_>>();
-                    eprintln!("vl: {vl}, wl: {wl}, fs: {fs}, fl: {fl}, ll: {ll}, vmin: {vmin}, vmax: {vmax}, nh: {nh}, vs: {vs:?}");
+                    eprintln!("vl: {vl}, wl: {wl}, fs: {fs}, fl: {fl}, ll: {ll}, ft: {ft}, lt: {lt}: vmin: {vmin}, vmax: {vmax}, nh: {nh}, vs: {vs:?}");
                     for (n, hop) in hops.iter().enumerate() {
                         let (lvl, (mhr, nhr)) = *hop;
                         // let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
@@ -3948,7 +3943,7 @@ pub mod frontend {
                         let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
                         let hposd = (sposd + offset).round(); //  + 10. * lvl.0 as f64;
                         let lvl_offset = container_depths.get(vl).copied().unwrap_or(0);
-                        eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {} {} {}", ts[*lvl], ndv, lvl_offset, container_offset);
+                        eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {} {}", ts[*lvl], ndv, lvl_offset);
                         let mut vpos = vs[n];
                         let mut vpos2 = vs[n+1];
 
