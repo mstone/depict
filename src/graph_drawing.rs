@@ -2123,9 +2123,7 @@ pub mod layout {
         // Rank vertices by the length of the longest path reaching them.
         let mut vx_rank = HashMap::new();
         for (rank, paths) in paths_by_rank.iter() {
-            for (n, (_vx, wx)) in paths.iter().enumerate() 
-            {
-                let n = OriginalHorizontalRank(n);
+            for (_vx, wx) in paths.iter() {
                 vx_rank.insert(wx.clone(), *rank);
             }
         }
@@ -2138,10 +2136,6 @@ pub mod layout {
         let mut locs_by_level = BTreeMap::new();
 
         for (wl, rank) in vx_rank.iter() {
-            // let paths = &paths_by_rank[rank];
-            // let mhr = paths.iter().position(|e| e.1 == *wl)
-            //     .or_err(Kind::IndexingError{})?;
-            // let mhr = OriginalHorizontalRank(mhr);
             let level = locs_by_level
                 .entry(*rank)
                 .or_insert(0);
@@ -2262,48 +2256,6 @@ pub mod layout {
         event!(Level::DEBUG, ?g_hops_dot, "HOPS GRAPH");
 
         Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders, hcg})
-    }
-
-    pub mod sol {
-        //! Indices for the edge-crossing-minimization problem domain.
-        use std::fmt::Display;
-
-        use crate::graph_drawing::osqp::Fresh;
-
-        /// Edge-crossing-minimization variable indices.
-        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub enum AnySol {
-            /// X-type variables are indexed by (lvl, ohr1, ohr2) tuples
-            /// Their associated solver-domain variables will be set to 
-            /// true or 1.0 when the solver concludes that the object
-            /// at horizontal rank ohr1 in level `lvl` should be placed
-            /// to the left of the object at horizontal rank `ohr2` in `lvl`.
-            X(usize, usize, usize),
-
-            /// C-type variables are indexed by (lvl, u1, u2, v1, v2) tuples.
-            /// Their associated solver-domain variables will be set to
-            /// true or 1.0 when the solver determines that the (u1, u2) and 
-            /// (v1, v2) hops, originating on vertical rank `lvl`, cross 
-            /// given the relative orderings of u1, v1, u2, and v2.
-            C(usize, usize, usize, usize, usize),
-        }
-
-        /// AnySol: Sol requires Fresh but fresh variables are not needed
-        /// for the edge-crossing minimization problem.
-        impl Fresh for AnySol {
-            fn fresh(_index: usize) -> Self {
-                unreachable!()
-            }
-        }
-
-        impl Display for AnySol {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self {
-                    AnySol::X(l, a, b) => write!(f, "x{},{},{}", l, a, b),
-                    AnySol::C(l, u1, v1, u2, v2) => write!(f, "c{},{},{},{},{}", l, u1, v1, u2, v2),
-                }
-            }
-        }
     }
 
     pub mod debug {
@@ -2459,17 +2411,17 @@ pub mod layout {
             let wl1 = &h1.wl;
             let vl2 = &h2.vl;
             let wl2 = &h2.wl;
-            eprintln!("CROSSES: {h1:?}, {h2:?}, {lvl}, {vl1}->{wl1} X {vl2}->{wl2}, ({h11},{h12}) X ({h21},{h22}) -> ({u1},{u2}) X ({v1},{v2}) -> {c}");
-            if x121 {
-                eprintln!("{vl2} {vl1}");
-            } else {
-                eprintln!("{vl1} {vl2}");
-            }
-            if x221 {
-                eprintln!("{wl2} {wl1}");
-            } else {
-                eprintln!("{wl1} {wl2}");
-            }
+            // eprintln!("CROSSES: {h1:?}, {h2:?}, {lvl}, {vl1}->{wl1} X {vl2}->{wl2}, ({h11},{h12}) X ({h21},{h22}) -> ({u1},{u2}) X ({v1},{v2}) -> {c}");
+            // if x121 {
+            //     eprintln!("{vl2} {vl1}");
+            // } else {
+            //     eprintln!("{vl1} {vl2}");
+            // }
+            // if x221 {
+            //     eprintln!("{wl2} {wl1}");
+            // } else {
+            //     eprintln!("{wl1} {wl2}");
+            // }
             c as usize
         }
 
@@ -2493,7 +2445,7 @@ pub mod layout {
                 let bohr = bn.1.0;
                 let ashr = p[aovr][aohr];
                 let bshr = p[bovr][bohr];
-                // for now, only constrain nodes on the same vertical rank
+                // imperfect without rank-spanning constraint edges but maybe a place to start?
                 (aovr == bovr && ashr < bshr) || ashr <= bshr
             });
 
@@ -2566,15 +2518,6 @@ pub mod layout {
             if hops_by_level.is_empty() {
                 return Ok(LayoutSolution{crossing_number: 0, solved_locs: BTreeMap::new()});
             }
-            // if hops_by_level.iter().all(|(_lvl, hops)| hops.iter().count() <= 1) {
-            //     let mut solved_locs = BTreeMap::new();
-            //     for (lvl, locs) in locs_by_level.iter() {
-            //         for (n, _) in locs.iter().enumerate() {
-            //             solved_locs.entry(*lvl).or_insert_with(BTreeMap::new).insert(OriginalHorizontalRank(n), SolvedHorizontalRank(n));
-            //         }
-            //     }
-            //     return Ok(LayoutSolution{crossing_number: 0, solved_locs})
-            // }
 
             let mut shrs = vec![];
             for (_rank, locs) in locs_by_level.iter() {
@@ -3761,7 +3704,7 @@ pub mod frontend {
     }
 
     pub mod dom {
-        use std::borrow::Cow;
+        use std::{borrow::Cow, cmp::max};
 
         use tracing::{instrument, event};
 
@@ -3831,7 +3774,7 @@ pub mod frontend {
             let vpad = 50.0;
             let line_height = 20.0;
             let char_width = 9.0;
-            let nesting_padding = 40.;
+            let nesting_top_padding = 40.;
             let nesting_bottom_padding = 10.;
 
             let mut texts = vec![];
@@ -3857,7 +3800,7 @@ pub mod frontend {
                             height_scale * ((*ovr-1).0 as f64) + 
                             vpad + 
                             ts.get(*ovr).unwrap_or(&0.) + 
-                            nesting_depth * nesting_padding;
+                            nesting_depth * nesting_top_padding;
                         let width = (rpos - lpos).round();
                         let hpos = lpos.round();
                         let height = line_height + 6.;
@@ -3893,7 +3836,7 @@ pub mod frontend {
                         height_scale * ((*ovr-1).0 as f64) + 
                         vpad + 
                         ts[*ovr-1] + 
-                        nesting_depth * nesting_padding;
+                        nesting_depth * nesting_top_padding;
                     let width = (rpos - lpos).round();
                     let depth = container_depths[container] as f64;
                     let inner_depth = nesting_depth_by_container[container] as f64;
@@ -3903,7 +3846,7 @@ pub mod frontend {
                         // - nesting_depth * nesting_padding 
                         // - nesting_depth * nesting_bottom_padding
                         + (ts[*ovr - 1 + container_depths[container]] - ts[*ovr-1])
-                        + inner_depth * (nesting_padding + nesting_bottom_padding)
+                        + inner_depth * (nesting_top_padding + nesting_bottom_padding)
                         - 20.;
                     eprintln!("HEIGHT: {container} {height}");
 
@@ -3966,15 +3909,7 @@ pub mod frontend {
                     let ndw = nesting_depths[wl] as f64;
 
                     let container_offset = if containers.contains(vl) {
-                        let (ovr, ohr) = &node_to_loc[&Loc::Node(vl.clone())];
-                        let depth = container_depths[vl];
-                        // let inner_depth = nesting_depth_by_container[vl] as f64;
-                        (depth-1) as f64 * height_scale - 26. - 20.
-                        // (nesting_padding + nesting_bottom_padding)
-                        
-                        // 0.
-                        // (depth-1) as f64 * height_scale
-                        // 0.
+                        nesting_top_padding + nesting_bottom_padding + 5.
                     } else {
                         0.
                     };
@@ -3984,29 +3919,38 @@ pub mod frontend {
                         0.
                     };
 
+                    let fs = container_depths.get(vl).copied().and_then(|d| d.checked_sub(1)).unwrap_or(0);
+                    let hops = if fs == 0 {
+                        hops.iter().collect::<Vec<_>>()
+                    } else {
+                        hops.iter().skip(fs).collect::<Vec<_>>()
+                    };
+                    let fh = hops.iter().next().unwrap();
+                    let lh = hops.iter().rev().next().unwrap();
+                    let fl = *fh.0 - 1;
+                    let ll = *lh.0;
+                    let vmin = fl.0 as f64 * height_scale + vpad + ts[fl] + ndv * nesting_top_padding + container_offset ;
+                    let vmax = ll.0 as f64 * height_scale + vpad + ts[ll] + ndw * nesting_top_padding;
+                    let nh = hops.len();
+                    let vs = (0..=nh).map(|lvl|  {
+                        let fraction = lvl as f64 / nh as f64;
+                        vmin + fraction * (vmax - vmin)
+                    })
+                        .collect::<Vec<_>>();
+                    eprintln!("vl: {vl}, wl: {wl}, fs: {fs}, fl: {fl}, ll: {ll}, vmin: {vmin}, vmax: {vmax}, nh: {nh}, vs: {vs:?}");
                     for (n, hop) in hops.iter().enumerate() {
-                        let (lvl, (mhr, nhr)) = hop;
+                        let (lvl, (mhr, nhr)) = *hop;
                         // let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
                         let hn = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
                         let spos = ss[hn];
                         let hnd = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
                         let sposd = ss[hnd];
                         let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
-                        let hposd = (sposd + offset).round() + 10. * lvl.0 as f64;
-                        eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {} {}", ts[*lvl], ndv, container_offset);
-                        let lvl_offset = container_depths.get(vl).copied().map(|d| d-2).unwrap_or(0);
-                        let vpos = 
-                            ((*lvl+lvl_offset-1).0 as f64) * height_scale 
-                            + vpad 
-                            + ts[*lvl]
-                            + ndv * nesting_padding
-                            + container_offset;
-                        let mut vpos2 = 
-                            ((*lvl+lvl_offset).0 as f64) * height_scale 
-                            + vpad 
-                            + ts[(*lvl+1)] 
-                            + ndw * nesting_padding;
-                            // + container_offset2;
+                        let hposd = (sposd + offset).round(); //  + 10. * lvl.0 as f64;
+                        let lvl_offset = container_depths.get(vl).copied().unwrap_or(0);
+                        eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {} {} {}", ts[*lvl], ndv, lvl_offset, container_offset);
+                        let mut vpos = vs[n];
+                        let mut vpos2 = vs[n+1];
 
                         if n == 0 {
                             hn0.push(hn);
@@ -4052,7 +3996,7 @@ pub mod frontend {
                             label_vpos = Some(match ew {
                                 x if x == "fake" => {
                                     if containers.contains(vl) {
-                                        vpos + 26.
+                                        vpos + 25.
                                     } else {
                                         vpos + 40.
                                     }
@@ -4062,8 +4006,7 @@ pub mod frontend {
                         }
 
                         if n < hops.len() - 1 {
-                            // vpos2 += 26.0;
-                            vpos2 += 26. + container_offset2;
+                            vpos2 += 26.;
                         }
 
                         if n == hops.len() - 1 && *ew == "actuates" { 
@@ -4104,8 +4047,8 @@ pub mod frontend {
                     let rl = ls[nr] - 7.;
                     let wl = width_by_loc[locl].right;
                     let wr = width_by_loc[locr].left;
-                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] + forward_voffset + ndv * nesting_padding;
-                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] + forward_voffset + ndw * nesting_padding;
+                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] + forward_voffset + ndv * nesting_top_padding;
+                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] + forward_voffset + ndw * nesting_top_padding;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = forward.join("\n");
                     let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
@@ -4126,8 +4069,8 @@ pub mod frontend {
                     let rl = ls[nr];
                     let wl = width_by_loc[locl].right;
                     let wr = width_by_loc[locr].left;
-                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] + reverse_voffset + ndv * nesting_padding;
-                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] + reverse_voffset + ndw * nesting_padding;
+                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[locl.0] + reverse_voffset + ndv * nesting_top_padding;
+                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[locr.0] + reverse_voffset + ndw * nesting_top_padding;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = reverse.join("\n");
                     let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
