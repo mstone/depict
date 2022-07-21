@@ -2730,12 +2730,12 @@ pub mod geometry {
         L(LocSol),
         R(LocSol),
         S(HopSol),
-        T(usize)
+        F(usize)
     }
 
     impl Fresh for AnySol {
         fn fresh(index: usize) -> Self {
-            Self::T(index)
+            Self::F(index)
         }
     }
 
@@ -2745,7 +2745,7 @@ pub mod geometry {
                 AnySol::L(loc) => write!(f, "l{}", loc.0),
                 AnySol::R(loc) => write!(f, "r{}", loc.0),
                 AnySol::S(hop) => write!(f, "s{}", hop.0),
-                AnySol::T(idx) => write!(f, "t{}", idx),
+                AnySol::F(idx) => write!(f, "f{}", idx),
             }
         }
     }
@@ -3427,7 +3427,7 @@ pub mod geometry {
         let mut solutions = v.iter().map(|(_sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
         solutions.sort_by_key(|(a, _)| *a);
         for (var, val) in solutions {
-            if !matches!(var.sol, AnySol::T(_)) {
+            if !matches!(var.sol, AnySol::Z(_)) {
                 eprintln!("{} = {}", var.sol, val);
             }
         }
