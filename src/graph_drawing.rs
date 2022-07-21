@@ -3146,11 +3146,19 @@ pub mod geometry {
         let Vcg{
             vert_edge_labels: dag_edge_labels, 
             containers,
+            nodes_by_container,
             nesting_depth_by_container,
             container_depths,
             ..
         } = vcg;
-        let LayoutProblem{hops_by_edge, node_to_loc, hcg, ..} = layout_problem;
+        let LayoutProblem{
+            hops_by_edge,
+            node_to_loc,
+            loc_to_node,
+            hcg,
+            container_borders,
+            ..
+        } = layout_problem;
         let LayoutSolution{solved_locs, ..} = &layout_solution;
         let GeometryProblem{
             all_locs, 
@@ -3279,6 +3287,10 @@ pub mod geometry {
             let mut min_width = node_width.width.round() as usize;
             let mut min_height = node_width.height.round() as usize;
 
+            if let Loc::Border(_) = loc {
+                continue;
+            }
+
             if let Loc::Node(vl) = loc {
                 update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut min_width, vl)?;
             }
@@ -3293,32 +3305,51 @@ pub mod geometry {
             if n != root_n {
                 ch.leq(&mut vh, l(root_n), l(n));
                 ch.leq(&mut vh, r(n), r(root_n));
-
-                // cv.leq(&mut vv, t(root_n), t(n));
-                // cv.leq(&mut vv, b(n), b(root_n));
             }
             event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
             ch.leqc(&mut vh, l(n), r(n), min_width as f64);
 
-            // c.leqc(&mut v, t(n), b(n), min_height as f64);
             cv.leqc(&mut vv, t(n), b(n), 26.);
-            // cv.sym(&mut vv, &mut pdv, t(n), b(n), 100.);
 
             if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
-                let np = sol_by_loc[&(ovr, ohrp)];
-                let shrp = locs[&ohrp];
-                let wp = &size_by_loc[&(ovr, ohrp)];
-                let gap = max_by(sep, wp.right + node_width.left, f64::total_cmp);
-                ch.leqc(&mut vh, r(np), l(n), gap);
-                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, %gap, "X1: l{n} >= r{np} + ε")
+                let mut process = true;
+                if let Loc::Node(vl) = loc {
+                    let vll = &loc_to_node[&(ovr, ohrp)];
+                    if let Loc::Node(vll) = vll {
+                        if containers.contains(vl) && nodes_by_container[vl].contains(vll) 
+                        || containers.contains(vll) && nodes_by_container[vll].contains(vl) {
+                            process = false;
+                        }
+                    }
+                }
+                if process {
+                    let np = sol_by_loc[&(ovr, ohrp)];
+                    let shrp = locs[&ohrp];
+                    let wp = &size_by_loc[&(ovr, ohrp)];
+                    let gap = max_by(sep, wp.right + node_width.left, f64::total_cmp);
+                    ch.leqc(&mut vh, r(np), l(n), gap);
+                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, %gap, "X1: l{n} >= r{np} + ε")
+                }
             }
             if let Some(ohrn) = locs.iter().position(|(_, shrn)| *shrn == shr+1).map(OriginalHorizontalRank) {
-                let nn = sol_by_loc[&(ovr,ohrn)];
-                let shrn = locs[&(ohrn)];
-                let wn = &size_by_loc[&(ovr, ohrn)];
-                let gap = max_by(sep, node_width.right + wn.left, f64::total_cmp);
-                ch.leqc(&mut vh, r(n), l(nn), gap);
-                event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, %gap, "X2: r{n} <= l{nn} - ε")
+                let mut process = true;
+                if let Loc::Node(vl) = loc {
+                    let vlr = &loc_to_node[&(ovr, ohrn)];
+                    if let Loc::Node(vlr) = vlr {
+                        if containers.contains(vl) && nodes_by_container[vl].contains(vlr) 
+                        || containers.contains(vlr) && nodes_by_container[vlr].contains(vl) {
+                            process = false;
+                        }
+                    }
+                }
+                if process {
+                    let nn = sol_by_loc[&(ovr,ohrn)];
+                    let shrn = locs[&(ohrn)];
+                    let wn = &size_by_loc[&(ovr, ohrn)];
+                    let gap = max_by(sep, node_width.right + wn.left, f64::total_cmp);
+                    ch.leqc(&mut vh, r(n), l(nn), gap);
+                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, %gap, "X2: r{n} <= l{nn} - ε")
+                }
             }
         }
         let mut already_seen = HashSet::new();
@@ -3359,8 +3390,6 @@ pub mod geometry {
                 already_seen.insert((vn, wn));
             }
             
-            // cv.leqc(&mut vv, t(vn), t(wn), 26.);
-            // qv.push(10. * vv.get(t(wn)));
             cv.sym(&mut vv, &mut pdv, b(wn), t(vn), 1.);
             
 
@@ -3483,6 +3512,36 @@ pub mod geometry {
             cv.sym(&mut vv, &mut pdv, t(nl), t(nr), 10000.);
         }
 
+        for container in containers.iter() {
+            let locc = &node_to_loc[&Loc::Node(container.clone())];
+            let nc = sol_by_loc[locc];
+            for node in nodes_by_container[container].iter() {
+                let locn = &node_to_loc[&Loc::Node(node.clone())];
+                let nn = sol_by_loc[locn];
+                ch.leqc(&mut vh, l(nc), l(nn), 40.);
+                ch.leqc(&mut vh, r(nn), r(nc), 40.);
+                // ch.sym(&mut vh, &mut pdh, l(nc), r(nc), 10000.);
+                // ch.sym(&mut vh, &mut pdh, l(nc), r(nn), 1.);
+                cv.leqc(&mut vv, t(nc), t(nn), nesting_top_padding);
+                cv.leqc(&mut vv, b(nn), b(nc), nesting_bottom_padding);
+            }
+            for border in container_borders[container].first().iter() {
+                let (ovr, (ohr, pair)) = **border;
+                let sol1 = sol_by_loc[&(ovr, ohr)];
+                let sol2 = sol_by_loc[&(ovr, pair)];
+                ch.leq(&mut vh, l(sol1), l(sol2));
+                ch.geq(&mut vh, l(sol1), l(sol2));
+                ch.leq(&mut vh, r(sol1), r(sol2));
+                ch.geq(&mut vh, r(sol1), r(sol2));
+                // ch.sym(&mut vh, &mut pdh, l(sol1), r(sol1), 10000.);
+
+                cv.leq(&mut vv, t(sol1), t(sol2));
+                cv.geq(&mut vv, t(sol1), t(sol2));
+                cv.leq(&mut vv, b(sol1), b(sol2));
+                cv.geq(&mut vv, b(sol1), b(sol2));
+            }
+        }
+
 
         // add non-negativity constraints for all vars
         for (sol, var) in vh.iter() {
@@ -3493,7 +3552,9 @@ pub mod geometry {
         for (n, (sol, var)) in vv.iter().enumerate() {
             if !matches!(sol, AnySol::F(_)) {
                 cv.push((0., vec![var.into()], f64::INFINITY));
-                // qv.push(((n+1) as f64) * <&Var<AnySol> as Into<Monomial<AnySol>>>::into(var));
+            }
+            if matches!(sol, AnySol::T(_)) {
+                qv.push(10000. as f64 * Monomial::from(var));
             }
         }
 
@@ -3918,14 +3979,10 @@ pub mod frontend {
                     let ln = sol_by_loc[&(*ovr, *lohr)];
                     let rn = sol_by_loc[&(*ovr, *rohr)];
                     let lpos = ls[ln];
-                    let rpos = rs[rn];
+                    let rpos = rs[ln];
                     let nesting_depth = nesting_depths[container] as f64;
                     let z_index = nesting_depths[container];
-                    let vpos = 
-                        height_scale * ((*ovr-1).0 as f64) + 
-                        vpad + 
-                        ts[ln] + 
-                        nesting_depth * nesting_top_padding;
+                    let vpos = ts[ln];
                     let width = (rpos - lpos).round();
                     let depth = container_depths[container] as f64;
                     let inner_depth = nesting_depth_by_container[container] as f64;
