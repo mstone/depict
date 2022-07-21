@@ -2776,7 +2776,7 @@ pub mod geometry {
         pub n: HopSol,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, PartialOrd)]
     pub struct NodeSize {
         pub width: f64,
         pub left: f64,
@@ -2784,7 +2784,7 @@ pub mod geometry {
         pub height: f64,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, PartialOrd)]
     pub struct HopSize {
         pub width: f64,
         pub left: f64,
@@ -3344,18 +3344,16 @@ pub mod geometry {
             let node = all_objects.iter().find(|loc| matches!(loc, Loc2::Node{..}));
             let num_objects: usize = level_to_object.iter().flat_map(|row| row.1.iter().map(|cell| cell.1.len())).sum();
             let terminal = nhr.0 > num_objects;
-            let default_hop_width = (20.0, 20.0);
-            let min_hop_height = 40.;
-            let (action_width, percept_width) = {
-                size_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width)
-            };
+            let default_hop_size = HopSize{width: 0., left: 20., right: 20., height: 50., top: 0., bottom: 0.};
+            let hop_size = &size_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).unwrap_or(&default_hop_size);
+            let (action_width, percept_width, min_hop_height) = (hop_size.left, hop_size.right, hop_size.height);
             // flow_width, flow_rev_width?
 
             ch.leqc(&mut vh, l(root_n), s(n), action_width);
             ch.leqc(&mut vh, s(n), r(root_n), percept_width);
 
             if !already_seen.contains(&(vn, wn)) {
-                cv.leqc(&mut vv, b(vn), t(wn), 50.);
+                cv.leqc(&mut vv, b(vn), t(wn), min_hop_height);
                 already_seen.insert((vn, wn));
             }
             
@@ -3392,14 +3390,14 @@ pub mod geometry {
 
                     for (ox, hop) in terminal_hops.iter().enumerate() {
                         if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
-                            let owidth = size_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
+                            let owidth = size_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_size);
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
-                                let owidth_l = size_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
-                                ch.leqc(&mut vh, s(*onl), s(*on), sep + owidth_l.1 + owidth.0);
+                                let owidth_l = size_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_size);
+                                ch.leqc(&mut vh, s(*onl), s(*on), sep + owidth_l.right + owidth.left);
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
-                                let owidth_r = size_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
-                                ch.leqc(&mut vh, s(*on), s(*onr), sep + owidth_r.0 + owidth.1);
+                                let owidth_r = size_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_size);
+                                ch.leqc(&mut vh, s(*on), s(*onr), sep + owidth_r.left + owidth.right);
                             }
                         }
                     }
@@ -3424,14 +3422,14 @@ pub mod geometry {
 
                     for (ox, hop) in initial_hops.iter().enumerate() {
                         if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
-                            let owidth =size_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
+                            let owidth = size_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_size);
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
-                                let owidth_l = size_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
-                                ch.leqc(&mut vh, s(*onl), s(*on), sep + owidth_l.1 + owidth.0);
+                                let owidth_l = size_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_size);
+                                ch.leqc(&mut vh, s(*onl), s(*on), sep + owidth_l.right + owidth.left);
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
-                                let owidth_r = size_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
-                                ch.leqc(&mut vh, s(*on), s(*onr), sep + owidth_r.0 + owidth.1);
+                                let owidth_r = size_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_size);
+                                ch.leqc(&mut vh, s(*on), s(*onr), sep + owidth_r.left + owidth.right);
                             }
                         }
                     }
@@ -3449,8 +3447,8 @@ pub mod geometry {
                             ch.geqc(&mut vh, s(n), l(*ln), sep + action_width);
                         },
                         Loc2::Hop{vl: lvl, wl: lwl, loc: (lvr, lhr), sol: ln, ..} => {
-                            let (_action_width_l, percept_width_l) = size_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
-                            ch.geqc(&mut vh, s(n), s(*ln), (2.*sep) + percept_width_l + action_width);
+                            let hop_size_l = size_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).unwrap_or(&default_hop_size);
+                            ch.geqc(&mut vh, s(n), s(*ln), (2.*sep) + hop_size_l.right + hop_size.left);
                         },
                     }
                 }
@@ -3465,8 +3463,8 @@ pub mod geometry {
                             ch.leqc(&mut vh, s(n), l(*rn), sep + action_width);
                         },
                         Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
-                            let (action_width_r, _percept_width_r) = size_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
-                            ch.leqc(&mut vh, s(n), s(*rn), (2.*sep) + action_width_r + percept_width);
+                            let hop_size_r = size_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_size);
+                            ch.leqc(&mut vh, s(n), s(*rn), (2.*sep) + hop_size_r.left + hop_size.right);
                         },
                     }
                 }
@@ -3542,7 +3540,7 @@ pub mod geometry {
 }
 
 pub mod frontend {
-    use std::{fmt::Display, borrow::Cow, collections::HashMap};
+    use std::{fmt::Display, borrow::Cow, collections::HashMap, cmp::max_by};
 
     use logos::Logos;
     use self_cell::self_cell;
@@ -3564,6 +3562,7 @@ pub mod frontend {
     {
         // let char_width = 8.67;
         let char_width = 9.0;
+        let line_height = geometry_problem.line_height.unwrap_or(20.);
         let arrow_width = 40.0;
         
         let vert_node_labels = &vcg.vert_node_labels;
@@ -3616,6 +3615,7 @@ pub mod frontend {
         for ((vl, wl), hops) in hops_by_edge.iter() {
             let mut action_width = 10.0;
             let mut percept_width = 10.0;
+            let mut height = 0.;
             let cex = condensed.find_edge(condensed_vxmap[vl], condensed_vxmap[wl]).unwrap();
             let cew = condensed.edge_weight(cex).unwrap();
             for (vl, wl, ew) in cew.iter() {
@@ -3624,12 +3624,12 @@ pub mod frontend {
                     .and_then(|dsts| dsts
                         .get(wl)
                         .and_then(|rels| rels.get(ew)))
-                        .and_then(|labels| labels
-                            .iter()
-                            .map(|label| label.len())
-                            .max()
-                        );
-    
+                    .and_then(|labels| labels
+                        .iter()
+                        .map(|label| label.len())
+                        .max()
+                    );
+
                 match ew {
                     x if *x == "senses" => {
                         percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
@@ -3639,14 +3639,24 @@ pub mod frontend {
                     }
                     _ => {}
                 }
+
+                let label_height = vert_edge_labels
+                    .get(vl)
+                    .and_then(|dsts| dsts
+                        .get(wl)
+                        .and_then(|rels| rels.get(ew)))
+                    .map(|labels| labels.len());
+
+                height = max_by(height, label_height.unwrap_or(1) as f64 * line_height, f64::total_cmp);
             }
-    
+            height += 50.;
+
             for (lvl, (mhr, _nhr)) in hops.iter() {
                 size_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), HopSize{
                     width: 0.,
                     left: action_width,
                     right: percept_width,
-                    height: 50.,
+                    height,
                     top: 0.,
                     bottom: 0.,
                 });
@@ -3662,6 +3672,7 @@ pub mod frontend {
         }
 
         eprintln!("SIZE_BY_LOC: {size_by_loc:#?}");
+        eprintln!("SIZE_BY_HOP: {size_by_hop:#?}");
     
         Ok(())
     }
@@ -3789,7 +3800,7 @@ pub mod frontend {
             pub vpos: f64,
         }
 
-        #[derive(Clone, Debug, PartialEq)]
+        #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Node {
             Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: LocSol, estimated_size: NodeSize },
             Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_size: HopSize },
@@ -4049,7 +4060,7 @@ pub mod frontend {
                                         vpos + 14.
                                     }
                                 },
-                                _ => vpos,
+                                _ => vpos - 20.,
                             });
                         }
 
