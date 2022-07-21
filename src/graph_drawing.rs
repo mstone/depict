@@ -2776,12 +2776,22 @@ pub mod geometry {
         pub n: HopSol,
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct NodeSize {
         pub width: f64,
         pub left: f64,
         pub right: f64,
         pub height: f64,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct HopSize {
+        pub width: f64,
+        pub left: f64,
+        pub right: f64,
+        pub height: f64,
+        pub top: f64,
+        pub bottom: f64,
     }
     
     #[derive(Clone, Debug, Default)]
@@ -2792,7 +2802,7 @@ pub mod geometry {
         pub sol_by_loc: HashMap<(VerticalRank, OriginalHorizontalRank), LocSol>,
         pub sol_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol>,
         pub size_by_loc: HashMap<LocIx, NodeSize>,
-        pub width_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), (f64, f64)>,
+        pub size_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSize>,
         pub height_scale: Option<f64>,
         pub line_height: Option<f64>,
         pub nesting_top_padding: Option<f64>,
@@ -2901,7 +2911,7 @@ pub mod geometry {
         }
     
         let size_by_loc = HashMap::new();
-        let width_by_hop = HashMap::new();
+        let size_by_hop = HashMap::new();
 
         let height_scale = None;
         let line_height = None;
@@ -2915,7 +2925,7 @@ pub mod geometry {
             sol_by_loc, 
             sol_by_hop, 
             size_by_loc, 
-            width_by_hop, 
+            size_by_hop, 
             height_scale,
             line_height, 
             nesting_top_padding, 
@@ -2943,7 +2953,7 @@ pub mod geometry {
         let Vcg{vert: dag, vert_vxmap: dag_map, ..} = vcg;
         let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = layout_solution;
-        let GeometryProblem{width_by_hop, ..} = geometry_problem;
+        let GeometryProblem{size_by_hop, ..} = geometry_problem;
         let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
         let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
         let mut v_dsts = v_ers
@@ -3012,15 +3022,15 @@ pub mod geometry {
         let out_width: f64 = v_out_first_hops
             .iter()
             .map(|idx| {
-                let widths = width_by_hop[idx];
-                widths.0 + widths.1
+                let sz = &size_by_hop[idx];
+                sz.left + sz.right
             })
             .sum();
         let in_width: f64 = w_in_last_hops
             .iter()
             .map(|idx| {
-                let widths = width_by_hop[idx];
-                widths.0 + widths.1
+                let sz = &size_by_hop[idx];
+                sz.left + sz.right
             })
             .sum();
 
@@ -3146,7 +3156,7 @@ pub mod geometry {
             sol_by_loc, 
             sol_by_hop, 
             size_by_loc, 
-            width_by_hop,
+            size_by_hop,
             height_scale,
             line_height,
             nesting_top_padding,
@@ -3198,7 +3208,7 @@ pub mod geometry {
         eprintln!("EDGE LABEL HEIGHTS {max_edge_label_height_by_rank:#?}");
         eprintln!("SPAN HEIGHTS {max_nesting_span_by_rank:#?}");
         eprintln!("PADDING HEIGHTS {max_nesting_depth_by_rank:#?}");
-        event!(Level::TRACE, ?width_by_hop, "WIDTH BY HOP");
+        event!(Level::TRACE, ?size_by_hop, "SIZE BY HOP");
         
     
         let sep = 20.0;
@@ -3337,10 +3347,8 @@ pub mod geometry {
             let default_hop_width = (20.0, 20.0);
             let min_hop_height = 40.;
             let (action_width, percept_width) = {
-                width_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).unwrap_or(&default_hop_width)
+                size_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width)
             };
-            let action_width = *action_width;
-            let percept_width = *percept_width;
             // flow_width, flow_rev_width?
 
             ch.leqc(&mut vh, l(root_n), s(n), action_width);
@@ -3384,13 +3392,13 @@ pub mod geometry {
 
                     for (ox, hop) in terminal_hops.iter().enumerate() {
                         if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
-                            let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
+                            let owidth = size_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
-                                let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
+                                let owidth_l = size_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
                                 ch.leqc(&mut vh, s(*onl), s(*on), sep + owidth_l.1 + owidth.0);
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
-                                let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
+                                let owidth_r = size_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
                                 ch.leqc(&mut vh, s(*on), s(*onr), sep + owidth_r.0 + owidth.1);
                             }
                         }
@@ -3416,13 +3424,13 @@ pub mod geometry {
 
                     for (ox, hop) in initial_hops.iter().enumerate() {
                         if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
-                            let owidth = width_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_width);
+                            let owidth =size_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
                             if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
-                                let owidth_l = width_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_width);
+                                let owidth_l = size_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
                                 ch.leqc(&mut vh, s(*onl), s(*on), sep + owidth_l.1 + owidth.0);
                             }
                             if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
-                                let owidth_r = width_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_width);
+                                let owidth_r = size_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
                                 ch.leqc(&mut vh, s(*on), s(*onr), sep + owidth_r.0 + owidth.1);
                             }
                         }
@@ -3441,7 +3449,7 @@ pub mod geometry {
                             ch.geqc(&mut vh, s(n), l(*ln), sep + action_width);
                         },
                         Loc2::Hop{vl: lvl, wl: lwl, loc: (lvr, lhr), sol: ln, ..} => {
-                            let (_action_width_l, percept_width_l) = width_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).unwrap_or(&default_hop_width);
+                            let (_action_width_l, percept_width_l) = size_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
                             ch.geqc(&mut vh, s(n), s(*ln), (2.*sep) + percept_width_l + action_width);
                         },
                     }
@@ -3457,7 +3465,7 @@ pub mod geometry {
                             ch.leqc(&mut vh, s(n), l(*rn), sep + action_width);
                         },
                         Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
-                            let (action_width_r, _percept_width_r) = width_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_width);
+                            let (action_width_r, _percept_width_r) = size_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).map(|sz| (sz.left, sz.right)).unwrap_or(default_hop_width);
                             ch.leqc(&mut vh, s(n), s(*rn), (2.*sep) + action_width_r + percept_width);
                         },
                     }
@@ -3542,7 +3550,7 @@ pub mod frontend {
     use tracing::{event, Level};
     use tracing_error::InstrumentResult;
 
-    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize}, error::{Error, Kind, OrErrExt}, eval::Val};
 
@@ -3561,7 +3569,7 @@ pub mod frontend {
         let vert_node_labels = &vcg.vert_node_labels;
         let vert_edge_labels = &vcg.vert_edge_labels;
         let size_by_loc = &mut geometry_problem.size_by_loc;
-        let width_by_hop = &mut geometry_problem.width_by_hop;
+        let size_by_hop = &mut geometry_problem.size_by_hop;
         let hops_by_edge = &layout_problem.hops_by_edge;
         let loc_to_node = &layout_problem.loc_to_node;
         let hcg = &layout_problem.hcg;
@@ -3634,7 +3642,14 @@ pub mod frontend {
             }
     
             for (lvl, (mhr, _nhr)) in hops.iter() {
-                width_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), (action_width, percept_width));
+                size_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), HopSize{
+                    width: 0.,
+                    left: action_width,
+                    right: percept_width,
+                    height: 50.,
+                    top: 0.,
+                    bottom: 0.,
+                });
                 if size_by_loc.get(&(*lvl, *mhr)).is_none() {
                     size_by_loc.insert((*lvl, *mhr), NodeSize{
                         width: action_width + percept_width, 
@@ -3763,7 +3778,7 @@ pub mod frontend {
 
         use tracing::{instrument, event};
 
-        use crate::graph_drawing::{error::{OrErrExt, Kind, Error}, layout::Loc, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}};
+        use crate::graph_drawing::{error::{OrErrExt, Kind, Error}, layout::Loc, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}};
 
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -3774,10 +3789,10 @@ pub mod frontend {
             pub vpos: f64,
         }
 
-        #[derive(Clone, Debug, PartialEq, PartialOrd)]
+        #[derive(Clone, Debug, PartialEq)]
         pub enum Node {
-            Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: LocSol, estimated_width: f64 },
-            Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_width: (f64,f64) },
+            Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: LocSol, estimated_size: NodeSize },
+            Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_size: HopSize },
         }
 
         #[derive(Clone, Debug)]
@@ -3816,7 +3831,7 @@ pub mod frontend {
             let hcg = &depiction.layout_problem.hcg;
             let sol_by_hop = &depiction.geometry_problem.sol_by_hop;
             let size_by_loc = &depiction.geometry_problem.size_by_loc;
-            let width_by_hop = &depiction.geometry_problem.width_by_hop;
+            let size_by_hop = &depiction.geometry_problem.size_by_hop;
             let crossing_number = depiction.layout_solution.crossing_number;
             let condensed = &depiction.cvcg.condensed;
             let containers = &depiction.vcg.containers;
@@ -3865,8 +3880,8 @@ pub mod frontend {
                         // if !label.is_screaming_snake_case() {
                         //     label = label.to_title_case();
                         // }
-                        let estimated_width = size_by_loc[&(*ovr, *ohr)].width;
-                        texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: n, estimated_width});
+                        let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
+                        texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: n, estimated_size});
                     } 
                 }
             }
@@ -3903,8 +3918,8 @@ pub mod frontend {
                         .clone();
                     if label == "_" { label = String::new(); };
                     
-                    let estimated_width = size_by_loc[&(*ovr, *ohr)].width;
-                    texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: ln, estimated_width});
+                    let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
+                    texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: ln, estimated_size});
                 }
             }
 
@@ -3949,7 +3964,7 @@ pub mod frontend {
                     // use rand::Rng;
                     // let mut rng = rand::thread_rng();
                     let mut hn0 = vec![];
-                    let mut estimated_width0 = None;
+                    let mut estimated_size0 = None;
 
                     let ndv = nesting_depths[vl] as f64;
                     let ndw = nesting_depths[wl] as f64;
@@ -3991,7 +4006,7 @@ pub mod frontend {
                         hn0.push(hnd);
                         
                         if n == 0 {
-                            estimated_width0 = Some(width_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())]);
+                            estimated_size0 = Some(size_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())].clone());
                             let mut vpos = vpos;
                             if *ew == "senses" {
                                 vpos += 7.0; // box height + arrow length
@@ -4058,7 +4073,7 @@ pub mod frontend {
                     if let (Some(label_text), Some(label_hpos), Some(label_width), Some(label_vpos)) = (label_text, label_hpos, label_width, label_vpos) {
                         label = Some(Label{text: label_text, hpos: label_hpos, width: label_width, vpos: label_vpos})
                     }
-                    arrows.push(Node::Svg{key, path, z_index, rel: ew.to_string(), label, hops: hn0, estimated_width: estimated_width0.unwrap()});
+                    arrows.push(Node::Svg{key, path, z_index, rel: ew.to_string(), label, hops: hn0, estimated_size: estimated_size0.unwrap()});
                 }
             }
             let forward_voffset = 6.;
@@ -4090,7 +4105,8 @@ pub mod frontend {
                     } else {
                         None
                     };
-                    arrows.push(Node::Svg{key, path, z_index, label, rel: "forward".into(), hops: vec![], estimated_width: (wl, wr) });
+                    let estimated_size = HopSize{ width: 0., left: wl, right: wr, height: 0., top: 0., bottom: 0. };
+                    arrows.push(Node::Svg{key, path, z_index, label, rel: "forward".into(), hops: vec![], estimated_size });
                 }
                 if let Some(reverse) = &lvl.reverse {
                     let key = format!("{vl}_{wl}_reverse_{m}");
@@ -4112,7 +4128,8 @@ pub mod frontend {
                     } else {
                         None
                     };
-                    arrows.push(Node::Svg{key, path, z_index, label, rel: "reverse".into(), hops: vec![], estimated_width: (wl, wr) });
+                    let estimated_size = HopSize{ width: 0., left: wl, right: wr, height: 0., top: 0., bottom: 0. };
+                    arrows.push(Node::Svg{key, path, z_index, label, rel: "reverse".into(), hops: vec![], estimated_size });
                 }
             }
 
