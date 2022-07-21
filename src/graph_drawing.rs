@@ -1172,7 +1172,7 @@ pub mod osqp {
         /// `t`, constraining `t` to be equal to `lhs - rhs`, and adding `t` to a 
         /// collection representing the diagonal of the quadratic form P of the 
         /// objective `1/2 x'Px + Qx`.
-        pub fn sym(&mut self, v: &mut Vars<S>, pd: &mut Vec<Monomial<S>>, lhs: S, rhs: S) {
+        pub fn sym(&mut self, v: &mut Vars<S>, pd: &mut Vec<Monomial<S>>, lhs: S, rhs: S, coeff: f64) {
             // P[i, j] = 100 => obj += 100 * x_i * x_j
             // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
             // x_k = x_i - x_j => x_k - x_i + x_j = 0
@@ -1181,9 +1181,10 @@ pub mod osqp {
             // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
             // obj.push(...)
             let t = v.get(S::fresh(v.vars.len()));
-            let symmetry_cost = 100.0;
-            pd.push(symmetry_cost * t);
+            let tm = coeff * t;
+            pd.push(tm);
             self.eq(&[t, -v.get(lhs), v.get(rhs)]);
+            eprintln!("SYM {t} {tm:?} {lhs} {rhs}");
         }
     }
 
@@ -2712,6 +2713,7 @@ pub mod geometry {
     use tracing_error::InstrumentError;
     use typed_index_collections::TiVec;
 
+    use crate::graph_drawing::layout::HorizontalConstraint;
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples};
 
     use super::error::{LayoutError};
@@ -3148,7 +3150,7 @@ pub mod geometry {
             container_depths,
             ..
         } = vcg;
-        let LayoutProblem{hops_by_edge, node_to_loc, ..} = layout_problem;
+        let LayoutProblem{hops_by_edge, node_to_loc, hcg, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = &layout_solution;
         let GeometryProblem{
             all_locs, 
@@ -3300,7 +3302,7 @@ pub mod geometry {
 
             // c.leqc(&mut v, t(n), b(n), min_height as f64);
             cv.leqc(&mut vv, t(n), b(n), 26.);
-            // cv.sym(&mut vv, &mut pdv, t(n), b(n));
+            // cv.sym(&mut vv, &mut pdv, t(n), b(n), 100.);
 
             if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
                 let np = sol_by_loc[&(ovr, ohrp)];
@@ -3359,12 +3361,12 @@ pub mod geometry {
             
             // cv.leqc(&mut vv, t(vn), t(wn), 26.);
             // qv.push(10. * vv.get(t(wn)));
-            cv.sym(&mut vv, &mut pdv, b(wn), t(vn));
+            cv.sym(&mut vv, &mut pdv, b(wn), t(vn), 1.);
             
 
             if !terminal {
                 let nd = sol_by_hop[&((*lvl+1), *nhr, (*vl).clone(), (*wl).clone())];
-                ch.sym(&mut vh, &mut pdh, s(n), s(nd));
+                ch.sym(&mut vh, &mut pdh, s(n), s(nd), 100.);
             }
 
             event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
@@ -3472,6 +3474,15 @@ pub mod geometry {
             
             event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP END");
         }
+
+        for HorizontalConstraint{a: vl, b: wl} in hcg.constraints.iter() {
+            let locl = &node_to_loc[&Loc::Node(vl.clone())];
+            let locr = &node_to_loc[&Loc::Node(wl.clone())];
+            let nl = sol_by_loc[locl];
+            let nr = sol_by_loc[locr];
+            cv.sym(&mut vv, &mut pdv, t(nl), t(nr), 10000.);
+        }
+
 
         // add non-negativity constraints for all vars
         for (sol, var) in vh.iter() {
@@ -4106,8 +4117,8 @@ pub mod frontend {
                     let rl = ls[nr] - 7.;
                     let wl = size_by_loc[locl].right;
                     let wr = size_by_loc[locr].left;
-                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[nl] + forward_voffset + ndv * nesting_top_padding;
-                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[nr] + forward_voffset + ndw * nesting_top_padding;
+                    let vposl = ts[nl] + forward_voffset;
+                    let vposr = ts[nr] + forward_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = forward.join("\n");
                     let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
@@ -4129,8 +4140,8 @@ pub mod frontend {
                     let rl = ls[nr];
                     let wl = size_by_loc[locl].right;
                     let wr = size_by_loc[locr].left;
-                    let vposl = ((locl.0-1).0 as f64) * height_scale + vpad + ts[nl] + reverse_voffset + ndv * nesting_top_padding;
-                    let vposr = ((locr.0-1).0 as f64) * height_scale + vpad + ts[nr] + reverse_voffset + ndw * nesting_top_padding;
+                    let vposl = ts[nl] + reverse_voffset;
+                    let vposr = ts[nr] + reverse_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = reverse.join("\n");
                     let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
