@@ -1489,7 +1489,7 @@ pub mod layout {
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
     
-    use petgraph::EdgeDirection::Outgoing;
+    use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::algo::floyd_warshall;
     use petgraph::dot::Dot;
     use petgraph::graph::{Graph, NodeIndex, EdgeReference};
@@ -1829,7 +1829,7 @@ pub mod layout {
         vcg.containers.insert(parent.clone());
     }
 
-    pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
+    pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>, hcg: &'t Hcg<Cow<'s, str>>) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
         let vert = Graph::<Cow<str>, Cow<str>>::new();
         let vert_vxmap = HashMap::<Cow<str>, NodeIndex>::new();
         let vert_node_labels = HashMap::new();
@@ -1913,6 +1913,50 @@ pub mod layout {
             }
         }
 
+        for HorizontalConstraint{a, b} in hcg.constraints.iter() {
+            let ax = vcg.vert_vxmap[a];
+            let bx = vcg.vert_vxmap[b];
+            let a_incoming = vcg.vert.edges_directed(ax, Incoming)
+                .filter_map(|er| {
+                    let rel = er.weight().as_ref();
+                    if rel == "actuates" || rel == "senses" || rel == "fake" {
+                        let src_ix = er.source(); 
+                        let src = vcg.vert.node_weight(src_ix).unwrap().clone();
+                        Some((src, src_ix))
+                    } else { 
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            let b_incoming = vcg.vert.edges_directed(bx, Incoming)
+                .filter_map(|er| {
+                    let rel = er.weight().as_ref();
+                    if rel == "actuates" || rel == "senses" || rel == "fake" {
+                        let src_ix = er.source(); 
+                        let src = vcg.vert.node_weight(src_ix).unwrap().clone();
+                        Some((src, src_ix))
+                    } else { 
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            eprintln!("IMPLIED {a} {b} {a_incoming:?} {b_incoming:?}");
+            for (src, src_ix) in a_incoming {
+                vcg.vert.add_edge(src_ix, bx, "implied_forward".into());
+                vcg.vert_edge_labels
+                    .entry(src.clone()).or_default()
+                    .entry(b.clone()).or_default()
+                    .entry("implied".into()).or_default();
+            }
+            for (src, src_ix) in b_incoming {
+                vcg.vert.add_edge(src_ix, ax, "implied_reverse".into());
+                vcg.vert_edge_labels
+                    .entry(src.clone()).or_default()
+                    .entry(a.clone()).or_default()
+                    .entry("implied".into()).or_default();
+            }
+        }
+
         let vert_roots = roots(&vcg.vert)?;
         let root_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, "root".into());
         vcg.vert_node_labels.insert("root".into(), "".to_string());
@@ -1933,7 +1977,23 @@ pub mod layout {
                 Some(el.clone())
             });
             let subroots = roots(&subdag)?;
-            let subpaths_by_rank = rank(&subdag, &subroots, &vcg.containers, &vcg.nodes_by_container, &container_depths)?;
+            let distance = {
+                let containers = &vcg.containers;
+                let nodes_by_container = &vcg.nodes_by_container;
+                let container_depths = &container_depths;
+                |src, dst| {
+                    if !containers.contains(src) {
+                        -1
+                    } else {
+                        if nodes_by_container[src].contains(dst) {
+                            0
+                        } else {
+                            -(container_depths[src] as isize)
+                        }
+                    }
+                }
+            };
+            let subpaths_by_rank = rank(&subdag, &subroots, distance)?;
             let depth = std::cmp::max(1, subpaths_by_rank.len());
             container_depths.insert(vl.clone(), depth);
             eprintln!("CONTAINER {vl}");
@@ -1943,8 +2003,12 @@ pub mod layout {
             eprintln!("DEPTH {depth}");
         }
 
+
+
         event!(Level::TRACE, ?vcg, "VCG");
         eprintln!("VCG: {vcg:#?}");
+        let vcg_dot = Dot::new(&vcg.vert);
+        eprintln!("VCG DOT:\n{vcg_dot:?}");
 
         Ok(vcg)
     }
@@ -1977,6 +2041,7 @@ pub mod layout {
         }
         let dot = Dot::new(&condensed);
         event!(Level::DEBUG, ?dot, "CONDENSED");
+        eprintln!("CONDENSED:\n{dot:?}");
         Ok(Cvcg{condensed, condensed_vxmap})
     }
 
@@ -1985,23 +2050,13 @@ pub mod layout {
     /// negative weights.
     pub fn rank<'s, V: Graphic, E>(
         dag: &'s Graph<V, E>, 
-        roots: &'s SortedVec<V>, 
-        containers: &'s HashSet<V>, 
-        nodes_by_container: &'s HashMap<V, HashSet<V>>,
-        container_depths: &'s HashMap<V, usize>,
+        roots: &'s SortedVec<V>,
+        distance: impl Fn(&'s V, &'s V) -> isize,
     ) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
         let paths_fw = floyd_warshall(&dag, |er| {
             let src = dag.node_weight(er.source()).unwrap();
             let dst = dag.node_weight(er.target()).unwrap();
-            if !containers.contains(src) {
-                -1
-            } else {
-                if nodes_by_container[src].contains(dst) {
-                    0
-                } else {
-                    -(container_depths[src] as isize)
-                }
-            }
+            distance(src, dst)
         })
             .map_err(|cycle| 
                 Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
@@ -2140,9 +2195,9 @@ pub mod layout {
     pub type RankedPaths<V> = BTreeMap<VerticalRank, SortedVec<(V, V)>>;
 
     /// Set up a [LayoutProblem] problem
-    pub fn calculate_locs_and_hops<'s, V, E>(
+    pub fn calculate_locs_and_hops<'s, V, E: AsRef<str>>(
         _model: &'s Val<V>,
-        dag: &'s Graph<V, E>, 
+        dag: &'s Graph<V, SortedVec<(V, V, E)>>, 
         paths_by_rank: &'s RankedPaths<V>,
         vcg: &Vcg<V, V>,
         hcg: Hcg<V>,
@@ -2181,7 +2236,7 @@ pub mod layout {
         }
 
         event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V1");
-        let is_contains = |er: &EdgeReference<E>| {
+        let is_contains = |er: &EdgeReference<_>| {
             let src = dag.node_weight(er.source()).unwrap();
             let dst = dag.node_weight(er.target()).unwrap();
             containers.contains(src) && nodes_by_container[src].contains(dst)
@@ -2190,15 +2245,20 @@ pub mod layout {
             dag
                 .edge_references()
                 .filter(|x| !is_contains(x))
-                .map(|er| {
+                .filter_map(|er| {
                     let (vx, wx) = (er.source(), er.target());
-                    let vl = dag.node_weight(vx).or_err(Kind::IndexingError{})?;
-                    let wl = dag.node_weight(wx).or_err(Kind::IndexingError{})?;
-                    Ok((vl.clone(), wl.clone(), er.weight()))
+                    let vl = dag.node_weight(vx).unwrap();
+                    let wl = dag.node_weight(wx).unwrap();
+                    let wgt = er.weight();
+                    if wgt.iter().any(|(_, _, rel)| rel.as_ref().starts_with("implied")) {
+                        None
+                    } else {
+                        Some((vl.clone(), wl.clone(), er.weight()))
+                    }
                 })
-                .into_iter()
-                .collect::<Result<Vec<_>, Error>>()?
+                .collect::<Vec<_>>()
         );
+        eprintln!("SORTED CONDENSED EDGES: {sorted_condensed_edges:?}");
 
         event!(Level::DEBUG, ?sorted_condensed_edges, "CONDENSED GRAPH");
 
@@ -3632,7 +3692,8 @@ pub mod geometry {
             let shrl = solved_locs[&locl.0][&locl.1];
             let shrr = solved_locs[&locr.0][&locr.1];
             let num_objects: usize = level_to_object.iter().flat_map(|row| row.1.iter().map(|cell| cell.1.len())).sum();
-            for obj in level_to_object[&ovrr][&shrr].iter() {
+            let empty = HashSet::new();
+            for obj in level_to_object.get(&ovrr).and_then(|lvl| lvl.get(&shrr)).unwrap_or(&empty) {
                 match obj {
                     Loc2::Hop{vl: hvl, wl: hwl, ..} => {
                         if *hwl == wl {
@@ -3643,7 +3704,7 @@ pub mod geometry {
                     _ => {},
                 }; 
             }
-            for obj in level_to_object[&ovrl][&shrl].iter() {
+            for obj in level_to_object.get(&ovrl).and_then(|lvl| lvl.get(&shrl)).unwrap_or(&empty) {
                 match obj {
                     Loc2::Hop{vl: hvl, wl: hwl, ..} => {
                         if *hvl == vl {
@@ -3863,7 +3924,7 @@ pub mod frontend {
     use tracing::{event, Level};
     use tracing_error::InstrumentResult;
 
-    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border, HorizontalConstraint}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize}, error::{Error, Kind, OrErrExt}, eval::Val};
 
@@ -4053,8 +4114,8 @@ pub mod frontend {
             eprintln!("SCOPES: {scopes:#?}");
             eprintln!("RESOLVE: {val:#?}");
     
-            let vcg = calculate_vcg(&val)?;
             let hcg = calculate_hcg(&val)?;
+            let vcg = calculate_vcg(&val, &hcg)?;
 
             event!(Level::TRACE, ?val, "HCG");
             eprintln!("HCG {hcg:#?}");
@@ -4066,7 +4127,29 @@ pub mod frontend {
     
             let roots = crate::graph_drawing::graph::roots(condensed)?;
     
-            let mut paths_by_rank = rank(condensed, &roots, containers, nodes_by_container, container_depths)?;
+            let distance = {
+                let containers = &containers;
+                let nodes_by_container = &nodes_by_container;
+                let container_depths = &container_depths;
+                |src: &Cow<str>, dst: &Cow<str>| {
+                    if !containers.contains(src) {
+                        // if hcg.constraints.contains(&HorizontalConstraint{a: src.clone(), b: dst.clone()})
+                        // || hcg.constraints.contains(&HorizontalConstraint{a: dst.clone(), b: src.clone()}) {
+                        //     0
+                        // } else {
+                        //     -1
+                        // }
+                        -1
+                    } else {
+                        if nodes_by_container[src].contains(dst) {
+                            0
+                        } else {
+                            -(container_depths[src] as isize)
+                        }
+                    }
+                }
+            };
+            let mut paths_by_rank = rank(condensed, &roots, distance)?;
 
             fixup_hcg_rank(&hcg, &mut paths_by_rank);
     
@@ -4751,8 +4834,8 @@ mod tests {
         
         let val = eval::eval(&v[..]);
 
-        let vcg = calculate_vcg(&val)?;
         let hcg = calculate_hcg(&val)?;
+        let vcg = calculate_vcg(&val, &hcg)?;
 
         let Vcg{vert, vert_vxmap, containers, nodes_by_container, container_depths, ..} = &vcg;
         let vx = vert_vxmap["Ab"];
@@ -4768,7 +4851,23 @@ mod tests {
 
         let roots = roots(&condensed)?;
 
-        let paths_by_rank = rank(&condensed, &roots, &containers, &nodes_by_container, &container_depths)?;
+        let distance = {
+            let containers = &containers;
+            let nodes_by_container = &nodes_by_container;
+            let container_depths = &container_depths;
+            |src, dst| {
+                if !containers.contains(src) {
+                    -1
+                } else {
+                    if nodes_by_container[src].contains(dst) {
+                        0
+                    } else {
+                        -(container_depths[src] as isize)
+                    }
+                }
+            }
+        };
+        let paths_by_rank = rank(&condensed, &roots, distance)?;
         assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("Ac")));
 
         let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg)?;

@@ -28,6 +28,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 const PLACEHOLDER: &str = indoc!("
 p q
 r q >: sdf / zlk
+r t
 ");
 /*
 a [ b ]
