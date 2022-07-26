@@ -1009,12 +1009,14 @@ pub mod osqp {
     //! 
     //! This module helps pose problems to minimize an objective defined 
     //! in terms of constrained variables.
-    use std::{borrow::Cow, collections::{HashMap, BTreeMap}, fmt::{Debug, Display}, hash::Hash};
+    use std::{borrow::Cow, collections::{HashMap, BTreeMap, HashSet}, fmt::{Debug, Display}, hash::Hash, ops::{Mul, Neg}};
 
     #[cfg(all(feature="osqp", not(feature="osqp-rust")))]
     use osqp;
     #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
     use osqp_rust as osqp;
+
+    use super::layout::Graphic;
 
     /// A map from Sols to Vars. `get()`ing an not-yet-seen sol 
     /// allocates a new `Var` for that sol and returns a monomial
@@ -1041,7 +1043,7 @@ pub mod osqp {
         }
     }
 
-    impl<S: Sol> Display for Monomial<S> {
+    impl<S: Sol, C: Coeff> Display for Monomial<S, C> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self.coeff {
                 x if x == -1. => write!(f, "-{}", self.var),
@@ -1051,7 +1053,7 @@ pub mod osqp {
         }
     }
 
-    impl<S: Sol> Display for Constraints<S> {
+    impl<S: Sol, C: Coeff> Display for Constraints<S, C> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             writeln!(f, "Constraints {{")?;
             for (l, comb, u) in self.constrs.iter() {
@@ -1082,7 +1084,7 @@ pub mod osqp {
             self.len() == 0
         }
 
-        pub fn get(&mut self, index: S) -> Monomial<S> {
+        pub fn get<C: Coeff>(&mut self, index: S) -> Monomial<S, C> {
             let len = self.vars.len();
             let var = self.vars
                 .entry(index)
@@ -1101,13 +1103,16 @@ pub mod osqp {
         }
     }
 
+    pub trait Coeff : Copy + Clone + Debug + Display + Eq + From<f64> + Hash + Into<f64> + Mul<Output=Self> + Neg<Output=Self> + Ord + PartialEq + PartialEq<f64> + PartialOrd {}
+    impl<C: Copy + Clone + Debug + Display + Eq + From<f64> + Hash + Into<f64> + Mul<Output=C> + Neg<Output=C> + Ord + PartialEq + PartialEq<f64> + PartialOrd> Coeff for C {}
+
     /// A collection of affine constraints: L <= Ax <= U.
     #[derive(Debug, Clone)]
-    pub struct Constraints<S: Sol> {
-        pub constrs: Vec<(f64, Vec<Monomial<S>>, f64)>,
+    pub struct Constraints<S: Sol, C: Coeff> {
+        pub constrs: HashSet<(C, Vec<Monomial<S, C>>, C)>,
     }
 
-    impl<S: Sol> Constraints<S> {
+    impl<S: Sol, C: Coeff> Constraints<S, C> {
         pub fn new() -> Self {
             Self { constrs: Default::default() }
         }
@@ -1120,11 +1125,11 @@ pub mod osqp {
             self.len() == 0
         }
 
-        pub fn push(&mut self, value: (f64, Vec<Monomial<S>>, f64)) {
-            self.constrs.push(value)
+        pub fn push(&mut self, value: (C, Vec<Monomial<S, C>>, C)) {
+            self.constrs.insert(value);
         }
 
-        pub fn iter(&self) -> impl Iterator<Item=&(f64, Vec<Monomial<S>>, f64)> {
+        pub fn iter(&self) -> impl Iterator<Item=&(C, Vec<Monomial<S, C>>, C)> {
             self.constrs.iter()
         }
 
@@ -1134,13 +1139,13 @@ pub mod osqp {
             if lhs == rhs {
                 return
             }
-            self.constrs.push((0., vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
+            self.constrs.insert(((0.).into(), vec![-v.get(lhs), v.get(rhs)], f64::INFINITY.into()));
         }
 
         /// Constrain `lhs + c` to be less than `rhs`.
         /// l + c < r => c < r - l => A = A += [1(r) ... -1(l) ...], L += 0, U += (FMAX/infty)
-        pub fn leqc(&mut self, v: &mut Vars<S>, lhs: S, rhs: S, c: f64) {
-            self.constrs.push((c, vec![-v.get(lhs), v.get(rhs)], f64::INFINITY));
+        pub fn leqc<C2: Into<C>>(&mut self, v: &mut Vars<S>, lhs: S, rhs: S, c: C2) {
+            self.constrs.insert((c.into(), vec![-v.get(lhs), v.get(rhs)], f64::INFINITY.into()));
         }
 
         /// Constrain `lhs` to be greater than `rhs`.
@@ -1149,30 +1154,30 @@ pub mod osqp {
             if lhs == rhs {
                 return
             }
-            self.constrs.push((0., vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
+            self.constrs.insert(((0.).into(), vec![v.get(lhs), -v.get(rhs)], f64::INFINITY.into()));
         }
 
         /// Constrain `lhs` to be greater than `rhs + c`.
         /// l > r + c => l - r > c => A += [1(r) ... -1(s) ...], L += c, U += (FMAX/infty)
-        pub fn geqc(&mut self, v: &mut Vars<S>, lhs: S, rhs: S, c: f64) {
-            self.constrs.push((c, vec![v.get(lhs), -v.get(rhs)], f64::INFINITY));
+        pub fn geqc<C2: Into<C>>(&mut self, v: &mut Vars<S>, lhs: S, rhs: S, c: C2) {
+            self.constrs.insert((c.into(), vec![v.get(lhs), -v.get(rhs)], f64::INFINITY.into()));
         }
 
         /// Constrain the linear combination `lc` to be equal to 0.
-        pub fn eq(&mut self, lc: &[Monomial<S>]) {
-            self.constrs.push((0., Vec::from(lc), 0.));
+        pub fn eq(&mut self, lc: &[Monomial<S, C>]) {
+            self.constrs.insert(((0.).into(), Vec::from(lc), (0.).into()));
         }
 
         /// Constrain the linear combination `lc` to be equal to `c`.
-        pub fn eqc(&mut self, lc: &[Monomial<S>], c: f64) {
-            self.constrs.push((c, Vec::from(lc), c));
+        pub fn eqc(&mut self, lc: &[Monomial<S, C>], c: C) {
+            self.constrs.insert((c, Vec::from(lc), c));
         }
 
         /// Constrain `lhs` to be similar to `rhs` by introducing a fresh variable, 
         /// `t`, constraining `t` to be equal to `lhs - rhs`, and adding `t` to a 
         /// collection representing the diagonal of the quadratic form P of the 
         /// objective `1/2 x'Px + Qx`.
-        pub fn sym(&mut self, v: &mut Vars<S>, pd: &mut Vec<Monomial<S>>, lhs: S, rhs: S, coeff: f64) {
+        pub fn sym<C2: Into<C>>(&mut self, v: &mut Vars<S>, pd: &mut Vec<Monomial<S, C>>, lhs: S, rhs: S, coeff: C2) {
             // P[i, j] = 100 => obj += 100 * x_i * x_j
             // we want 100 * (x_i-x_j)^2 => we need a new variable for x_i - x_j?
             // x_k = x_i - x_j => x_k - x_i + x_j = 0
@@ -1180,15 +1185,15 @@ pub mod osqp {
             // 0 <= k-i+j && k-i+j <= 0    =>    i <= k+j && k+j <= i       => i-j <= k && k <= i-j => k == i-j
             // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
             // obj.push(...)
-            let t = v.get(S::fresh(v.vars.len()));
-            let tm = coeff * t;
-            pd.push(tm);
+            let mut t = v.get(S::fresh(v.vars.len()));
+            t.coeff = t.coeff * coeff.into();
+            pd.push(t);
             self.eq(&[t, -v.get(lhs), v.get(rhs)]);
-            eprintln!("SYM {t} {tm:?} {lhs} {rhs}");
+            eprintln!("SYM {t} {lhs} {rhs}");
         }
     }
 
-    impl<S: Sol> Default for Constraints<S> {
+    impl<S: Sol, C: Coeff> Default for Constraints<S, C> {
         fn default() -> Self {
             Self::new()
         }
@@ -1206,7 +1211,7 @@ pub mod osqp {
     impl<S: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd> Sol for S {}
 
     /// Convert `rows` into an `osqp::CscMatrix` in "compressed sparse column" format.
-    fn as_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial<S>]]) -> osqp::CscMatrix<'s> {
+    fn as_csc_matrix<'s, S: Sol, C: Coeff>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial<S, C>]]) -> osqp::CscMatrix<'s> {
         let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
         let mut indptr = vec![];
         let mut indices = vec![];
@@ -1218,7 +1223,7 @@ pub mod osqp {
                     let old = cols
                         .entry(term.var.index)
                         .or_default()
-                        .insert(row, term.coeff);
+                        .insert(row, term.coeff.into());
                     assert!(old.is_none());
                 }
             }
@@ -1250,7 +1255,7 @@ pub mod osqp {
     }
 
     /// Convert `rows` into a *diagonal* `osqp::CscMatrix` in "compressed sparse column" format.
-    pub fn as_diag_csc_matrix<'s, S: Sol>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial<S>]) -> osqp::CscMatrix<'s> {
+    pub fn as_diag_csc_matrix<'s, S: Sol, C: Coeff>(nrows: Option<usize>, ncols: Option<usize>, rows: &[Monomial<S, C>]) -> osqp::CscMatrix<'s> {
         let mut cols: BTreeMap<usize, BTreeMap<usize, f64>> = BTreeMap::new();
         let mut indptr = vec![];
         let mut indices = vec![];
@@ -1261,7 +1266,7 @@ pub mod osqp {
                 let old = cols
                     .entry(term.var.index)
                     .or_default()
-                    .insert(term.var.index, term.coeff);
+                    .insert(term.var.index, term.coeff.into());
                 assert!(old.is_none());
             }
         }
@@ -1291,8 +1296,23 @@ pub mod osqp {
         }
     }
 
-    impl<'s, S: Sol> From<Constraints<S>> for osqp::CscMatrix<'s> {
-        fn from(c: Constraints<S>) -> Self {
+    pub fn as_scipy(name: impl Display, m: &osqp::CscMatrix) {
+        let osqp::CscMatrix{
+            nrows,
+            ncols,
+            indptr,
+            indices,
+            data,
+        } = m;
+        eprintln!("{name} = sp.csc_array(({data:?},{indices:?},{indptr:?}), shape=({nrows},{ncols}))");
+    }
+
+    pub fn as_numpy(name: impl Display, v: &Vec<f64>) {
+        eprintln!("{name} = np.array({v:?})");
+    }
+
+    impl<'s, S: Sol, C: Coeff> From<Constraints<S, C>> for osqp::CscMatrix<'s> {
+        fn from(c: Constraints<S, C>) -> Self {
             let a = &c.constrs
                 .iter()
                 .map(|(_, comb, _)| &comb[..])
@@ -1323,13 +1343,13 @@ pub mod osqp {
     /// We use "monomials" to specify the data (weights and variables) 
     /// of individual terms of these linear or quadratic forms to be 
     /// optimized via convenient syntax implemented via operator overloading.
-    #[derive(Clone, Copy, Debug)]
-    pub struct Monomial<S: Sol> {
+    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct Monomial<S: Sol, C: Coeff> {
         pub var: Var<S>,
-        pub coeff: f64,
+        pub coeff: C,
     }
 
-    impl<S: Sol> std::ops::Neg for Monomial<S> {
+    impl<S: Sol, C: Coeff> std::ops::Neg for Monomial<S, C> {
         type Output = Self;
         fn neg(mut self) -> Self::Output {
             self.coeff = -self.coeff;
@@ -1337,24 +1357,24 @@ pub mod osqp {
         }
     }
 
-    impl<S: Sol> From<&Var<S>> for Monomial<S> {
+    impl<S: Sol, C: Coeff> From<&Var<S>> for Monomial<S, C> {
         fn from(var: &Var<S>) -> Self {
-            Monomial{ var: *var, coeff: 1. }
+            Monomial{ var: *var, coeff: (1.).into() }
         }
     }
 
-    impl<S: Sol> std::ops::Mul<Monomial<S>> for f64 {
-        type Output = Monomial<S>;
-        fn mul(self, mut rhs: Monomial<S>) -> Self::Output {
-            rhs.coeff *= self;
+    impl<S: Sol, C: Coeff> std::ops::Mul<Monomial<S, C>> for f64 {
+        type Output = Monomial<S, C>;
+        fn mul(self, mut rhs: Monomial<S, C>) -> Self::Output {
+            rhs.coeff = rhs.coeff * self.into();
             rhs
         }
     }
 
     /// A pretty-printer for linear combinations of monomials.
-    pub struct Printer<'s, S: Sol>(pub &'s Vec<Monomial<S>>);
+    pub struct Printer<'s, S: Sol, C: Coeff>(pub &'s Vec<Monomial<S, C>>);
 
-    impl<'s, S: Sol> Display for Printer<'s, S> {
+    impl<'s, S: Sol, C: Coeff> Display for Printer<'s, S, C> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "[")?;
             for (n, m) in self.0.iter().enumerate() {
@@ -2122,7 +2142,7 @@ pub mod layout {
         let Vcg{containers, nodes_by_container, container_depths, ..} = vcg;
 
         // Rank vertices by the length of the longest path reaching them.
-        let mut vx_rank = HashMap::new();
+        let mut vx_rank = BTreeMap::new();
         for (rank, paths) in paths_by_rank.iter() {
             for (_vx, wx) in paths.iter() {
                 vx_rank.insert(wx.clone(), *rank);
@@ -2175,8 +2195,6 @@ pub mod layout {
         for (vl, wl, _) in sorted_condensed_edges.iter() {
             let (vvr, vhr) = node_to_loc[&Loc::Node(vl.clone())].clone();
             let (wvr, whr) = node_to_loc[&Loc::Node(wl.clone())].clone();
-            // let vvr = *vx_rank.get(vl).unwrap() + container_depths.get(vl).copied().map(|d| d-1).unwrap_or(0);
-            // let wvr = *vx_rank.get(wl).unwrap();
             
             let mut mhrs = vec![vhr];
             for mid_level in (vvr+1).0..(wvr.0) {
@@ -2702,6 +2720,7 @@ pub mod geometry {
     //! 3. then, the resulting [osqp_rust::Solution] needs to be destructured so that the resulting solution values can be returned to [`position_sols()`]'s caller as a [GeometrySolution].
 
     use enum_kinds::EnumKind;
+    use ordered_float::OrderedFloat;
     #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
     use osqp_rust as osqp;
     #[cfg(all(feature="osqp", not(feature="osqp-rust")))]
@@ -2713,11 +2732,11 @@ pub mod geometry {
     use tracing_error::InstrumentError;
     use typed_index_collections::TiVec;
 
-    use crate::graph_drawing::layout::HorizontalConstraint;
-    use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples};
+    use crate::graph_drawing::layout::{HorizontalConstraint, Border};
+    use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples, as_scipy, as_numpy};
 
     use super::error::{LayoutError};
-    use super::osqp::{Constraints, Monomial, Vars, Fresh, Var, Sol};
+    use super::osqp::{Constraints, Monomial, Vars, Fresh, Var, Sol, Coeff};
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
@@ -2728,6 +2747,7 @@ pub mod geometry {
     use std::collections::{HashMap, BTreeMap, HashSet};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
+    use std::ops::Mul;
 
     #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, EnumKind)]
     #[enum_kind(AnySolKind)]
@@ -3047,11 +3067,11 @@ pub mod geometry {
     }
 
 
-    fn solve_problem<S: Sol>(
+    fn solve_problem<S: Sol, C: Coeff>(
         v: &Vars<S>,
-        c: &Constraints<S>, 
-        pd: &Vec<Monomial<S>>, 
-        q: &Vec<Monomial<S>>,
+        c: &Constraints<S, C>, 
+        pd: &Vec<Monomial<S, C>>, 
+        q: &Vec<Monomial<S, C>>,
         settings: &osqp::Settings,
     ) -> Result<Vec<(Var<S>, f64)>, Error> {
         let n = v.len();
@@ -3064,14 +3084,14 @@ pub mod geometry {
         let mut q2 = Vec::with_capacity(n);
         q2.resize(n, 0.);
         for q in q.iter() {
-            q2[q.var.index] += q.coeff; 
+            q2[q.var.index] += q.coeff.into(); 
         }
 
         let mut l2 = vec![];
         let mut u2 = vec![];
         for (l, _, u) in c.iter() {
-            l2.push(*l);
-            u2.push(*u);
+            l2.push((*l).into());
+            u2.push((*u).into());
         }
         eprintln!("V[{}]: {v}", v.len());
         eprintln!("C[{}]: {c}", &c.len());
@@ -3083,6 +3103,23 @@ pub mod geometry {
         eprintln!("L2[{}]: {l2:?}", l2.len());
         eprintln!("U2[{}]: {u2:?}", u2.len());
         eprintln!("A2[{},{}]: {a2:?}", a2.nrows, a2.ncols);
+        eprintln!("NUMPY");
+        eprintln!("import osqp");
+        eprintln!("import numpy as np");
+        eprintln!("import scipy.sparse as sp");
+        eprintln!("");
+        eprintln!("inf = np.inf");
+        eprintln!("np.set_printoptions(precision=1, suppress=True)");
+        as_scipy("P", &p2);
+        as_numpy("q", &q2);
+        as_scipy("A", &a2);
+        as_numpy("l", &l2);
+        as_numpy("u", &u2);
+        eprintln!("m = osqp.OSQP()");
+        eprintln!("m.setup(P=P, q=q, A=A, l=l, u=u)");
+        eprintln!("r = m.solve()");
+        eprintln!("r.info.status");
+        eprintln!("r.x");
 
         let mut prob = osqp::Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], settings)
             .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
@@ -3224,14 +3261,14 @@ pub mod geometry {
         let sep = 20.0;
 
         let mut vh: Vars<AnySol> = Vars::new();
-        let mut ch: Constraints<AnySol> = Constraints::new();
-        let mut pdh: Vec<Monomial<AnySol>> = vec![];
-        let mut qh: Vec<Monomial<AnySol>> = vec![];
+        let mut ch: Constraints<AnySol, OrderedFloat<f64>> = Constraints::new();
+        let mut pdh: Vec<Monomial<AnySol, OrderedFloat<f64>>> = vec![];
+        let mut qh: Vec<Monomial<AnySol, OrderedFloat<f64>>> = vec![];
 
         let mut vv: Vars<AnySol> = Vars::new();
-        let mut cv: Constraints<AnySol> = Constraints::new();
-        let mut pdv: Vec<Monomial<AnySol>> = vec![];
-        let mut qv: Vec<Monomial<AnySol>> = vec![];
+        let mut cv: Constraints<AnySol, OrderedFloat<f64>> = Constraints::new();
+        let mut pdv: Vec<Monomial<AnySol, OrderedFloat<f64>>> = vec![];
+        let mut qv: Vec<Monomial<AnySol, OrderedFloat<f64>>> = vec![];
 
         let l = AnySol::L;
         let r = AnySol::R;
@@ -3308,6 +3345,8 @@ pub mod geometry {
             }
             event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
             ch.leqc(&mut vh, l(n), r(n), min_width as f64);
+            // ch.leqc(&mut vh, l(n), r(n), 40. + min_width as f64);
+            // ch.sym(&mut vh, &mut pdh, l(n), r(n), 10000.);
 
             cv.leqc(&mut vv, t(n), b(n), 26.);
 
@@ -3395,7 +3434,7 @@ pub mod geometry {
 
             if !terminal {
                 let nd = sol_by_hop[&((*lvl+1), *nhr, (*vl).clone(), (*wl).clone())];
-                ch.sym(&mut vh, &mut pdh, s(n), s(nd), 100.);
+                ch.sym(&mut vh, &mut pdh, s(n), s(nd), 1.);
             }
 
             event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
@@ -3513,27 +3552,65 @@ pub mod geometry {
         }
 
         for container in containers.iter() {
-            let locc = &node_to_loc[&Loc::Node(container.clone())];
-            let nc = sol_by_loc[locc];
+            let borders = &container_borders[container];
+            let (ovr, (ohr, pair)) = borders.iter().next().unwrap();
+            let shr1 = solved_locs[ovr][ohr];
+            let shr2 = solved_locs[ovr][pair];
+            let lohr = if shr1 < shr2 { ohr } else { pair };
+            let rohr = if shr1 < shr2 { pair } else { ohr };
+            let ln = sol_by_loc[&(*ovr, *lohr)];
+            let rn = sol_by_loc[&(*ovr, *rohr)];
+            let nc = ln;
+            let np = rn;
+            ch.leqc(&mut vh, l(nc), r(np), 20.);
+            ch.leqc(&mut vh, l(nc), r(nc), 20.);
+            ch.leqc(&mut vh, r(nc), l(np), 20.);
+            ch.leqc(&mut vh, l(np), r(np), 20.);
             for node in nodes_by_container[container].iter() {
                 let locn = &node_to_loc[&Loc::Node(node.clone())];
                 let nn = sol_by_loc[locn];
-                ch.leqc(&mut vh, l(nc), l(nn), 40.);
-                ch.leqc(&mut vh, r(nn), r(nc), 40.);
-                // ch.sym(&mut vh, &mut pdh, l(nc), r(nc), 10000.);
-                // ch.sym(&mut vh, &mut pdh, l(nc), r(nn), 1.);
+                if containers.contains(node) {
+                    let (ovr, (ohr, pair)) = container_borders[container].iter().copied().next().unwrap();
+                    let (iovr, (iohr, ipair)) = container_borders[node].iter().copied().next().unwrap();
+                    let shr1 = solved_locs[&ovr][&ohr];
+                    let shr2 = solved_locs[&ovr][&pair];
+                    let lohr = if shr1 < shr2 { ohr } else { pair };
+                    let rohr = if shr1 < shr2 { pair } else { ohr };
+                    let sol1 = sol_by_loc[&(ovr, lohr)];
+                    let sol2 = sol_by_loc[&(ovr, rohr)];
+
+                    let ishr1 = solved_locs[&iovr][&iohr];
+                    let ishr2 = solved_locs[&iovr][&ipair];
+                    let ilohr = if ishr1 < ishr2 { iohr } else { ipair };
+                    let irohr = if ishr1 < ishr2 { ipair } else { iohr };
+                    let isol1 = sol_by_loc[&(iovr, ilohr)];
+                    let isol2 = sol_by_loc[&(iovr, irohr)];
+                    
+                    ch.leqc(&mut vh, l(sol1), l(isol1), 20.);
+                    ch.leqc(&mut vh, r(isol2), r(sol2), 20.);
+                } else {
+                    ch.leqc(&mut vh, l(nc), l(nn), 40.);
+                    ch.leqc(&mut vh, r(nn), r(np), 40.);
+                    // ch.sym(&mut vh, &mut pdh, l(nc), r(nc), 100.);
+                    // // ch.sym(&mut vh, &mut pdh, l(nc), r(nn), 1.);
+                }
                 cv.leqc(&mut vv, t(nc), t(nn), nesting_top_padding);
                 cv.leqc(&mut vv, b(nn), b(nc), nesting_bottom_padding);
             }
             for border in container_borders[container].first().iter() {
                 let (ovr, (ohr, pair)) = **border;
-                let sol1 = sol_by_loc[&(ovr, ohr)];
-                let sol2 = sol_by_loc[&(ovr, pair)];
+                let shr1 = solved_locs[&ovr][&ohr];
+                let shr2 = solved_locs[&ovr][&pair];
+                let lohr = if shr1 < shr2 { ohr } else { pair };
+                let rohr = if shr1 < shr2 { pair } else { ohr };
+                let sol1 = sol_by_loc[&(ovr, lohr)];
+                let sol2 = sol_by_loc[&(ovr, rohr)];
                 ch.leq(&mut vh, l(sol1), l(sol2));
-                ch.geq(&mut vh, l(sol1), l(sol2));
+                // ch.geq(&mut vh, l(sol1), l(sol2));
                 ch.leq(&mut vh, r(sol1), r(sol2));
-                ch.geq(&mut vh, r(sol1), r(sol2));
-                // ch.sym(&mut vh, &mut pdh, l(sol1), r(sol1), 10000.);
+                // ch.geq(&mut vh, r(sol1), r(sol2));
+                // // ch.sym(&mut vh, &mut pdh, l(sol1), r(sol2), 10.);
+                // // ch.sym(&mut vh, &mut pdh, l(sol2), r(sol1), 10.);
 
                 cv.leq(&mut vv, t(sol1), t(sol2));
                 cv.geq(&mut vv, t(sol1), t(sol2));
@@ -3546,43 +3623,89 @@ pub mod geometry {
         // add non-negativity constraints for all vars
         for (sol, var) in vh.iter() {
             if !matches!(sol, AnySol::F(_)) {
-                ch.push((0., vec![var.into()], f64::INFINITY));
+                ch.push(((0.).into(), vec![var.into()], f64::INFINITY.into()));
             }
+            // if matches!(sol, AnySol::R(_)) {
+            //     qh.push(10000. as f64 * Monomial::from(var));
+            // }
         }
         for (n, (sol, var)) in vv.iter().enumerate() {
             if !matches!(sol, AnySol::F(_)) {
-                cv.push((0., vec![var.into()], f64::INFINITY));
+                cv.push(((0.).into(), vec![var.into()], f64::INFINITY.into()));
             }
             if matches!(sol, AnySol::T(_)) {
                 qv.push(10000. as f64 * Monomial::from(var));
             }
         }
 
-        eprintln!("SOLVE HORIZONTAL");
-        let solutions_h = solve_problem(&vh, &ch, &pdh, &qh, &osqp::Settings::default()
-        // .adaptive_rho(false)
-        // .check_termination(Some(200))
-        // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
-        // .adaptive_rho_interval(Some(25))
-        .eps_abs(1e-1)
-        .eps_rel(1e-1)
-        .max_iter(128_000)
-        // .max_iter(400)
-        // .polish(true)
-        .verbose(true))?;
-
+        let mut solutions_h;
+        loop {
+            let mut eps_abs = 1e-4_f64;
+            let mut eps_rel = 1e-4_f64;
+            eprintln!("SOLVE HORIZONTAL");
+            solutions_h = solve_problem(&vh, &ch, &pdh, &qh, &osqp::Settings::default()
+                // .adaptive_rho(false)
+                // .rho(1e2_f64)
+                .check_termination(Some(4000))
+                // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
+                // .adaptive_rho_interval(Some(25))
+                .eps_abs(eps_abs)
+                .eps_rel(eps_rel)
+                .max_iter(128_000_000)
+                // .scaled_termination(false)
+                // .max_iter(400)
+                .polish(true)
+                .verbose(true))?;
+            
+            let mut constraints_satisfied = true;
+            for container in containers.iter() {
+                let locc = &node_to_loc[&Loc::Node(container.clone())];
+                let nc = sol_by_loc[locc];
+                for node in nodes_by_container[container].iter() {
+                    let locn = &node_to_loc[&Loc::Node(node.clone())];
+                    let nn = sol_by_loc[locn];
+                    let vlnc = vh.get::<OrderedFloat<f64>>(l(nc));
+                    let vlnn = vh.get::<OrderedFloat<f64>>(l(nn));
+                    let vrnn = vh.get::<OrderedFloat<f64>>(r(nn));
+                    let vrnc = vh.get::<OrderedFloat<f64>>(r(nc));
+                    let lnc = &solutions_h[vlnc.var.index].1;
+                    let lnn = &solutions_h[vlnn.var.index].1;
+                    let rnc = &solutions_h[vrnc.var.index].1;
+                    let rnn = &solutions_h[vrnn.var.index].1;
+                    if lnc + 39. >= *lnn {
+                        eprintln!("lnc-lnn conflict");
+                        constraints_satisfied = false;
+                    }
+                    if rnn + 39. >= *rnc {
+                        eprintln!("rnn-rnc conflict");
+                        constraints_satisfied = false;
+                    }
+                    if rnc - lnc < 21. {
+                        eprintln!("container too narrow");
+                        constraints_satisfied = false;
+                    }
+                }
+            }
+            // if constraints_satisfied {
+                break
+            // } else {
+            //     eps_abs = eps_abs / 10.;
+            //     eps_rel = eps_rel / 10.;
+            // }
+        }
+        
         eprintln!("SOLVE VERTICAL");
         let solutions_v = solve_problem(&vv, &cv, &pdv, &qv, &osqp::Settings::default()
-        // .adaptive_rho(false)
-        // .check_termination(Some(200))
-        // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
-        // .adaptive_rho_interval(Some(25))
-        // .eps_abs(1e-4)
-        // .eps_rel(1e-4)
-        // .max_iter(128_000)
-        // .max_iter(400)
-        // .polish(true)
-        .verbose(true))?;
+            .adaptive_rho(false)
+            // .check_termination(Some(200))
+            // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
+            // .adaptive_rho_interval(Some(25))
+            // .eps_abs(1e-4)
+            // .eps_rel(1e-4)
+            // .max_iter(128_000)
+            // .max_iter(400)
+            // .polish(true)
+            .verbose(true))?;
 
         let ls = extract_variable(&vh, &solutions_h, AnySolKind::L, "ls".into(), |s| { 
             if let AnySol::L(l) = s { l } else { panic!() }
@@ -3979,7 +4102,7 @@ pub mod frontend {
                     let ln = sol_by_loc[&(*ovr, *lohr)];
                     let rn = sol_by_loc[&(*ovr, *rohr)];
                     let lpos = ls[ln];
-                    let rpos = rs[ln];
+                    let rpos = rs[rn];
                     let nesting_depth = nesting_depths[container] as f64;
                     let z_index = nesting_depths[container];
                     let vpos = ts[ln];
