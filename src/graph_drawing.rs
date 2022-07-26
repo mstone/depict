@@ -665,7 +665,7 @@ pub mod eval {
     fn eval_path<'s, 't>(path: &'t [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
         path.iter().filter_map(|i| {
             match i {
-                Item::Text(s) if s == "LEFT" => None,
+                Item::Text(s) if s == "LEFT" || s == "<" || s == ">" || s == "-" => None,
                 Item::Text(s) => Some(s.clone()),
                 Item::Seq(s) => Some(itertools::join(s, " ").into()),
                 _ => None
@@ -728,11 +728,23 @@ pub mod eval {
     }
 
     fn eval_rel<'s, 't>(path: &'t [Item<'s>]) -> Rel {
-        if path.len() > 0 && path[0] == Item::Text(Cow::from("LEFT")) {
-            Rel::Horizontal
-        } else {
-            Rel::Vertical
-        }
+        if path.len() > 0 {
+            if let Item::Text(t) = &path[0] {
+                let t = t.as_ref();
+                match t {
+                    "LEFT" | "<" | ">" | "-" => { return Rel::Horizontal; }
+                    _ => {}
+                }
+            }
+            if let Item::Text(t) = &path[path.len()-1] {
+                let t = t.as_ref();
+                match t {
+                    "LEFT" | "<" | ">" | "-" => { return Rel::Horizontal; }
+                    _ => {}
+                }
+            }
+        } 
+        Rel::Vertical
     }
 
     fn eval_seq<'s, 't>(ls: &'t [Item<'s>]) -> Option<Body<Cow<'s, str>>> {
@@ -3644,17 +3656,17 @@ pub mod geometry {
             let mut eps_rel = 1e-4_f64;
             eprintln!("SOLVE HORIZONTAL");
             solutions_h = solve_problem(&vh, &ch, &pdh, &qh, &osqp::Settings::default()
-                // .adaptive_rho(false)
+                .adaptive_rho(false)
                 // .rho(1e2_f64)
-                .check_termination(Some(4000))
+                // .check_termination(Some(4000))
                 // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
                 // .adaptive_rho_interval(Some(25))
-                .eps_abs(eps_abs)
-                .eps_rel(eps_rel)
-                .max_iter(128_000_000)
+                // .eps_abs(eps_abs)
+                // .eps_rel(eps_rel)
+                // .max_iter(128_000_000)
                 // .scaled_termination(false)
                 // .max_iter(400)
-                .polish(true)
+                // .polish(true)
                 .verbose(true))?;
             
             let mut constraints_satisfied = true;
@@ -3673,15 +3685,15 @@ pub mod geometry {
                     let rnc = &solutions_h[vrnc.var.index].1;
                     let rnn = &solutions_h[vrnn.var.index].1;
                     if lnc + 39. >= *lnn {
-                        eprintln!("lnc-lnn conflict");
+                        eprintln!("CONSTRAINT VIOLATION: lnc-lnn conflict, {container}, {node}");
                         constraints_satisfied = false;
                     }
                     if rnn + 39. >= *rnc {
-                        eprintln!("rnn-rnc conflict");
+                        eprintln!("CONSTRAINT VIOLATION: rnn-rnc conflict, {container}, {node}");
                         constraints_satisfied = false;
                     }
                     if rnc - lnc < 21. {
-                        eprintln!("container too narrow");
+                        eprintln!("CONSTRAINT VIOLATION: container too narrow, {container}");
                         constraints_satisfied = false;
                     }
                 }
