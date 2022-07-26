@@ -2584,10 +2584,10 @@ pub mod layout {
             let mut crossing_number = usize::MAX;
             let mut solution: Option<Vec<Vec<usize>>> = None;
             multisearch(&mut shrs_ref, |p| {
-                eprintln!("HEAPS PROCESS: ");
-                for (n, s) in p.iter().enumerate() {
-                    eprintln!("{n}: {s:?}");
-                }
+                // eprintln!("HEAPS PROCESS: ");
+                // for (n, s) in p.iter().enumerate() {
+                //     eprintln!("{n}: {s:?}");
+                // }
                 let mut cn = 0;
                 for (rank, hops) in hops_by_level.iter() {
                     for h1i in 0..hops.len() {
@@ -2601,7 +2601,7 @@ pub mod layout {
                         }
                     }
                 }
-                eprintln!("CN: {cn}");
+                // eprintln!("CN: {cn}");
                 if cn < crossing_number {
                     if conforms(vcg, &layout_problem, &locs_by_level2, &nodes_by_container2, p) {
                         crossing_number = cn;
@@ -2752,7 +2752,7 @@ pub mod geometry {
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution};
+    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len};
 
     use std::borrow::Cow;
     use std::cmp::{max, max_by};
@@ -2839,6 +2839,7 @@ pub mod geometry {
         pub size_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSize>,
         pub height_scale: Option<f64>,
         pub line_height: Option<f64>,
+        pub char_width: Option<f64>,
         pub nesting_top_padding: Option<f64>,
         pub nesting_bottom_padding: Option<f64>,
     }
@@ -2949,6 +2950,7 @@ pub mod geometry {
 
         let height_scale = None;
         let line_height = None;
+        let char_width = None;
         let nesting_top_padding = None;
         let nesting_bottom_padding = None;
     
@@ -2961,7 +2963,8 @@ pub mod geometry {
             size_by_loc, 
             size_by_hop, 
             height_scale,
-            line_height, 
+            line_height,
+            char_width,
             nesting_top_padding, 
             nesting_bottom_padding
         }
@@ -3189,7 +3192,7 @@ pub mod geometry {
         layout_solution: &'s LayoutSolution,
         geometry_problem: &'s GeometryProblem<V>,
     ) -> Result<GeometrySolution, Error> where 
-        V: Display + Graphic,
+        V: Display + Graphic + Len,
         E: Graphic
     {
         let Vcg{
@@ -3216,6 +3219,7 @@ pub mod geometry {
             sol_by_hop, 
             size_by_loc, 
             size_by_hop,
+            char_width,
             height_scale,
             line_height,
             nesting_top_padding,
@@ -3223,6 +3227,7 @@ pub mod geometry {
             ..
         } = geometry_problem;
 
+        let char_width = char_width.unwrap_or(9.);
         let height_scale = height_scale.unwrap_or(100.);
         let line_height = line_height.unwrap_or(20.);
         let nesting_top_padding = nesting_top_padding.unwrap_or(40.);
@@ -3593,6 +3598,17 @@ pub mod geometry {
             // cv.eq(&[vv.get(t(nl)), vv.get(t(nr))]);
             cv.sym(&mut vv, &mut pdv, t(nl), t(nr), 10000.);
             // eprintln!("VSYM {vl} {wl} {nl} {nr}");
+        }
+        for ((vl, wl), lvl) in &hcg.labels {
+            let locl = &node_to_loc[&Loc::Node(vl.clone())];
+            let locr = &node_to_loc[&Loc::Node(wl.clone())];
+            let nl = sol_by_loc[locl];
+            let nr = sol_by_loc[locr];
+            let mut left = 0;
+            let mut right = 0;
+            left = std::cmp::max(left, lvl.reverse.as_ref().and_then(|rs| rs.iter().map(|r| r.len()).max()).unwrap_or(0));
+            right = std::cmp::max(right, lvl.forward.as_ref().and_then(|fs| fs.iter().map(|f| f.len()).max()).unwrap_or(0));
+            ch.leqc(&mut vh, r(nl), l(nr), sep + char_width * (left + right) as f64);
         }
 
         for container in containers.iter() {
