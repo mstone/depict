@@ -3629,6 +3629,31 @@ pub mod geometry {
                     }
                 }   
             }
+            let shrl = solved_locs[&locl.0][&locl.1];
+            let shrr = solved_locs[&locr.0][&locr.1];
+            let num_objects: usize = level_to_object.iter().flat_map(|row| row.1.iter().map(|cell| cell.1.len())).sum();
+            for obj in level_to_object[&ovrr][&shrr].iter() {
+                match obj {
+                    Loc2::Hop{vl: hvl, wl: hwl, ..} => {
+                        if *hwl == wl {
+                            // todo!()
+                            eprintln!("LOWER RIGHT CORNER {vl}-{wl}, {hvl}->{hwl}");
+                        }
+                    },
+                    _ => {},
+                }; 
+            }
+            for obj in level_to_object[&ovrl][&shrl].iter() {
+                match obj {
+                    Loc2::Hop{vl: hvl, wl: hwl, ..} => {
+                        if *hvl == vl {
+                            // todo!()
+                            eprintln!("UPPER LEFT CORNER {vl}-{wl}, {hvl}->{hwl}");
+                        }
+                    },
+                    _ => {},
+                }; 
+            }
             // reverse heights
             for objects in level_to_object.get(&(ovrl+1)).iter() {
                 for (shro, objs) in objects.iter() {
