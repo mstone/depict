@@ -4556,15 +4556,17 @@ pub mod frontend {
 
                         if let Some(Label{text, hpos, width: _, vpos, ..}) = label {
                             for (lineno, line) in text.lines().enumerate() {
-                                let translate = if rel == "actuates" { 
-                                    format!("translate({}, {})", hpos-12., vpos + 56. + (20. * lineno as f64))
-                                } else { 
-                                    format!("translate({}, {})", hpos+12., vpos + 56. + (20. * lineno as f64))
+                                let translate = match rel.as_ref() {
+                                    "actuates" => format!("translate({}, {})", hpos-12., vpos + 56. + (20. * lineno as f64)),
+                                    "senses" => format!("translate({}, {})", hpos+12., vpos + 56. + (20. * lineno as f64)),
+                                    "forward" => format!("translate({}, {})", hpos, vpos - 10. - 20. * lineno as f64),
+                                    "reverse" => format!("translate({}, {})", hpos, vpos + 20. + 20. * lineno as f64),
+                                    "fake" => format!("translate({}, {})", hpos, vpos + 20.),
+                                    _ => format!("translate({}, {})", hpos, (vpos + 20. * lineno as f64)),
                                 };
-                                let anchor = if rel == "actuates" {
-                                    "end"
-                                } else {
-                                    "start"
+                                let anchor = match rel.as_ref() {
+                                    "actuates" | "forward" => "end",
+                                    _ => "start",
                                 };
                                 svg.append(Group::new()
                                     .add(TextElt::new()
@@ -4590,6 +4592,7 @@ pub mod frontend {
             svg::write(&mut buf, &svg).unwrap();
             let bytes = buf.into_inner().unwrap();
             let svg_str = String::from_utf8(bytes).unwrap();
+            // eprintln!("SVG {svg_str}");
             format!("data:image/svg+xml;utf8,{svg_str}")
         }
 
