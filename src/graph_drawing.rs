@@ -3608,7 +3608,42 @@ pub mod geometry {
             let mut right = 0;
             left = std::cmp::max(left, lvl.reverse.as_ref().and_then(|rs| rs.iter().map(|r| r.len()).max()).unwrap_or(0));
             right = std::cmp::max(right, lvl.forward.as_ref().and_then(|fs| fs.iter().map(|f| f.len()).max()).unwrap_or(0));
+            let left_height = lvl.reverse.as_ref().map(|rs| rs.len()).unwrap_or(0);
+            let right_height = lvl.forward.as_ref().map(|fs| fs.len()).unwrap_or(0);
             ch.leqc(&mut vh, r(nl), l(nr), sep + char_width * (left + right) as f64);
+
+            let ovrl = locl.0;
+            let ovrr = locr.0;
+            // forward heights
+            for objects in level_to_object.get(&(ovrr-1)).iter() {
+                for (shro, objs) in objects.iter() {
+                    for obj in objs {
+                        let obj_loc = match obj {
+                            Loc2::Node{loc: obj_loc, ..} => obj_loc,
+                            Loc2::Hop{loc: obj_loc, ..} => obj_loc,
+                        };
+                        let nobj = sol_by_loc[&obj_loc];
+                        let height = height_scale / 2. + line_height * right_height as f64;
+                        cv.geqc(&mut vv, t(nl), b(nobj), height);
+                        cv.geqc(&mut vv, t(nr), b(nobj), height);
+                    }
+                }   
+            }
+            // reverse heights
+            for objects in level_to_object.get(&(ovrl+1)).iter() {
+                for (shro, objs) in objects.iter() {
+                    for obj in objs {
+                        let obj_loc = match obj {
+                            Loc2::Node{loc: obj_loc, ..} => obj_loc,
+                            Loc2::Hop{loc: obj_loc, ..} => obj_loc,
+                        };
+                        let nobj = sol_by_loc[&obj_loc];
+                        let height = height_scale / 2. + line_height * (right_height + left_height) as f64;
+                        cv.leqc(&mut vv, t(nl), t(nobj), height);
+                        cv.leqc(&mut vv, t(nr), t(nobj), height);
+                    }
+                }
+            }
         }
 
         for container in containers.iter() {
@@ -4616,7 +4651,8 @@ pub mod frontend {
                                 {match label { 
                                     Some(Label{text, hpos, width: _, vpos}) => {
                                         let translate = match &rel[..] {
-                                            "actuates" | "forward" => "translate(calc(-100% - 1.5ex))",
+                                            "actuates" => "translate(calc(-100% - 1.5ex))",
+                                            "forward" => "translate(calc(-100% - 1.5ex), calc(-100% + 20px))",
                                             "senses" | "reverse" => "translate(1.5ex)",
                                             _ => "translate(0px, 0px)",
                                         };
