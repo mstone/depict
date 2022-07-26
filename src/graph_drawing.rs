@@ -1198,9 +1198,9 @@ pub mod osqp {
             // obj = add(obj, mul(hundred, square(sub(s.get(n)?, s.get(nd)?)?)?)?)?;
             // obj.push(...)
             let mut t = v.get(S::fresh(v.vars.len()));
+            self.eq(&[t.clone(), -v.get(lhs), v.get(rhs)]);
             t.coeff = t.coeff * coeff.into();
             pd.push(t);
-            self.eq(&[t, -v.get(lhs), v.get(rhs)]);
             eprintln!("SYM {t} {lhs} {rhs}");
         }
     }
@@ -3361,6 +3361,7 @@ pub mod geometry {
             // ch.sym(&mut vh, &mut pdh, l(n), r(n), 10000.);
 
             cv.leqc(&mut vv, t(n), b(n), 26.);
+            qv.push(vv.get(b(n)));
 
             if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
                 let mut process = true;
@@ -3403,6 +3404,7 @@ pub mod geometry {
                 }
             }
         }
+
         let mut already_seen = HashSet::new();
         for hop_row in all_hops.iter() {
             let HopRow{lvl, mhr, nhr, vl, wl, ..} = &hop_row;
@@ -3441,6 +3443,7 @@ pub mod geometry {
                 already_seen.insert((vn, wn));
             }
             
+            // qv.push(vv.get(b(wn)));
             cv.sym(&mut vv, &mut pdv, b(wn), t(vn), 1.);
             
 
@@ -3560,7 +3563,9 @@ pub mod geometry {
             let locr = &node_to_loc[&Loc::Node(wl.clone())];
             let nl = sol_by_loc[locl];
             let nr = sol_by_loc[locr];
+            // cv.eq(&[vv.get(t(nl)), vv.get(t(nr))]);
             cv.sym(&mut vv, &mut pdv, t(nl), t(nr), 10000.);
+            // eprintln!("VSYM {vl} {wl} {nl} {nr}");
         }
 
         for container in containers.iter() {
@@ -3645,9 +3650,9 @@ pub mod geometry {
             if !matches!(sol, AnySol::F(_)) {
                 cv.push(((0.).into(), vec![var.into()], f64::INFINITY.into()));
             }
-            if matches!(sol, AnySol::T(_)) {
-                qv.push(10000. as f64 * Monomial::from(var));
-            }
+            // if matches!(sol, AnySol::T(_)) {
+            //     qv.push(10000. as f64 * Monomial::from(var));
+            // }
         }
 
         let mut solutions_h;
@@ -4358,7 +4363,7 @@ pub mod frontend {
             });
 
             event!(tracing::Level::TRACE, %root_width, ?nodes, "NODES");
-            // println!("NODES: {nodes:#?}");
+            eprintln!("NODES: {nodes:#?}");
 
             Ok(Drawing{
                 crossing_number: Some(crossing_number), 
