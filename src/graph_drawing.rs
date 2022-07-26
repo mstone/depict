@@ -2979,7 +2979,7 @@ pub mod geometry {
         pub bs: TiVec<LocSol, f64>,
     }
 
-    fn update_min_width<V: Graphic + Display, E: Graphic>(
+    fn update_min_width<V: Graphic + Display + Len, E: Graphic>(
         vcg: &Vcg<V, E>, 
         layout_problem: &LayoutProblem<V>,
         layout_solution: &LayoutSolution,
@@ -3073,7 +3073,7 @@ pub mod geometry {
 
         let in_width = in_width.round() as usize;
         let out_width = out_width.round() as usize;
-        let orig_width = *min_width;
+        let orig_width = max(*min_width, 9 * vl.len());
         // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
         *min_width = max(orig_width, max(in_width, out_width));
         event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
@@ -3545,14 +3545,14 @@ pub mod geometry {
                             let lwl = (*lwl).clone();
                             let lvloc = &node_to_loc[&Loc::Node(lvl.clone())];
                             let lwloc = &node_to_loc[&Loc::Node(lwl.clone())];
-                            if vl != &lvl && lvloc.0 == *ovr {
-                                let lvn = sol_by_loc[lvloc];
-                                ch.geqc(&mut vh, s(n), r(lvn), sep + action_width);
-                            }
-                            if wl != &lwl && lwloc.0 == *ovr+1 {
-                                let lwn = sol_by_loc[lwloc];
-                                ch.geqc(&mut vh, s(n), r(lwn), sep + action_width);
-                            }
+                            // if vl != &lvl && lvloc.0 == *ovr {
+                            //     let lvn = sol_by_loc[lvloc];
+                            //     ch.geqc(&mut vh, s(n), r(lvn), sep + action_width);
+                            // }
+                            // if wl != &lwl && lwloc.0 == *ovr+1 {
+                            //     let lwn = sol_by_loc[lwloc];
+                            //     ch.geqc(&mut vh, s(n), r(lwn), sep + action_width);
+                            // }
                         },
                     }
                 }
@@ -3574,14 +3574,14 @@ pub mod geometry {
                             let rwl = (*rwl).clone();
                             let rvloc = &node_to_loc[&Loc::Node(rvl.clone())];
                             let rwloc = &node_to_loc[&Loc::Node(rwl.clone())];
-                            if vl != &rvl && rvloc.0 == *ovr {
-                                let rvn = sol_by_loc[rvloc];
-                                ch.leqc(&mut vh, s(n), l(rvn), sep + percept_width);
-                            }
-                            if wl != &rwl && rwloc.0 == *ovr+1 {
-                                let rwn = sol_by_loc[rwloc];
-                                ch.leqc(&mut vh, s(n), l(rwn), sep + percept_width);
-                            }
+                            // if vl != &rvl && rvloc.0 == *ovr {
+                            //     let rvn = sol_by_loc[rvloc];
+                            //     ch.leqc(&mut vh, s(n), l(rvn), sep + percept_width);
+                            // }
+                            // if wl != &rwl && rwloc.0 == *ovr+1 {
+                            //     let rwn = sol_by_loc[rwloc];
+                            //     ch.leqc(&mut vh, s(n), l(rwn), sep + percept_width);
+                            // }
                         },
                     }
                 }
