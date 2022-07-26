@@ -3409,6 +3409,7 @@ pub mod geometry {
         for hop_row in all_hops.iter() {
             let HopRow{lvl, mhr, nhr, vl, wl, ..} = &hop_row;
 
+            let ovr = lvl;
             let shr = &solved_locs[lvl][mhr];
             let n = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
             let vloc = node_to_loc[&Loc::Node(vl.clone())].clone();
@@ -3529,11 +3530,24 @@ pub mod geometry {
                     event!(Level::TRACE, ?lo, "POS LEFT OBJECT");
                     match lo {
                         Loc2::Node{sol: ln, ..} => {
-                            ch.geqc(&mut vh, s(n), l(*ln), sep + action_width);
+                            ch.geqc(&mut vh, s(n), r(*ln), sep + action_width);
                         },
                         Loc2::Hop{vl: lvl, wl: lwl, loc: (lvr, lhr), sol: ln, ..} => {
                             let hop_size_l = size_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).unwrap_or(&default_hop_size);
                             ch.geqc(&mut vh, s(n), s(*ln), (2.*sep) + hop_size_l.right + hop_size.left);
+                            
+                            let lvl = (*lvl).clone();
+                            let lwl = (*lwl).clone();
+                            let lvloc = &node_to_loc[&Loc::Node(lvl.clone())];
+                            let lwloc = &node_to_loc[&Loc::Node(lwl.clone())];
+                            if vl != &lvl && lvloc.0 == *ovr {
+                                let lvn = sol_by_loc[lvloc];
+                                ch.geqc(&mut vh, s(n), r(lvn), sep + action_width);
+                            }
+                            if wl != &lwl && lwloc.0 == *ovr+1 {
+                                let lwn = sol_by_loc[lwloc];
+                                ch.geqc(&mut vh, s(n), r(lwn), sep + action_width);
+                            }
                         },
                     }
                 }
@@ -3545,11 +3559,24 @@ pub mod geometry {
                     event!(Level::TRACE, ?ro, "POS RIGHT OBJECT");
                     match ro {
                         Loc2::Node{sol: rn, ..} => {
-                            ch.leqc(&mut vh, s(n), l(*rn), sep + action_width);
+                            ch.leqc(&mut vh, s(n), l(*rn), sep + percept_width);
                         },
                         Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
                             let hop_size_r = size_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_size);
                             ch.leqc(&mut vh, s(n), s(*rn), (2.*sep) + hop_size_r.left + hop_size.right);
+
+                            let rvl = (*rvl).clone();
+                            let rwl = (*rwl).clone();
+                            let rvloc = &node_to_loc[&Loc::Node(rvl.clone())];
+                            let rwloc = &node_to_loc[&Loc::Node(rwl.clone())];
+                            if vl != &rvl && rvloc.0 == *ovr {
+                                let rvn = sol_by_loc[rvloc];
+                                ch.leqc(&mut vh, s(n), l(rvn), sep + percept_width);
+                            }
+                            if wl != &rwl && rwloc.0 == *ovr+1 {
+                                let rwn = sol_by_loc[rwloc];
+                                ch.leqc(&mut vh, s(n), l(rwn), sep + percept_width);
+                            }
                         },
                     }
                 }
