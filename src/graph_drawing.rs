@@ -2258,7 +2258,7 @@ pub mod layout {
                 })
                 .collect::<Vec<_>>()
         );
-        eprintln!("SORTED CONDENSED EDGES: {sorted_condensed_edges:?}");
+        eprintln!("SORTED CONDENSED EDGES: {sorted_condensed_edges:#?}");
 
         event!(Level::DEBUG, ?sorted_condensed_edges, "CONDENSED GRAPH");
 
@@ -3032,11 +3032,11 @@ pub mod geometry {
     
     #[derive(Debug, Default)]
     pub struct GeometrySolution {
-        pub ls: TiVec<LocSol, f64>,
-        pub rs: TiVec<LocSol, f64>,
-        pub ss: TiVec<HopSol, f64>,
-        pub ts: TiVec<LocSol, f64>,
-        pub bs: TiVec<LocSol, f64>,
+        pub ls: BTreeMap<LocSol, f64>,
+        pub rs: BTreeMap<LocSol, f64>,
+        pub ss: BTreeMap<HopSol, f64>,
+        pub ts: BTreeMap<LocSol, f64>,
+        pub bs: BTreeMap<LocSol, f64>,
     }
 
     fn update_min_width<V: Graphic + Display + Len, E: Graphic>(
@@ -3228,7 +3228,7 @@ pub mod geometry {
         kind: AnySolKind,
         name: Cow<str>,
         extract_index: impl Fn(AnySol) -> Idx,
-    ) -> TiVec<Idx, Val> {
+    ) -> BTreeMap<Idx, Val> {
         let mut vs = v.iter()
             .filter_map(|(sol, var)| {
                 if AnySolKind::from(sol) == kind {
@@ -3241,7 +3241,7 @@ pub mod geometry {
             .collect::<Vec<_>>();
         vs.sort_by_key(|(idx, _)| *idx);
         eprintln!("{name}: {vs:?}");
-        let vs = vs.iter().map(|(_, v)| *v).collect::<TiVec<Idx, _>>();
+        let vs = vs.iter().copied().collect::<BTreeMap<Idx, Val>>();
         vs
     }
 
@@ -4260,7 +4260,7 @@ pub mod frontend {
             let mut texts = vec![];
 
             let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
-            let root_width = rs[root_n] - ls[root_n];
+            let root_width = rs[&root_n] - ls[&root_n];
 
             for (loc, node) in loc_to_node.iter() {
                 let (ovr, ohr) = loc;
@@ -4270,16 +4270,18 @@ pub mod frontend {
                     if !containers.contains(vl) {
                         let n = sol_by_loc[&(*ovr, *ohr)];
 
-                        let lpos = ls[n];
-                        let rpos = rs[n];
+                        eprintln!("TEXT {vl} {ovr} {ohr} {n}");
+
+                        let lpos = ls[&n];
+                        let rpos = rs[&n];
 
                         let nesting_depth = nesting_depths[vl] as f64;
                         let z_index = nesting_depths[vl];
 
-                        let vpos = ts[n];
+                        let vpos = ts[&n];
                         let width = (rpos - lpos).round();
                         let hpos = lpos.round();
-                        let height = bs[n] - ts[n];
+                        let height = bs[&n] - ts[&n];
                         
                         let key = vl.to_string();
                         let label = vert_node_labels
@@ -4304,16 +4306,16 @@ pub mod frontend {
                     let rohr = if shr1 < shr2 { pair } else { ohr };
                     let ln = sol_by_loc[&(*ovr, *lohr)];
                     let rn = sol_by_loc[&(*ovr, *rohr)];
-                    let lpos = ls[ln];
-                    let rpos = rs[rn];
+                    let lpos = ls[&ln];
+                    let rpos = rs[&rn];
                     let nesting_depth = nesting_depths[container] as f64;
                     let z_index = nesting_depths[container];
-                    let vpos = ts[ln];
+                    let vpos = ts[&ln];
                     let width = (rpos - lpos).round();
                     let depth = container_depths[container] as f64;
                     let inner_depth = nesting_depth_by_container[container] as f64;
                     let hpos = lpos.round();
-                    let height = bs[ln] - ts[ln];
+                    let height = bs[&ln] - ts[&ln];
                     eprintln!("HEIGHT: {container} {height}");
 
                     let key = format!("{}_{}_{}_{}", container, ovr, ohr, pair);
@@ -4380,8 +4382,8 @@ pub mod frontend {
                     } else {
                         hops.iter().skip(fs).collect::<Vec<_>>()
                     };
-                    let vmin = bs[sol_by_loc[&node_to_loc[&Loc::Node(vl.clone())]]];
-                    let vmax = ts[sol_by_loc[&node_to_loc[&Loc::Node(wl.clone())]]];
+                    let vmin = bs[&sol_by_loc[&node_to_loc[&Loc::Node(vl.clone())]]];
+                    let vmax = ts[&sol_by_loc[&node_to_loc[&Loc::Node(wl.clone())]]];
                     let fh = hops.iter().next().unwrap();
                     let lh = hops.iter().rev().next().unwrap();
                     let nh = hops.len();
@@ -4395,9 +4397,9 @@ pub mod frontend {
                         let (lvl, (mhr, nhr)) = *hop;
                         // let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
                         let hn = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
-                        let spos = ss[hn];
+                        let spos = ss[&hn];
                         let hnd = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
-                        let sposd = ss[hnd];
+                        let sposd = ss[&hnd];
                         let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
                         let hposd = (sposd + offset).round(); //  + 10. * lvl.0 as f64;
                         let lvl_offset = container_depths.get(vl).copied().unwrap_or(0);
@@ -4438,13 +4440,13 @@ pub mod frontend {
                             label_width = Some(match ew {
                                 x if x == "senses" => {
                                     // ls[n]
-                                    rs[n] - sposd
+                                    rs[&n] - sposd
                                 },
                                 x if x == "actuates" => {
                                     // ls[n]
-                                    sposd - ls[n]
+                                    sposd - ls[&n]
                                 },
-                                _ => rs[n] - ls[n]
+                                _ => rs[&n] - ls[&n]
                             });
                             label_vpos = Some(match ew {
                                 x if x == "fake" => {
@@ -4496,12 +4498,12 @@ pub mod frontend {
                     let locr = &node_to_loc[&Loc::Node(wl.clone())];
                     let nl = sol_by_loc[locl];
                     let nr = sol_by_loc[locr];
-                    let lr = rs[nl];
-                    let rl = ls[nr] - 7.;
-                    let wl = size_by_loc[locl].right;
-                    let wr = size_by_loc[locr].left;
-                    let vposl = ts[nl] + forward_voffset;
-                    let vposr = ts[nr] + forward_voffset;
+                    let lr = rs[&nl];
+                    let rl = ls[&nr] - 7.;
+                    let wl = size_by_loc[&locl].right;
+                    let wr = size_by_loc[&locr].left;
+                    let vposl = ts[&nl] + forward_voffset;
+                    let vposr = ts[&nr] + forward_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = forward.join("\n");
                     let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
@@ -4519,12 +4521,12 @@ pub mod frontend {
                     let locr = &node_to_loc[&Loc::Node(wl.clone())];
                     let nl = sol_by_loc[locl];
                     let nr = sol_by_loc[locr];
-                    let lr = rs[nl] + 7.;
-                    let rl = ls[nr];
+                    let lr = rs[&nl] + 7.;
+                    let rl = ls[&nr];
                     let wl = size_by_loc[locl].right;
                     let wr = size_by_loc[locr].left;
-                    let vposl = ts[nl] + reverse_voffset;
-                    let vposr = ts[nr] + reverse_voffset;
+                    let vposl = ts[&nl] + reverse_voffset;
+                    let vposr = ts[&nr] + reverse_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = reverse.join("\n");
                     let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
