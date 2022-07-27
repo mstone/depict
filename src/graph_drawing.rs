@@ -1968,20 +1968,30 @@ pub mod layout {
                     }
                 })
                 .collect::<Vec<_>>();
-            eprintln!("IMPLIED {a} {b} {a_incoming:?} {b_incoming:?}");
+            let mut a_plus_containers = vcg.containers.iter().filter(|c| vcg.nodes_by_container[c.clone()].contains(a)).collect::<Vec<_>>();
+            let mut b_plus_containers = vcg.containers.iter().filter(|c| vcg.nodes_by_container[c.clone()].contains(b)).collect::<Vec<_>>();
+            a_plus_containers.push(a);
+            b_plus_containers.push(b);
+            eprintln!("IMPLIED {a} {b} {a_plus_containers:?} {b_plus_containers:?} {a_incoming:?} {b_incoming:?}");
             for (src, src_ix) in a_incoming {
-                vcg.vert.add_edge(src_ix, bx, "implied_forward".into());
-                vcg.vert_edge_labels
-                    .entry(src.clone()).or_default()
-                    .entry(b.clone()).or_default()
-                    .entry("implied".into()).or_default();
+                for dst in a_plus_containers.iter() {
+                    let dst_ix = vcg.vert_vxmap[*dst];
+                    vcg.vert.add_edge(src_ix, dst_ix, "implied_forward".into());
+                    vcg.vert_edge_labels
+                        .entry(src.clone()).or_default()
+                        .entry(b.clone()).or_default()
+                        .entry("implied".into()).or_default();
+                }
             }
             for (src, src_ix) in b_incoming {
-                vcg.vert.add_edge(src_ix, ax, "implied_reverse".into());
-                vcg.vert_edge_labels
-                    .entry(src.clone()).or_default()
-                    .entry(a.clone()).or_default()
-                    .entry("implied".into()).or_default();
+                for dst in b_plus_containers.iter() {
+                    let dst_ix = vcg.vert_vxmap[*dst];
+                    vcg.vert.add_edge(src_ix, dst_ix, "implied_reverse".into());
+                    vcg.vert_edge_labels
+                        .entry(src.clone()).or_default()
+                        .entry(a.clone()).or_default()
+                        .entry("implied".into()).or_default();
+                }
             }
         }
 
