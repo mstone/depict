@@ -2250,7 +2250,7 @@ pub mod layout {
                     let vl = dag.node_weight(vx).unwrap();
                     let wl = dag.node_weight(wx).unwrap();
                     let wgt = er.weight();
-                    if wgt.iter().any(|(_, _, rel)| rel.as_ref().starts_with("implied")) {
+                    if wgt.len() > 0 && wgt.iter().all(|(_, _, rel)| rel.as_ref().starts_with("implied")) {
                         None
                     } else {
                         Some((vl.clone(), wl.clone(), er.weight()))
@@ -3133,7 +3133,7 @@ pub mod geometry {
 
         let in_width = in_width.round() as usize;
         let out_width = out_width.round() as usize;
-        let orig_width = max(*min_width, 9 * vl.len());
+        let orig_width = max(max(4, *min_width), 9 * vl.len());
         // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
         *min_width = max(orig_width, max(in_width, out_width));
         event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
