@@ -1938,10 +1938,14 @@ pub mod layout {
             }
         }
 
+        // to ensure that nodes in horizontal relationships have correct vertical positioning,
+        // we add implied edges based on horizontal relationships and containment relationships.
+        eprintln!("NODES_BY_CONTAINER: {:#?}", vcg.nodes_by_container);
+        eprintln!("PRELIMINARY VERT: {:#?}", vcg.vert);
         for HorizontalConstraint{a, b} in hcg.constraints.iter() {
             let ax = vcg.vert_vxmap[a];
             let bx = vcg.vert_vxmap[b];
-            let a_incoming = vcg.vert.edges_directed(ax, Incoming)
+            let mut a_incoming = vcg.vert.edges_directed(ax, Incoming)
                 .filter_map(|er| {
                     let rel = er.weight().as_ref();
                     if rel == "actuates" || rel == "senses" || rel == "fake" {
@@ -1953,7 +1957,7 @@ pub mod layout {
                     }
                 })
                 .collect::<Vec<_>>();
-            let b_incoming = vcg.vert.edges_directed(bx, Incoming)
+            let mut b_incoming = vcg.vert.edges_directed(bx, Incoming)
                 .filter_map(|er| {
                     let rel = er.weight().as_ref();
                     if rel == "actuates" || rel == "senses" || rel == "fake" {
@@ -1965,30 +1969,37 @@ pub mod layout {
                     }
                 })
                 .collect::<Vec<_>>();
-            let mut a_plus_containers = vcg.containers.iter().filter(|c| vcg.nodes_by_container[c.clone()].contains(a)).collect::<Vec<_>>();
-            let mut b_plus_containers = vcg.containers.iter().filter(|c| vcg.nodes_by_container[c.clone()].contains(b)).collect::<Vec<_>>();
-            a_plus_containers.push(a);
-            b_plus_containers.push(b);
-            eprintln!("IMPLIED {a} {b} {a_plus_containers:?} {b_plus_containers:?} {a_incoming:?} {b_incoming:?}");
-            for (src, src_ix) in a_incoming {
-                for dst in a_plus_containers.iter() {
-                    let dst_ix = vcg.vert_vxmap[*dst];
-                    vcg.vert.add_edge(src_ix, dst_ix, "implied_forward".into());
-                    vcg.vert_edge_labels
-                        .entry(src.clone()).or_default()
-                        .entry(b.clone()).or_default()
-                        .entry("implied".into()).or_default();
+            let mut a_incoming_plus_containers = vcg.containers.iter().filter_map(|c| {
+                if vcg.nodes_by_container[c].contains(a) {
+                    Some((c.clone(), vcg.vert_vxmap[c]))
+                } else {
+                    None
                 }
+            }).collect::<Vec<_>>();
+            let mut b_incoming_plus_containers = vcg.containers.iter().filter_map(|c| {
+                if vcg.nodes_by_container[c].contains(b) {
+                    Some((c.clone(), vcg.vert_vxmap[c]))
+                } else { 
+                    None
+                }
+            }).collect::<Vec<_>>();
+            a_incoming_plus_containers.append(&mut a_incoming);
+            b_incoming_plus_containers.append(&mut b_incoming);
+            eprintln!("IMPLIED {a} {b} {a_incoming_plus_containers:?} {b_incoming_plus_containers:?}");
+            for (src, src_ix) in a_incoming_plus_containers {
+                vcg.vert.add_edge(src_ix, bx, "implied_forward".into());
+                vcg.vert_edge_labels
+                    .entry(src.clone()).or_default()
+                    .entry(b.clone()).or_default()
+                    .entry("implied".into()).or_default();
+                
             }
-            for (src, src_ix) in b_incoming {
-                for dst in b_plus_containers.iter() {
-                    let dst_ix = vcg.vert_vxmap[*dst];
-                    vcg.vert.add_edge(src_ix, dst_ix, "implied_reverse".into());
-                    vcg.vert_edge_labels
-                        .entry(src.clone()).or_default()
-                        .entry(a.clone()).or_default()
-                        .entry("implied".into()).or_default();
-                }
+            for (src, src_ix) in b_incoming_plus_containers {
+                vcg.vert.add_edge(src_ix, ax, "implied_reverse".into());
+                vcg.vert_edge_labels
+                    .entry(src.clone()).or_default()
+                    .entry(a.clone()).or_default()
+                    .entry("implied".into()).or_default();
             }
         }
 
@@ -3474,12 +3485,13 @@ pub mod geometry {
             // ch.leqc(&mut vh, l(n), r(n), 40. + min_width as f64);
             // ch.sym(&mut vh, &mut pdh, l(n), r(n), 10000.);
 
-            cv.leq(&mut vv, h(ovr), t(n));
-            cv.leqc(&mut vv, t(n), b(n), 26.);
             if let Loc::Node(vl) = loc {
-                if !containers.contains(vl) {
-                    cv.leqc(&mut vv, b(n), h(ovr+1), 50.);
-                }
+                cv.leq(&mut vv, h(ovr), t(n));
+                eprintln!("VERTICAL SPAN: {loc:?}");
+                cv.leqc(&mut vv, t(n), b(n), 26.);
+            //     if !containers.contains(vl) {
+            //         cv.leqc(&mut vv, b(n), h(ovr+1), 50.);
+            //     }
             }
             qv.push(vv.get(b(n)));
 
@@ -3734,19 +3746,45 @@ pub mod geometry {
             let ovrl = locl.0;
             let ovrr = locr.0;
             // forward heights
+            // LOWER LEFT CORNER
             for objects in level_to_object.get(&(ovrr-1)).iter() {
                 for (shro, objs) in objects.iter() {
                     for obj in objs {
+                        if let Loc2::Node{vl: ovl, ..} = obj {
+                            if containers.contains(ovl) && (nodes_by_container[ovl].contains(vl) || nodes_by_container[ovl].contains(wl)) {
+                                continue;
+                            }
+                        }
+                        if let Loc2::Hop{vl: ovl, wl: owl, ..} = obj {
+                            if *owl != vl && *owl != wl {
+                                continue;
+                            }
+                        }
                         let obj_loc = match obj {
                             Loc2::Node{loc: obj_loc, ..} => obj_loc,
                             Loc2::Hop{loc: obj_loc, ..} => obj_loc,
                         };
                         let nobj = sol_by_loc[&obj_loc];
                         let height = height_scale / 2. + line_height * right_height as f64;
+                        eprintln!("FORWARD HEIGHT: {vl} {ovrl} {wl} {ovrr} {obj:?} {height}");
+
                         cv.geqc(&mut vv, t(nl), b(nobj), height);
                         cv.geqc(&mut vv, t(nr), b(nobj), height);
                     }
                 }   
+            }
+            for container in containers.iter() {
+                let nobj = sol_by_loc[&node_to_loc[&Loc::Node(container.clone())]];
+                let top_height = height_scale / 2. + line_height * right_height as f64;
+                let bottom_height = line_height * left_height as f64;
+                if nodes_by_container[container].contains(vl) {
+                    cv.leqc(&mut vv, t(nobj), t(nl), top_height);
+                    cv.leqc(&mut vv, b(nl), b(nobj), bottom_height);
+                }
+                if nodes_by_container[container].contains(wl) {
+                    cv.leqc(&mut vv, t(nobj), t(nr), top_height);
+                    cv.leqc(&mut vv, b(nl), b(nobj), bottom_height);
+                }
             }
             let shrl = solved_locs[&locl.0][&locl.1];
             let shrr = solved_locs[&locr.0][&locr.1];
