@@ -932,36 +932,26 @@ pub mod eval {
             match expr {
                 Item::Colon(l, r) => {
                     if l.len() == 1 && matches!(l[0], Item::Text(..)){
-                        let mut rbody = eval(&r[..]);
                         if let Item::Text(name) = &l[0] {
-                            let sublabel = match &rbody {
-                                Val::Ref { .. } => None,
-                                Val::Process { label, body, .. } => {
-                                    if label.is_some() { 
-                                        label.as_ref().cloned()
-                                    } else {
-                                        if let Some(body) = body {
-                                            match &body[..] {
-                                                [Val::Process{label, ..}, ..] => { label.as_ref().cloned() },
-                                                _ => {None},
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    }
-                                },
-                                Val::Chain { .. } => None,
-                            };
-                            let label = sublabel.or_else(|| Some(name.clone()));
-                            rbody = match rbody {
-                                Val::Process { body: Some(Body::All(bs)), .. } if bs.len() == 1 && matches!(bs[0], Val::Process{..}) => {
-                                    bs[0].clone()
-                                },
-                                _ => rbody,
-                            };
-                            rbody.set_name(name.clone());
-                            rbody.set_label(label.clone());
-                            body.get_or_insert_with(Default::default).push(rbody);
+                            let mut rbody = eval_seq(&r[..]);
+                            eprintln!("BOOM {l:?} {r:?} {rbody:?}");
+                            if let Some(rbody) = rbody {
+                                let mut rbody: Vec<Val<_>> = rbody.into();
+                                rbody.get_mut(0).map(|fst| {
+                                    fst.set_name(name.clone());
+                                    let label = fst.label().unwrap_or(name);
+                                    fst.set_label(Some(label.clone()));
+                                });
+                                body.get_or_insert_with(Default::default).append(&mut rbody);
+                            } else {
+                                body.get_or_insert_with(Default::default).push(Val::Process{
+                                    name: None, 
+                                    label: Some(name.clone()), 
+                                    body: None, 
+                                    name_to_part: None, 
+                                    notes: None
+                                })
+                            }
                         }
                     } else {
                         match &l[..] {
@@ -2382,6 +2372,8 @@ pub mod layout {
         event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V2");
 
         event!(Level::DEBUG, ?hops_by_level, "HOPS_BY_LEVEL");
+
+        eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
 
         let mut container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>> = HashMap::new();
         
