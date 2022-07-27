@@ -663,6 +663,7 @@ pub mod eval {
     }
 
     fn eval_path<'s, 't>(path: &'t [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
+        eprintln!("EVAL_PATH: {path:?}");
         path.iter().filter_map(|i| {
             match i {
                 Item::Text(s) if s == "LEFT" || s == "<" || s == ">" || s == "-" => None,
@@ -748,6 +749,7 @@ pub mod eval {
     }
 
     fn eval_seq<'s, 't>(ls: &'t [Item<'s>]) -> Option<Body<Cow<'s, str>>> {
+        eprintln!("EVAL_SEQ: {ls:?}");
         let mut body: Option<Body<_>> = None;
 
         if ls.iter().all(|l| matches!(l, Item::Text(_) | Item::Seq(_))) {
@@ -962,17 +964,43 @@ pub mod eval {
                             body.get_or_insert_with(Default::default).push(rbody);
                         }
                     } else {
-                        body.get_or_insert_with(Default::default).push(Val::Chain{
-                            name: None,
-                            rel: eval_rel(&l[..]),
-                            path: eval_path(&l[..]),
-                            labels: eval_labels(None, &r[..]),
-                        });
+                        match &l[..] {
+                            [Item::Comma(ls)] => {
+                                body.get_or_insert_with(Default::default).push(Val::Chain{
+                                    name: None,
+                                    rel: eval_rel(&ls[..]),
+                                    path: eval_path(&ls[..]),
+                                    labels: eval_labels(None, &r[..]),
+                                });
+                            }
+                            _ => {
+                                body.get_or_insert_with(Default::default).push(Val::Chain{
+                                    name: None,
+                                    rel: eval_rel(&l[..]),
+                                    path: eval_path(&l[..]),
+                                    labels: eval_labels(None, &r[..]),
+                                });
+                            }
+                        }
                     }
                 },
-                Item::Seq(ls) | Item::Comma(ls) => {
+                Item::Comma(ls) => {
                     if let Some(seq_body) = eval_seq(ls) {
                         body.get_or_insert_with(Default::default).append(&mut seq_body.into());
+                    }
+                }
+                Item::Seq(ls)  => {
+                    match &ls[..] {
+                        [Item::Comma(ls)] => {
+                            if let Some(seq_body) = eval_seq(ls) {
+                                body.get_or_insert_with(Default::default).append(&mut seq_body.into());
+                            }
+                        },
+                        _ => {
+                            if let Some(seq_body) = eval_seq(ls) {
+                                body.get_or_insert_with(Default::default).append(&mut seq_body.into());
+                            }
+                        }
                     }
                 }
                 Item::Sq(nest) | Item::Br(nest) => {
@@ -1851,7 +1879,7 @@ pub mod layout {
             container_depths,
         };
 
-        let body = if let Val::Process{body: Some(body), ..} = process { body } else { unreachable!(); };
+        let body = if let Val::Process{body: Some(body), ..} = process { Ok(body) } else { Err(Kind::MissingDrawingError{}.in_current_span()) }?;
 
         let mut queue = vec![];
 
