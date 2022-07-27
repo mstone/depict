@@ -26,8 +26,13 @@ use tracing_error::{ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PLACEHOLDER: &str = indoc!("
-a [ b t: / qqqq, qqqq, qqqq, qqqq ; - t u: foo, foo, foo, foo ]
+driver
+car [ wheel ]
+driver wheel
 ");
+/*
+a [ b t: / qqqq, qqqq, qqqq, qqqq ; - t u: foo, foo, foo, foo ]
+*/
 /*
 a [ b [ - c e ] ]
 z c

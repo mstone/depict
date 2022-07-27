@@ -2003,6 +2003,35 @@ pub mod layout {
             }
         }
 
+        for container in vcg.containers.iter() {
+            let cx = vcg.vert_vxmap[container];
+            for node in vcg.nodes_by_container[container].iter() {
+                let nx = vcg.vert_vxmap[node];
+                let mut node_incoming = vcg.vert.edges_directed(nx, Incoming)
+                    .filter_map(|er| {
+                        let rel = er.weight().as_ref();
+                        if rel == "actuates" || rel == "senses" || rel == "fake" {
+                            let src_ix = er.source(); 
+                            let src = vcg.vert.node_weight(src_ix).unwrap().clone();
+                            Some((src, src_ix))
+                        } else { 
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                for (src, src_ix) in node_incoming {
+                    if !vcg.nodes_by_container[container].contains(&src) {
+                        vcg.vert.add_edge(src_ix, cx, "implied_contains".into());
+                        vcg.vert_edge_labels
+                            .entry(src.clone()).or_default()
+                            .entry(node.clone()).or_default()
+                            .entry("implied".into()).or_default();
+                    }
+                }
+            }
+        }
+
+
         let vert_roots = roots(&vcg.vert)?;
         let root_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, "root".into());
         vcg.vert_node_labels.insert("root".into(), "".to_string());
@@ -3489,9 +3518,9 @@ pub mod geometry {
                 cv.leq(&mut vv, h(ovr), t(n));
                 eprintln!("VERTICAL SPAN: {loc:?}");
                 cv.leqc(&mut vv, t(n), b(n), 26.);
-            //     if !containers.contains(vl) {
-            //         cv.leqc(&mut vv, b(n), h(ovr+1), 50.);
-            //     }
+                if !containers.contains(vl) {
+                    cv.leqc(&mut vv, b(n), h(ovr+1), 50.);
+                }
             }
             qv.push(vv.get(b(n)));
 
@@ -3844,6 +3873,8 @@ pub mod geometry {
             ch.leqc(&mut vh, l(nc), r(nc), 20.);
             ch.leqc(&mut vh, r(nc), l(np), 20.);
             ch.leqc(&mut vh, l(np), r(np), 20.);
+            cv.leq(&mut vv, h(*ovr), t(ln));
+            cv.leq(&mut vv, h(*ovr), t(rn));
             for node in nodes_by_container[container].iter() {
                 let locn = &node_to_loc[&Loc::Node(node.clone())];
                 let nn = sol_by_loc[locn];
