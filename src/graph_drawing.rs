@@ -2867,6 +2867,8 @@ pub mod geometry {
         S(HopSol),
         T(LocSol),
         B(LocSol),
+        H(VerticalRank),
+        V(SolvedHorizontalRank),
         F(usize)
     }
 
@@ -2884,6 +2886,8 @@ pub mod geometry {
                 AnySol::S(hop) => write!(f, "s{}", hop.0),
                 AnySol::T(loc) => write!(f, "t{}", loc.0),
                 AnySol::B(loc) => write!(f, "b{}", loc.0),
+                AnySol::H(ovr) => write!(f, "h{}", ovr.0),
+                AnySol::V(shr) => write!(f, "v{}", shr.0),
                 AnySol::F(idx) => write!(f, "f{}", idx),
             }
         }
@@ -3390,6 +3394,7 @@ pub mod geometry {
         let s = AnySol::S;
         let t = AnySol::T;
         let b = AnySol::B;
+        let h = AnySol::H;
 
         eprintln!("SOL_BY_LOC: {sol_by_loc:#?}");
         
@@ -3428,6 +3433,15 @@ pub mod geometry {
         event!(Level::TRACE, ?level_to_object, "LEVEL TO OBJECT");
         // eprintln!("LEVEL TO OBJECT: {level_to_object:#?}");
 
+        for ovr in 0..solved_locs.len() {
+            if ovr == 0 {
+                cv.leq(&mut vv, t(root_n), h(VerticalRank(ovr)));
+            } else {
+                cv.leqc(&mut vv, h(VerticalRank(ovr-1)), h(VerticalRank(ovr)), 20.);
+            }
+            qv.push(vv.get(h(VerticalRank(ovr))));
+        }
+
         for LocRow{ovr, ohr, loc, ..} in all_locs.iter() {
             let ovr = *ovr; 
             let ohr = *ohr;
@@ -3463,7 +3477,9 @@ pub mod geometry {
             // ch.leqc(&mut vh, l(n), r(n), 40. + min_width as f64);
             // ch.sym(&mut vh, &mut pdh, l(n), r(n), 10000.);
 
+            cv.leq(&mut vv, h(ovr), t(n));
             cv.leqc(&mut vv, t(n), b(n), 26.);
+            cv.leqc(&mut vv, b(n), h(ovr+1), 50.);
             qv.push(vv.get(b(n)));
 
             if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
