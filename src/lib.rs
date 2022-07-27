@@ -459,9 +459,23 @@ pub mod rest {
     #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
     pub enum Node {
         /// Boxes
-        Div { key: String, label: String, hpos: f64, vpos: f64, width: f64 },
+        Div {
+            key: String,
+            label: String,
+            hpos: f64,
+            vpos: f64,
+            width: f64,
+            height: f64,
+            z_index: usize,
+        },
         /// Arrows with optional textual labels
-        Svg { key: String, path: String, rel: String, label: Option<Label> },
+        Svg {
+            key: String,
+            path: String,
+            z_index: usize,
+            rel: String,
+            label: Option<Label>,
+        },
     }
 
     /// The data of a drawing of a "depiction".
