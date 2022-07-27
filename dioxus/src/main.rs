@@ -26,8 +26,12 @@ use tracing_error::{ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PLACEHOLDER: &str = indoc!("
-a [ b c ]
+a [ b [ - c e ] ]
+z c
 ");
+/*
+a [ b c ] 
+*/
 /*
 a [  - b c: z ] 
 d b

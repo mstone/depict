@@ -1800,7 +1800,6 @@ pub mod layout {
                     for p in parents.iter() {
                         vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
                     }
-                    vcg.nesting_depths.insert(node.clone(), parents.len());
                 },
                 Val::Process{label, body: Some(body), ..} => {
                     if let (Some(parent), Some(label)) = (parent.as_ref(), label.as_ref()) {
@@ -1808,7 +1807,6 @@ pub mod layout {
                     }
                     // BUG: need to debruijn-number unlabeled containers
                     if let Some(node) = label.as_ref() {
-                        vcg.nesting_depths.insert(node.clone(), parents.len());
                         for p in parents.iter() {
                             vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
                         }
@@ -1827,7 +1825,6 @@ pub mod layout {
                             for p in parents.iter() {
                                 vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
                             }
-                            vcg.nesting_depths.insert(node.clone(), parents.len());
                         }
                     }
                 },
@@ -2041,7 +2038,10 @@ pub mod layout {
             eprintln!("DEPTH {depth}");
         }
 
-
+        let nesting_depths = &mut vcg.nesting_depths;
+        for vl in vcg.vert_vxmap.keys() {
+            nesting_depths.insert(vl.clone(), vcg.nodes_by_container.values().filter(|nodes| nodes.contains(vl)).count());
+        }
 
         event!(Level::TRACE, ?vcg, "VCG");
         eprintln!("VCG: {vcg:#?}");
@@ -2287,11 +2287,12 @@ pub mod layout {
                     let (vx, wx) = (er.source(), er.target());
                     let vl = dag.node_weight(vx).unwrap();
                     let wl = dag.node_weight(wx).unwrap();
-                    let wgt = er.weight();
-                    if wgt.len() > 0 && wgt.iter().all(|(_, _, rel)| rel.as_ref().starts_with("implied")) {
+                    let wgt = er.weight().iter().filter(|(_, _, rel)| !rel.as_ref().starts_with("implied")).collect::<Vec<_>>();
+                    let wgt = SortedVec::from_unsorted(wgt);
+                    if wgt.is_empty() {
                         None
                     } else {
-                        Some((vl.clone(), wl.clone(), er.weight()))
+                        Some((vl.clone(), wl.clone(), wgt))
                     }
                 })
                 .collect::<Vec<_>>()
@@ -4394,6 +4395,7 @@ pub mod frontend {
                 let mut prev_vwe = None;
                 for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
                     if *vl == "root" { continue; }
+                    if ew.as_ref().starts_with("implied") { continue; }
 
                     if prev_vwe == Some((vl, wl, ew)) {
                         continue
