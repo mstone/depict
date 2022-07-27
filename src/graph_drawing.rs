@@ -3453,10 +3453,6 @@ pub mod geometry {
             let mut min_width = node_width.width.round() as usize;
             let mut min_height = node_width.height.round() as usize;
 
-            if let Loc::Border(_) = loc {
-                continue;
-            }
-
             if let Loc::Node(vl) = loc {
                 update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut min_width, vl)?;
             }
@@ -3479,8 +3475,16 @@ pub mod geometry {
 
             cv.leq(&mut vv, h(ovr), t(n));
             cv.leqc(&mut vv, t(n), b(n), 26.);
-            cv.leqc(&mut vv, b(n), h(ovr+1), 50.);
+            if let Loc::Node(vl) = loc {
+                if !containers.contains(vl) {
+                    cv.leqc(&mut vv, b(n), h(ovr+1), 50.);
+                }
+            }
             qv.push(vv.get(b(n)));
+
+            if let Loc::Border(_) = loc {
+                continue;
+            }
 
             if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
                 let mut process = true;
