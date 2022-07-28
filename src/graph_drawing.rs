@@ -1552,14 +1552,26 @@ pub mod layout {
                 for n in 0..path.len()-1 {
                     if let Val::Process{label: Some(al), ..} = &path[n] {
                         if let Val::Process{label: Some(bl), ..} = &path[n+1] {
-                            hcg.constraints.insert(
-                                HorizontalConstraint{
-                                    a: al.clone(), 
-                                    b: bl.clone()
-                                }
-                            );
+                            let mut al = al;
+                            let mut bl = bl;
+                            let has_prior_orientation = hcg.constraints.contains(&HorizontalConstraint{a: bl.clone(), b: al.clone()});
+                            if !has_prior_orientation {
+                                hcg.constraints.insert(
+                                    HorizontalConstraint{
+                                        a: al.clone(), 
+                                        b: bl.clone()
+                                    }
+                                );
+                            } else {
+                                std::mem::swap(&mut al, &mut bl);
+                            }
                             if let Some(level) = labels.get(n) {
                                 let eval::Level{forward, reverse} = level.clone();
+                                let mut forward = forward;
+                                let mut reverse = reverse;
+                                if has_prior_orientation {
+                                    std::mem::swap(&mut forward, &mut reverse);
+                                }
                                 let hlvl = hcg.labels.entry((al.clone(), bl.clone()))
                                     .or_insert(eval::Level{forward: None, reverse: None});
                                 // if hf.is_none() then forward else hf.map()
