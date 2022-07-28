@@ -1897,28 +1897,44 @@ pub mod layout {
             }
             for n in 0..path.len()-1 {
                 let src = &path[n];
-                let src = if let Val::Process { label: Some(label), .. } = src { label } else { continue; };
+                let mut src = if let Val::Process { label: Some(label), .. } = src { label } else { continue; };
                 let dst = &path[n+1];
-                let dst = if let Val::Process { label: Some(label), .. } = dst { label } else { continue; };
-                let src_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, src.clone());
-                let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst.clone());
+                let mut dst = if let Val::Process { label: Some(label), .. } = dst { label } else { continue; };
+                let mut src_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, src.clone());
+                let mut dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst.clone());
 
-                // TODO: record associated action/percept texts.
+                let has_prior_orientation = vcg.vert.edges_connecting(dst_ix, src_ix).next().is_some();
+                if has_prior_orientation {
+                    std::mem::swap(&mut src, &mut dst);
+                    std::mem::swap(&mut src_ix, &mut dst_ix);
+                }
+
                 let empty = eval::Level{forward: None, reverse: None};
                 let labels = labels_by_level.get(n).unwrap_or(&empty);
                 let rels = vcg.vert_edge_labels.entry(src.clone()).or_default().entry(dst.clone()).or_default();
-                for action in labels.forward.iter().flatten() {
-                    let action = action.clone().trim();
-                    if !action.is_empty() {
-                        vcg.vert.add_edge(src_ix, dst_ix, "actuates".into());
-                        rels.entry("actuates".into()).or_default().push(action);
+                let mut maybe_needs_edge = true;
+                for label in labels.forward.iter().flatten() {
+                    let label = label.clone().trim();
+                    if !label.is_empty() {
+                        let rel = if has_prior_orientation { "senses" } else { "actuates"};
+                        vcg.vert.add_edge(src_ix, dst_ix, rel.into());
+                        rels.entry(rel.into()).or_default().push(label);
+                        maybe_needs_edge = false;
                     }
                 }
-                for percept in labels.reverse.iter().flatten() {
-                    let percept = percept.clone().trim();
-                    if !percept.is_empty() {
-                        vcg.vert.add_edge(src_ix, dst_ix, "senses".into());
-                        rels.entry("senses".into()).or_default().push(percept);
+                for label in labels.reverse.iter().flatten() {
+                    let label = label.clone().trim();
+                    if !label.is_empty() {
+                        let rel = if has_prior_orientation { "actuates" } else { "senses"};
+                        vcg.vert.add_edge(src_ix, dst_ix, rel.into());
+                        rels.entry(rel.into()).or_default().push(label);
+                        maybe_needs_edge = false;
+                    }
+                }
+                if maybe_needs_edge {
+                    if rels.is_empty() {
+                        vcg.vert.add_edge(src_ix, dst_ix, "fake".into());
+                        rels.entry("fake".into()).or_default().push("?".into());
                     }
                 }
             }
