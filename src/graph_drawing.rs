@@ -463,7 +463,7 @@ pub mod index {
 pub mod eval {
     //! The main "value" type of depiction parts.
 
-    use std::{collections::{BTreeMap, HashMap}, borrow::{Cow}, vec::IntoIter, ops::Deref, slice::Iter};
+    use std::{collections::{HashMap}, borrow::{Cow}, vec::IntoIter, ops::Deref, slice::Iter};
 
     use crate::{parser::Item};
     
@@ -947,7 +947,7 @@ pub mod eval {
                 Item::Colon(l, r) => {
                     if l.len() == 1 && matches!(l[0], Item::Text(..)){
                         if let Item::Text(name) = &l[0] {
-                            let mut rbody = eval_seq(&r[..]);
+                            let rbody = eval_seq(&r[..]);
                             eprintln!("BOOM {l:?} {r:?} {rbody:?}");
                             if let Some(rbody) = rbody {
                                 let mut rbody: Vec<Val<_>> = rbody.into();
@@ -1054,7 +1054,7 @@ pub mod eval {
             assert_eq!(eval(&[]), p());
 
             assert_eq!(eval(&[t(a)]), mp(p().set_label(Some(a.into()))));
-            
+
             assert_eq!(
                 eval(&[sq(&[t(a), t(b)])]), 
                 mp(p().set_body(Some(Body::All(vec![
@@ -1080,8 +1080,6 @@ pub mod osqp {
     use osqp;
     #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
     use osqp_rust as osqp;
-
-    use super::layout::Graphic;
 
     /// A map from Sols to Vars. `get()`ing an not-yet-seen sol 
     /// allocates a new `Var` for that sol and returns a monomial
@@ -1948,7 +1946,7 @@ pub mod layout {
                 let mut dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst.clone());
 
                 let has_prior_orientation = {
-                    let costs = dijkstra::dijkstra(&vcg.vert, dst_ix, Some(src_ix), |er| 1);
+                    let costs = dijkstra::dijkstra(&vcg.vert, dst_ix, Some(src_ix), |_er| 1);
                     costs.contains_key(&src_ix)
                 };
                 if has_prior_orientation {
@@ -2002,7 +2000,7 @@ pub mod layout {
                         rels.remove("fake".into());
                         let mut edges = vcg.vert.neighbors_directed(src_ix, Outgoing).detach();
                         while let Some(ex) = edges.next_edge(&vcg.vert) {
-                            if let Some((esx, etx)) = vcg.vert.edge_endpoints(ex) {
+                            if let Some((_esx, etx)) = vcg.vert.edge_endpoints(ex) {
                                 if dst_ix == etx && vcg.vert.edge_weight(ex).map(|w| w.as_ref()) == Some("fake") {
                                     vcg.vert.remove_edge(ex);
                                 }
@@ -2082,7 +2080,7 @@ pub mod layout {
             let cx = vcg.vert_vxmap[container];
             for node in vcg.nodes_by_container[container].iter() {
                 let nx = vcg.vert_vxmap[node];
-                let mut node_incoming = vcg.vert.edges_directed(nx, Incoming)
+                let node_incoming = vcg.vert.edges_directed(nx, Incoming)
                     .filter_map(|er| {
                         let rel = er.weight().as_ref();
                         if rel == "actuates" || rel == "senses" || rel == "fake" {
@@ -2425,7 +2423,7 @@ pub mod layout {
             let mut mhrs = vec![vhr];
             for mid_level in (vvr+1).0..(wvr.0) {
                 let mid_level = VerticalRank(mid_level); // pending https://github.com/rust-lang/rust/issues/42168
-                let mut num_mhrs = locs_by_level.entry(mid_level).or_insert(0);
+                let num_mhrs = locs_by_level.entry(mid_level).or_insert(0);
                 let mhr = OriginalHorizontalRank(*num_mhrs);
                 *num_mhrs += 1;
                 if let Some(old) = loc_to_node.insert((mid_level, mhr), Loc::Hop(mid_level, vl.clone(), wl.clone())) {
@@ -2653,11 +2651,11 @@ pub mod layout {
             let x212 = u2 < v2;
             let c = (x121 && x212) || (x112 && x221);
             
-            let lvl = h1.lvl;
-            let vl1 = &h1.vl;
-            let wl1 = &h1.wl;
-            let vl2 = &h2.vl;
-            let wl2 = &h2.wl;
+            // let lvl = h1.lvl;
+            // let vl1 = &h1.vl;
+            // let wl1 = &h1.wl;
+            // let vl2 = &h2.vl;
+            // let wl2 = &h2.wl;
             // eprintln!("CROSSES: {h1:?}, {h2:?}, {lvl}, {vl1}->{wl1} X {vl2}->{wl2}, ({h11},{h12}) X ({h21},{h22}) -> ({u1},{u2}) X ({v1},{v2}) -> {c}");
             // if x121 {
             //     eprintln!("{vl2} {vl1}");
@@ -2964,9 +2962,8 @@ pub mod geometry {
     use petgraph::visit::EdgeRef;
     use tracing::{event, Level, instrument};
     use tracing_error::InstrumentError;
-    use typed_index_collections::TiVec;
 
-    use crate::graph_drawing::layout::{HorizontalConstraint, Border};
+    use crate::graph_drawing::layout::{HorizontalConstraint};
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples, as_scipy, as_numpy};
 
     use super::error::{LayoutError};
@@ -2981,7 +2978,6 @@ pub mod geometry {
     use std::collections::{HashMap, BTreeMap, HashSet};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
-    use std::ops::Mul;
 
     #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, EnumKind)]
     #[enum_kind(AnySolKind)]
@@ -3484,7 +3480,7 @@ pub mod geometry {
         let mut max_nesting_span_by_rank = BTreeMap::<VerticalRank, usize>::new();
         let mut max_nesting_depth_by_rank = BTreeMap::<VerticalRank, usize>::new();
         for container in containers.iter() {
-            let (ovr, ohr) = node_to_loc[&Loc::Node(container.clone())];
+            let (ovr, _ohr) = node_to_loc[&Loc::Node(container.clone())];
             let nesting_span = container_depths[container];
             let nesting_depth = nesting_depth_by_container[container] + 1;
 
@@ -3575,7 +3571,6 @@ pub mod geometry {
             let node_width = size_by_loc.get(&(ovr, ohr))
                 .ok_or_else::<Error,_>(|| LayoutError::OsqpError{error: format!("missing node width: {ovr}, {ohr}")}.in_current_span().into())?;
             let mut min_width = node_width.width.round() as usize;
-            let mut min_height = node_width.height.round() as usize;
 
             if let Loc::Node(vl) = loc {
                 update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut min_width, vl)?;
@@ -3657,7 +3652,6 @@ pub mod geometry {
         for hop_row in all_hops.iter() {
             let HopRow{lvl, mhr, nhr, vl, wl, ..} = &hop_row;
 
-            let ovr = lvl;
             let shr = &solved_locs[lvl][mhr];
             let n = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
             let vloc = node_to_loc[&Loc::Node(vl.clone())].clone();
@@ -3784,10 +3778,10 @@ pub mod geometry {
                             let hop_size_l = size_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).unwrap_or(&default_hop_size);
                             ch.geqc(&mut vh, s(n), s(*ln), (2.*sep) + hop_size_l.right + hop_size.left);
                             
-                            let lvl = (*lvl).clone();
-                            let lwl = (*lwl).clone();
-                            let lvloc = &node_to_loc[&Loc::Node(lvl.clone())];
-                            let lwloc = &node_to_loc[&Loc::Node(lwl.clone())];
+                            // let lvl = (*lvl).clone();
+                            // let lwl = (*lwl).clone();
+                            // let lvloc = &node_to_loc[&Loc::Node(lvl.clone())];
+                            // let lwloc = &node_to_loc[&Loc::Node(lwl.clone())];
                             // if vl != &lvl && lvloc.0 == *ovr {
                             //     let lvn = sol_by_loc[lvloc];
                             //     ch.geqc(&mut vh, s(n), r(lvn), sep + action_width);
@@ -3813,10 +3807,10 @@ pub mod geometry {
                             let hop_size_r = size_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_size);
                             ch.leqc(&mut vh, s(n), s(*rn), (2.*sep) + hop_size_r.left + hop_size.right);
 
-                            let rvl = (*rvl).clone();
-                            let rwl = (*rwl).clone();
-                            let rvloc = &node_to_loc[&Loc::Node(rvl.clone())];
-                            let rwloc = &node_to_loc[&Loc::Node(rwl.clone())];
+                            // let rvl = (*rvl).clone();
+                            // let rwl = (*rwl).clone();
+                            // let rvloc = &node_to_loc[&Loc::Node(rvl.clone())];
+                            // let rwloc = &node_to_loc[&Loc::Node(rwl.clone())];
                             // if vl != &rvl && rvloc.0 == *ovr {
                             //     let rvn = sol_by_loc[rvloc];
                             //     ch.leqc(&mut vh, s(n), l(rvn), sep + percept_width);
@@ -3860,14 +3854,14 @@ pub mod geometry {
             // forward heights
             // LOWER LEFT CORNER
             for objects in level_to_object.get(&(ovrr-1)).iter() {
-                for (shro, objs) in objects.iter() {
+                for (_shro, objs) in objects.iter() {
                     for obj in objs {
                         if let Loc2::Node{vl: ovl, ..} = obj {
                             if containers.contains(ovl) && (nodes_by_container[ovl].contains(vl) || nodes_by_container[ovl].contains(wl)) {
                                 continue;
                             }
                         }
-                        if let Loc2::Hop{vl: ovl, wl: owl, ..} = obj {
+                        if let Loc2::Hop{vl: _ovl, wl: owl, ..} = obj {
                             if *owl != vl && *owl != wl {
                                 continue;
                             }
@@ -3900,7 +3894,6 @@ pub mod geometry {
             }
             let shrl = solved_locs[&locl.0][&locl.1];
             let shrr = solved_locs[&locr.0][&locr.1];
-            let num_objects: usize = level_to_object.iter().flat_map(|row| row.1.iter().map(|cell| cell.1.len())).sum();
             let empty = HashSet::new();
             for obj in level_to_object.get(&ovrr).and_then(|lvl| lvl.get(&shrr)).unwrap_or(&empty) {
                 match obj {
@@ -3926,7 +3919,7 @@ pub mod geometry {
             }
             // reverse heights
             for objects in level_to_object.get(&(ovrl+1)).iter() {
-                for (shro, objs) in objects.iter() {
+                for (_shro, objs) in objects.iter() {
                     for obj in objs {
                         let obj_loc = match obj {
                             Loc2::Node{loc: obj_loc, ..} => obj_loc,
@@ -4021,7 +4014,7 @@ pub mod geometry {
             //     qh.push(10000. as f64 * Monomial::from(var));
             // }
         }
-        for (n, (sol, var)) in vv.iter().enumerate() {
+        for (sol, var) in vv.iter() {
             if !matches!(sol, AnySol::F(_)) {
                 cv.push(((0.).into(), vec![var.into()], f64::INFINITY.into()));
             }
@@ -4030,10 +4023,10 @@ pub mod geometry {
             // }
         }
 
-        let mut solutions_h;
+        let solutions_h;
         loop {
-            let mut eps_abs = 1e-4_f64;
-            let mut eps_rel = 1e-4_f64;
+            // let mut eps_abs = 1e-4_f64;
+            // let mut eps_rel = 1e-4_f64;
             eprintln!("SOLVE HORIZONTAL");
             solutions_h = solve_problem(&vh, &ch, &pdh, &qh, &osqp::Settings::default()
                 .adaptive_rho(false)
@@ -4049,7 +4042,7 @@ pub mod geometry {
                 // .polish(true)
                 .verbose(true))?;
             
-            let mut constraints_satisfied = true;
+            // let mut constraints_satisfied = true;
             for container in containers.iter() {
                 let locc = &node_to_loc[&Loc::Node(container.clone())];
                 let nc = sol_by_loc[locc];
@@ -4066,15 +4059,15 @@ pub mod geometry {
                     let rnn = &solutions_h[vrnn.var.index].1;
                     if lnc + 39. >= *lnn {
                         eprintln!("CONSTRAINT VIOLATION: lnc-lnn conflict, {container}, {node}");
-                        constraints_satisfied = false;
+                        // constraints_satisfied = false;
                     }
                     if rnn + 39. >= *rnc {
                         eprintln!("CONSTRAINT VIOLATION: rnn-rnc conflict, {container}, {node}");
-                        constraints_satisfied = false;
+                        // constraints_satisfied = false;
                     }
                     if rnc - lnc < 21. {
                         eprintln!("CONSTRAINT VIOLATION: container too narrow, {container}");
-                        constraints_satisfied = false;
+                        // constraints_satisfied = false;
                     }
                 }
             }
@@ -4135,7 +4128,7 @@ pub mod frontend {
     use tracing::{event, Level};
     use tracing_error::InstrumentResult;
 
-    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border, HorizontalConstraint}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize}, error::{Error, Kind, OrErrExt}, eval::Val};
 
@@ -4394,7 +4387,7 @@ pub mod frontend {
     }
 
     pub mod dom {
-        use std::{borrow::Cow, cmp::max};
+        use std::{borrow::Cow};
 
         use tracing::{instrument, event};
 
@@ -4458,15 +4451,9 @@ pub mod frontend {
             let container_borders = &depiction.layout_problem.container_borders;
             let container_depths = &depiction.vcg.container_depths;
             let nesting_depths = &depiction.vcg.nesting_depths;
-            let nesting_depth_by_container = &depiction.vcg.nesting_depth_by_container;
             let solved_locs = &depiction.layout_solution.solved_locs;
 
-            let height_scale = 100.0;
-            let vpad = 50.0;
-            let line_height = 20.0;
-            let char_width = 9.0;
-            let nesting_top_padding = 40.;
-            let nesting_bottom_padding = 10.;
+            let char_width = &depiction.geometry_problem.char_width.unwrap_or(9.);
 
             let mut texts = vec![];
 
@@ -4486,7 +4473,6 @@ pub mod frontend {
                         let lpos = ls[&n];
                         let rpos = rs[&n];
 
-                        let nesting_depth = nesting_depths[vl] as f64;
                         let z_index = nesting_depths[vl];
 
                         let vpos = ts[&n];
@@ -4519,12 +4505,9 @@ pub mod frontend {
                     let rn = sol_by_loc[&(*ovr, *rohr)];
                     let lpos = ls[&ln];
                     let rpos = rs[&rn];
-                    let nesting_depth = nesting_depths[container] as f64;
                     let z_index = nesting_depths[container];
                     let vpos = ts[&ln];
                     let width = (rpos - lpos).round();
-                    let depth = container_depths[container] as f64;
-                    let inner_depth = nesting_depth_by_container[container] as f64;
                     let hpos = lpos.round();
                     let height = bs[&ln] - ts[&ln];
                     eprintln!("HEIGHT: {container} {height}");
@@ -4586,7 +4569,6 @@ pub mod frontend {
                     let mut estimated_size0 = None;
 
                     let ndv = nesting_depths[vl] as f64;
-                    let ndw = nesting_depths[wl] as f64;
 
                     let fs = container_depths.get(vl).copied().and_then(|d| d.checked_sub(1)).unwrap_or(0);
                     let hops = if fs == 0 {
@@ -4596,8 +4578,6 @@ pub mod frontend {
                     };
                     let vmin = bs[&sol_by_loc[&node_to_loc[&Loc::Node(vl.clone())]]];
                     let vmax = ts[&sol_by_loc[&node_to_loc[&Loc::Node(wl.clone())]]];
-                    let fh = hops.iter().next().unwrap();
-                    let lh = hops.iter().rev().next().unwrap();
                     let nh = hops.len();
                     let vs = (0..=nh).map(|lvl|  {
                         let fraction = lvl as f64 / nh as f64;
@@ -4616,7 +4596,7 @@ pub mod frontend {
                         let hposd = (sposd + offset).round(); //  + 10. * lvl.0 as f64;
                         let lvl_offset = container_depths.get(vl).copied().unwrap_or(0);
                         eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {}", ndv, lvl_offset);
-                        let mut vpos = vs[n];
+                        let vpos = vs[n];
                         let mut vpos2 = vs[n+1];
 
                         if n == 0 {
@@ -4701,8 +4681,6 @@ pub mod frontend {
             for (m, ((vl, wl), lvl)) in hcg.labels.iter().enumerate() {
 
                 let z_index = std::cmp::max(nesting_depths[vl], nesting_depths[wl]) + 1;
-                let ndv = nesting_depths[vl] as f64;
-                let ndw = nesting_depths[vl] as f64;
 
                 if let Some(forward) = &lvl.forward {
                     let key = format!("{vl}_{wl}_forward_{m}");
