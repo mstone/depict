@@ -499,7 +499,7 @@ pub mod eval {
     /// What are the labels for the forward and reverse 
     /// directions for a given link of the containing 
     /// [Val::Chain]?
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Level<V> {
         /// What are the labels for the "forward" direction 
         /// of this link of the chain?
@@ -510,7 +510,7 @@ pub mod eval {
     }
 
     /// How are these parts related to the whole they make up?
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub enum Body<V> {
         /// States or modes the process could be in
         Any(Vec<Val<V>>),
@@ -585,7 +585,7 @@ pub mod eval {
 
     /// What processes and labeled relationships between them
     /// are we depicting?
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub enum Val<V> {
         Ref {
             name: V,
@@ -597,10 +597,6 @@ pub mod eval {
             label: Option<V>,
             /// Maybe this process has nested parts?
             body: Option<Body<V>>,
-            /// Maybe there are nested parts accessible by name?
-            name_to_part: Option<BTreeMap<V, usize>>,
-            /// Maybe there are annotations?
-            notes: Option<Vec<Note<V>>>,
         },
         Chain {
             /// Maybe this chain is named?
@@ -620,8 +616,6 @@ pub mod eval {
                 name: None,
                 label: None,
                 body: None,
-                name_to_part: None,
-                notes: None,
             }
         }
     }
@@ -660,6 +654,14 @@ pub mod eval {
             }
             self
         }
+
+        pub fn set_body(&mut self, body: Option<Body<V>>) -> &mut Self {
+            match self {
+                Val::Process{ body: b, .. } => { *b = body; }
+                _ => {},
+            }
+            self
+        }
     }
 
     fn eval_path<'s, 't>(path: &'t [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
@@ -676,8 +678,6 @@ pub mod eval {
                 name: None,
                 label: Some(label),
                 body: None,
-                name_to_part: None,
-                notes: None,
             }
         }).collect::<Vec<_>>()
     }
@@ -795,8 +795,6 @@ pub mod eval {
                                     }
                                 }), " ").into()),
                                 body: Some(nest_val),
-                                name_to_part: None,
-                                notes: None,
                             });
                             return body;
                         }
@@ -818,8 +816,6 @@ pub mod eval {
                             name: None,
                             label: None,
                             body: Some(nest_val),
-                            name_to_part: None,
-                            notes: None,
                         });
                     }
                 },
@@ -827,9 +823,7 @@ pub mod eval {
                     body.get_or_insert_with(Default::default).push(Val::Process{
                         name: None, 
                         label: Some(s.clone()), 
-                        body: None, 
-                        name_to_part: None, 
-                        notes: None
+                        body: None,
                     })
                 },
                 _ => {},
@@ -967,9 +961,7 @@ pub mod eval {
                                 body.get_or_insert_with(Default::default).push(Val::Process{
                                     name: None, 
                                     label: Some(name.clone()), 
-                                    body: None, 
-                                    name_to_part: None, 
-                                    notes: None
+                                    body: None,
                                 })
                             }
                         }
@@ -1024,8 +1016,6 @@ pub mod eval {
                             name: None,
                             label: None,
                             body: Some(nest_val),
-                            name_to_part: None,
-                            notes: None,
                         });
                     }
                 }
@@ -1033,9 +1023,7 @@ pub mod eval {
                     body.get_or_insert_with(Default::default).push(Val::Process{
                         name: None, 
                         label: Some(s.clone()), 
-                        body: None, 
-                        name_to_part: None, 
-                        notes: None
+                        body: None,
                     })
                 }
                 _ => {},
@@ -1045,9 +1033,36 @@ pub mod eval {
         Val::Process{ 
             name: None, 
             label: None, 
-            body, 
-            name_to_part: None,
-            notes: None,
+            body,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::parser::Item;
+
+        #[test]
+        fn test_eval() {
+            let a = "a";
+            let b = "b";
+            let p = || Val::Process{name: None, label: None, body: None};
+            let mp = |p: &Val<_>| { Val::Process{name: None, label: None, body: Some(Body::All(vec![p.clone()]))}};
+            let t = |a: &'static str| { Item::Text(Cow::from(a)) };
+            let sq = |a: &[Item<'static>]| { Item::Sq(a.iter().cloned().collect::<Vec<_>>()) };
+
+            assert_eq!(eval(&[]), p());
+
+            assert_eq!(eval(&[t(a)]), mp(p().set_label(Some(a.into()))));
+            
+            assert_eq!(
+                eval(&[sq(&[t(a), t(b)])]), 
+                mp(p().set_body(Some(Body::All(vec![
+                    p().set_label(Some(a.into())).clone(), 
+                    p().set_label(Some(b.into())).clone()
+                    ]))
+                ))
+            );
         }
     }
 }
