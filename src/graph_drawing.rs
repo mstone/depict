@@ -753,12 +753,16 @@ pub mod eval {
         let mut body: Option<Body<_>> = None;
 
         if ls.iter().all(|l| matches!(l, Item::Text(_) | Item::Seq(_))) {
-            body.get_or_insert_with(Default::default).push(Val::Chain{
-                name: None,
-                rel: eval_rel(&ls[..]),
-                path: eval_path(&ls[..]),
-                labels: vec![],
-            });
+            if ls.len() == 1 {
+                body.get_or_insert_with(Default::default).append(&mut eval_path(&ls[..]));
+            } else {
+                body.get_or_insert_with(Default::default).push(Val::Chain{
+                    name: None,
+                    rel: eval_rel(&ls[..]),
+                    path: eval_path(&ls[..]),
+                    labels: vec![],
+                });
+            }
             return body;
         }
         if ls.len() == 2 {
