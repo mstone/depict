@@ -748,10 +748,15 @@ pub mod eval {
         Rel::Vertical
     }
 
-    fn eval_seq<'s, 't>(ls: &'t [Item<'s>]) -> Option<Body<Cow<'s, str>>> {
+    fn eval_seq<'s, 't>(mut ls: &'t [Item<'s>]) -> Option<Body<Cow<'s, str>>> {
         eprintln!("EVAL_SEQ: {ls:?}");
         let mut body: Option<Body<_>> = None;
 
+        if ls.len() == 1 {
+            if let Item::Comma(ls) = &ls[0] {
+                return eval_seq(ls);
+            }
+        }
         if ls.iter().all(|l| matches!(l, Item::Text(_) | Item::Seq(_))) {
             if ls.len() == 1 {
                 body.get_or_insert_with(Default::default).append(&mut eval_path(&ls[..]));
@@ -765,19 +770,30 @@ pub mod eval {
             }
             return body;
         }
-        if ls.len() == 2 {
-            if let Item::Text(label) = &ls[0] {
-                match &ls[1] {
+        if ls.len() > 0 {
+            if matches!(&ls[ls.len()-1], Item::Comma(v) if v.is_empty()) {
+                ls = &ls[0..ls.len()-1];
+            }
+        }
+        if ls.len() > 1 {
+            if ls[0..ls.len()-1].iter().all(|l| matches!(l, Item::Text(_) | Item::Seq(_))) {
+                match &ls[ls.len()-1] {
                     Item::Sq(nest) | Item::Br(nest) => {
                         if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
-                            let nest_val = if matches!(ls[1], Item::Sq(_)) { 
+                            let nest_val = if matches!(ls[ls.len()-1], Item::Sq(_)) { 
                                 Body::All(nest_val.into()) 
                             } else { 
                                 Body::Any(nest_val.into()) 
                             };
                             body.get_or_insert_with(Default::default).push(Val::Process{
                                 name: None,
-                                label: Some(label.clone()),
+                                label: Some(itertools::join(ls[0..ls.len()-1].iter().filter_map(|i| {
+                                    match i {
+                                        Item::Text(s) => Some(s.clone()),
+                                        Item::Seq(s) => Some(itertools::join(s, " ").into()),
+                                        _ => None
+                                    }
+                                }), " ").into()),
                                 body: Some(nest_val),
                                 name_to_part: None,
                                 notes: None,
