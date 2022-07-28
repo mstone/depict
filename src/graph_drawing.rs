@@ -654,9 +654,9 @@ pub mod eval {
 
         pub fn set_label(&mut self, label: Option<V>) -> &mut Self {
             match self {
-                Val::Ref { .. } => unreachable!(),
+                Val::Ref { .. } => {},
                 Val::Process { label: l, .. } => { *l = label; },
-                Val::Chain { .. } => unreachable!(),
+                Val::Chain { .. } => {},
             }
             self
         }
@@ -1888,6 +1888,9 @@ pub mod layout {
             if *rel == Rel::Horizontal {
                 continue
             }
+            if path.is_empty() {
+                continue;
+            }
             for n in 0..path.len()-1 {
                 let src = &path[n];
                 let src = if let Val::Process { label: Some(label), .. } = src { label } else { continue; };
@@ -2678,7 +2681,13 @@ pub mod layout {
             eprintln!("LOC_TO_NODE: {l2n:#?}");
             
             if hops_by_level.is_empty() {
-                return Ok(LayoutSolution{crossing_number: 0, solved_locs: BTreeMap::new()});
+                let mut solved_locs = BTreeMap::new();
+                for (lvl, locs) in locs_by_level.iter() {
+                    solved_locs.insert(*lvl, (0..*locs)
+                        .map(|loc| (OriginalHorizontalRank(loc), SolvedHorizontalRank(loc)))
+                        .collect::<BTreeMap<_, _>>());
+                }
+                return Ok(LayoutSolution{crossing_number: 0, solved_locs});
             }
 
             let mut shrs = vec![];
