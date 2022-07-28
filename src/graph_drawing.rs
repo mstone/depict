@@ -1512,7 +1512,7 @@ pub mod layout {
     use std::hash::Hash;
     
     use petgraph::EdgeDirection::{Outgoing, Incoming};
-    use petgraph::algo::floyd_warshall;
+    use petgraph::algo::{floyd_warshall, dijkstra};
     use petgraph::dot::Dot;
     use petgraph::graph::{Graph, NodeIndex, EdgeReference};
     use petgraph::visit::{EdgeRef, IntoNodeReferences};
@@ -1554,6 +1554,7 @@ pub mod layout {
                         if let Val::Process{label: Some(bl), ..} = &path[n+1] {
                             let mut al = al;
                             let mut bl = bl;
+                            // bug: needs to be transitive
                             let has_prior_orientation = hcg.constraints.contains(&HorizontalConstraint{a: bl.clone(), b: al.clone()});
                             if !has_prior_orientation {
                                 hcg.constraints.insert(
@@ -1915,7 +1916,10 @@ pub mod layout {
                 let mut src_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, src.clone());
                 let mut dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, dst.clone());
 
-                let has_prior_orientation = vcg.vert.edges_connecting(dst_ix, src_ix).next().is_some();
+                let has_prior_orientation = {
+                    let costs = dijkstra::dijkstra(&vcg.vert, dst_ix, Some(src_ix), |er| 1);
+                    costs.contains_key(&src_ix)
+                };
                 if has_prior_orientation {
                     std::mem::swap(&mut src, &mut dst);
                     std::mem::swap(&mut src_ix, &mut dst_ix);
@@ -1959,6 +1963,21 @@ pub mod layout {
                     let dst_ix = vcg.vert_vxmap[dst];
                     vcg.vert.add_edge(src_ix, dst_ix, "fake".into());
                     rels.entry("fake".into()).or_default().push("?".into());
+                }
+                if rels.contains_key("fake".into()) {
+                    if rels.contains_key("actuates".into()) || rels.contains_key("senses".into()) {
+                        let src_ix = vcg.vert_vxmap[src];
+                        let dst_ix = vcg.vert_vxmap[dst];
+                        rels.remove("fake".into());
+                        let mut edges = vcg.vert.neighbors_directed(src_ix, Outgoing).detach();
+                        while let Some(ex) = edges.next_edge(&vcg.vert) {
+                            if let Some((esx, etx)) = vcg.vert.edge_endpoints(ex) {
+                                if dst_ix == etx && vcg.vert.edge_weight(ex).map(|w| w.as_ref()) == Some("fake") {
+                                    vcg.vert.remove_edge(ex);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
