@@ -78,7 +78,7 @@ says:
 * there is a path downward in our model from a process (controller) named `person` to a process named `microwave` to a process named `food`, 
 * in the space between `person` and `microwave`, there are three actions, `open`, `start`, and `stop`, and one feedback, `beep`, 
 * in the space between `microwave` and `food`, there is one action, `heat`.
-* finally, there is also a direct relationship between `person` and `food` consisting of the action: `stir`.
+* finally, there is also a direct relationship between `person` and `food` consisting of the action: `eat`.
 
 
 ## Syntax
