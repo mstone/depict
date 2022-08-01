@@ -587,9 +587,6 @@ pub mod eval {
     /// are we depicting?
     #[derive(Clone, Debug, PartialEq)]
     pub enum Val<V> {
-        Ref {
-            name: V,
-        },
         Process {
             /// Maybe this process is named?
             name: Option<V>,
@@ -623,7 +620,6 @@ pub mod eval {
     impl<V> Val<V> {
         pub fn name(&self) -> Option<&V> {
             match self {
-                Val::Ref { name } => Some(name),
                 Val::Process { name, .. } => name.as_ref(),
                 Val::Chain { name, .. } => name.as_ref(),
             }
@@ -631,7 +627,6 @@ pub mod eval {
 
         pub fn set_name(&mut self, name: V) -> &mut Self {
             match self {
-                Val::Ref { name: n } => { *n = name; },
                 Val::Process { name: n, .. } => { *n = Some(name); },
                 Val::Chain { name: n, .. } => { *n = Some(name); },
             }
@@ -640,7 +635,6 @@ pub mod eval {
 
         pub fn label(&self) -> Option<&V> {
             match self {
-                Val::Ref { .. } => None, // really?
                 Val::Process { label, .. } => label.as_ref(),
                 Val::Chain { .. } => None,
             }
@@ -648,7 +642,6 @@ pub mod eval {
 
         pub fn set_label(&mut self, label: Option<V>) -> &mut Self {
             match self {
-                Val::Ref { .. } => {},
                 Val::Process { label: l, .. } => { *l = label; },
                 Val::Chain { .. } => {},
             }
@@ -839,7 +832,6 @@ pub mod eval {
         scopes: &'u mut HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
     ) {
         match val {
-            Val::Ref { name: _ } => {},
             Val::Process { name, body, .. } => {
                 if let Some(name) = name {
                     current_scope.push(name.clone());
@@ -875,9 +867,6 @@ pub mod eval {
         eprintln!("RESOLVE {current_path:?}");
         let mut resolution = None;
         match val {
-            Val::Ref { name: _ } => {
-                todo!()
-            },
             Val::Process { name, body, label, .. } => {
                 if let Some(name) = name {
                     current_path.push(name.clone());
