@@ -1858,6 +1858,9 @@ pub mod layout {
                     queue.push((path, rel, labels, parent));
                     for val in path {
                         if let Val::Process{label: Some(node), ..} = val {
+                            if let Some(parent) = parent {
+                                add_contains_edge(vcg, parent, node);
+                            }
                             for p in parents.iter() {
                                 vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
                             }
