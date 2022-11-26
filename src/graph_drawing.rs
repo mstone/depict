@@ -1035,6 +1035,8 @@ pub mod eval {
         fn test_eval() {
             let a = "a";
             let b = "b";
+            let c = "c";
+            let d = "d";
             let dash = "-";
             let p = || Val::Process{name: None, label: None, body: None};
             let l = |a: &'static str| { p().set_label(Some(a.into())).clone() };
@@ -1042,6 +1044,7 @@ pub mod eval {
             let t = |a: &'static str| { Item::Text(Cow::from(a)) };
             let sq = |a: &[Item<'static>]| { Item::Sq(a.iter().cloned().collect::<Vec<_>>()) };
             let seq = |a: &[Item<'static>]| { Item::Seq(a.iter().cloned().collect::<Vec<_>>()) };
+            let hc = |a: &[Val<_>]| { Val::Chain{ name: None, rel: Rel::Horizontal, path: a.iter().cloned().collect::<Vec<_>>(), labels: vec![], }};
 
             assert_eq!(eval(&[]), p());
 
@@ -1055,10 +1058,16 @@ pub mod eval {
             assert_eq!(
                 eval(&[seq(&[t(a), t(b), t(dash)])]),
                 mp(
-                    &Val::Chain{ name: None, rel: Rel::Horizontal, path: vec![l(a), l(b)], labels: vec![] }
+                    &hc(&[l(a), l(b)])
                 )
             );
 
+            assert_eq!(
+                eval(&[seq(&[t(a), sq(&[seq(&[t(dash), t(b), t(c)])])])]),
+                mp(l(a).set_body(Some(Body::All(vec![
+                    hc(&[l(b), l(c)])
+                ]))))
+            );
         }
     }
 }
