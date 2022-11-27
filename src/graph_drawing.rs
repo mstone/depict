@@ -1672,6 +1672,8 @@ pub mod layout {
                 preliminary_rank.insert(wl.clone(), *rank);
             }
         }
+        eprintln!("HCG PRELIMINARY RANK: {preliminary_rank:#?}");
+
         let mut modified_rank = HashMap::new();
         for (node, rank) in preliminary_rank.iter() {
             let rank = *rank;
@@ -1690,9 +1692,12 @@ pub mod layout {
                 }
             }
         }
+        eprintln!("HCG MODIFIED RANK: {modified_rank:#?}");
+
         for (node, rank) in modified_rank.iter() {
             paths_by_rank.entry(*rank).or_default().insert(("root".into(), node.clone()));
         }
+        eprintln!("HCG MODIFIED PATHS_BY_RANK: {paths_by_rank:#?}");
     }
 
     #[derive(Clone, Debug, Default)]
@@ -2217,7 +2222,9 @@ pub mod layout {
         let paths_fw = floyd_warshall(&dag, |er| {
             let src = dag.node_weight(er.source()).unwrap();
             let dst = dag.node_weight(er.target()).unwrap();
-            distance(src, dst)
+            let dist = distance(src, dst);
+            eprintln!("DISTANCE: {src:?} {dst:?} {dist:?}");
+            dist
         })
             .map_err(|cycle| 
                 Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
@@ -2235,6 +2242,7 @@ pub mod layout {
                 .collect::<Result<Vec<_>, Error>>()?
         );
         event!(Level::DEBUG, ?paths_fw2, "FLOYD-WARSHALL");
+        eprintln!("FLOYD-WARSHALL: {paths_fw2:#?}");
 
         let paths_from_roots = SortedVec::from_unsorted(
             paths_fw2
@@ -2249,6 +2257,7 @@ pub mod layout {
                 .collect::<Vec<_>>()
         );
         event!(Level::DEBUG, ?paths_from_roots, "PATHS_FROM_ROOTS");
+        eprintln!("PATHS_FROM_ROOTS: {paths_from_roots:#?}");
 
         let mut paths_by_rank = BTreeMap::new();
         for (wgt, vx, wx) in paths_from_roots.iter() {
@@ -2258,6 +2267,7 @@ pub mod layout {
                 .insert((vx.clone(), wx.clone()));
         }
         event!(Level::DEBUG, ?paths_by_rank, "PATHS_BY_RANK");
+        eprintln!("RANK_PATHS_BY_RANK: {paths_by_rank:#?}");
 
         Ok(paths_by_rank)
     }
@@ -2511,6 +2521,38 @@ pub mod layout {
         event!(Level::DEBUG, ?g_hops_dot, "HOPS GRAPH");
 
         Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders, hcg})
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_fixup_hcg_rank_is_deterministic() {
+            let mut hcg = Hcg{
+                constraints: HashSet::new(),
+                labels: HashMap::new(),
+            };
+            hcg.constraints.insert(HorizontalConstraint{a: "s".into(), b: "b".into()});
+            hcg.constraints.insert(HorizontalConstraint{a: "c".into(), b: "s".into()});
+
+            let mut pbr: BTreeMap<VerticalRank, SortedVec<(Cow<str>, Cow<str>)>> = BTreeMap::new();
+            pbr.insert(VerticalRank(0), SortedVec::from_unsorted(vec![("root".into(), "root".into())]));
+            pbr.insert(VerticalRank(1), SortedVec::from_unsorted(vec![
+                ("root".into(), "b".into()),
+                ("root".into(), "k".into()),
+                ("root".into(), "s".into()),
+            ]));
+            pbr.insert(VerticalRank(2), SortedVec::from_unsorted(vec![
+                ("root".into(), "c".into()),
+            ]));
+
+            let mut pbr1 = pbr.clone();
+            let mut pbr2 = pbr.clone();
+            fixup_hcg_rank(&hcg, &mut pbr1);
+            fixup_hcg_rank(&hcg, &mut pbr2);
+            assert_eq!(pbr1, pbr2);
+        }
     }
 
     pub mod debug {
