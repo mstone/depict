@@ -1540,7 +1540,7 @@ pub mod layout {
     //! seems to serve us best.
     
     use std::borrow::{Cow};
-    use std::collections::{BTreeMap, HashSet};
+    use std::collections::{BTreeMap, HashSet, BTreeSet};
     use std::collections::{HashMap, hash_map::Entry};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
@@ -1565,7 +1565,7 @@ pub mod layout {
     }
 
     /// Require a to be left of b
-    #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+    #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
     pub struct HorizontalConstraint<V: Graphic> {
         pub a: V,
         pub b: V,
@@ -2021,9 +2021,11 @@ pub mod layout {
 
         // to ensure that nodes in horizontal relationships have correct vertical positioning,
         // we add implied edges based on horizontal relationships and containment relationships.
-        eprintln!("NODES_BY_CONTAINER: {:#?}", vcg.nodes_by_container);
+        let sorted_nodes_by_container = vcg.nodes_by_container.iter().collect::<BTreeMap<_, _>>();
+        let sorted_constraints = hcg.constraints.iter().collect::<BTreeSet<_>>();
+        eprintln!("NODES_BY_CONTAINER: {:#?}", sorted_nodes_by_container);
         eprintln!("PRELIMINARY VERT: {:#?}", vcg.vert);
-        for HorizontalConstraint{a, b} in hcg.constraints.iter() {
+        for HorizontalConstraint{a, b} in sorted_constraints.iter() {
             let ax = vcg.vert_vxmap[a];
             let bx = vcg.vert_vxmap[b];
             let mut a_incoming = vcg.vert.edges_directed(ax, Incoming)
