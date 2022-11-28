@@ -1665,8 +1665,11 @@ pub mod layout {
         Ok(hcg)
     }
     
+    /// Ensure that for all nodes N, if there's a horizontal constraint
+    /// between A and N or between N and A, then rank'(N) == rank'(A)
+    /// and rank'(N) >= rank(N) and rank'(A) >= rank(A).
     pub fn fixup_hcg_rank<'s, 't>(hcg: &'t Hcg<Cow<'s, str>>, paths_by_rank: &'t mut BTreeMap<VerticalRank, SortedVec<(Cow<'s, str>, Cow<'s, str>)>>) {
-        let mut preliminary_rank = HashMap::new();
+        let mut preliminary_rank = BTreeMap::new();
         for (rank, paths) in paths_by_rank.iter() {
             for (_, wl) in paths.iter() {
                 preliminary_rank.insert(wl.clone(), *rank);
@@ -1674,22 +1677,36 @@ pub mod layout {
         }
         eprintln!("HCG PRELIMINARY RANK: {preliminary_rank:#?}");
 
-        let mut modified_rank = HashMap::new();
+        let mut preliminary_rank_inv: BTreeMap<VerticalRank, BTreeSet<Cow<'s, str>>> = BTreeMap::new();
         for (node, rank) in preliminary_rank.iter() {
-            let rank = *rank;
-            for HorizontalConstraint{a, b} in hcg.constraints.iter() {
-                let ar = modified_rank.get(a).copied().unwrap_or(preliminary_rank[a]);
-                let br = modified_rank.get(b).copied().unwrap_or(preliminary_rank[b]);
-                if node == a || node == b {
-                    let (o, or) = if node == a { (b, br) } else { (a, ar) };
-                    if ar != br {
-                        if rank < or {
-                            modified_rank.insert(node.clone(), or);
-                        } else {
-                            modified_rank.insert(o.clone(), rank);
-                        }
-                    }
-                }
+            preliminary_rank_inv.entry(*rank).or_default().insert(node.clone());
+        }
+
+        // XXX: this really should be a fully transitively closed relation?
+        // and we really should take max ranks on horiziontal-connected-components?
+        // and then we should really push everything in the vertical down-set down?
+        let mut index_constraints: BTreeMap<Cow<'s, str>, BTreeSet<Cow<'s, str>>> = BTreeMap::new();
+        for HorizontalConstraint{a, b} in hcg.constraints.iter() {
+            index_constraints.entry(a.clone()).or_default().insert(b.clone());
+            index_constraints.entry(b.clone()).or_default().insert(a.clone());
+        }
+
+        let mut modified_rank = HashMap::new();
+        let empty = BTreeSet::new();
+        for (rank, nodes) in preliminary_rank_inv.iter() {
+            for node in nodes.iter() {
+                let max_rank = index_constraints
+                    .get(node)
+                    .unwrap_or(&empty)
+                    .iter()
+                    .map(|a| modified_rank
+                            .get(a)
+                            .copied()
+                            .unwrap_or(preliminary_rank[a])
+                        )
+                    .max()
+                    .unwrap_or(*rank);
+                modified_rank.insert(node.clone(), max_rank);
             }
         }
         eprintln!("HCG MODIFIED RANK: {modified_rank:#?}");
