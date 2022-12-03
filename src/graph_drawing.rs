@@ -4477,11 +4477,15 @@ pub mod frontend {
             Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_size: HopSize },
         }
 
+        #[derive(Clone, Debug, PartialEq, PartialOrd)]
+        pub enum Log {}
+
         #[derive(Clone, Debug)]
         pub struct Drawing {
             pub crossing_number: Option<usize>,
             pub viewbox_width: f64,
             pub nodes: Vec<Node>,
+            pub logs: Vec<Log>,
         }
 
         impl Default for Drawing {
@@ -4489,7 +4493,8 @@ pub mod frontend {
                 Self { 
                     crossing_number: Default::default(), 
                     viewbox_width: 1024.0,
-                    nodes: Default::default() 
+                    nodes: Default::default(),
+                    logs: vec![],
                 }
             }
         }
@@ -4815,7 +4820,8 @@ pub mod frontend {
             Ok(Drawing{
                 crossing_number: Some(crossing_number), 
                 viewbox_width: root_width,
-                nodes
+                nodes,
+                logs: vec![],
             })
         }
     }
