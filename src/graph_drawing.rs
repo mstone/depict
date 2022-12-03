@@ -4478,7 +4478,9 @@ pub mod frontend {
         }
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
-        pub enum Log {}
+        pub enum Log {
+            String(String)
+        }
 
         #[derive(Clone, Debug)]
         pub struct Drawing {
@@ -4504,6 +4506,7 @@ pub mod frontend {
             let render_cell = super::render(Cow::Owned(data))?;
             let depiction = render_cell.borrow_dependent();
             
+            let val = &depiction.val;
             let rs = &depiction.geometry_solution.rs;
             let ls = &depiction.geometry_solution.ls;
             let ss = &depiction.geometry_solution.ss;
@@ -4529,8 +4532,13 @@ pub mod frontend {
 
             let char_width = &depiction.geometry_problem.char_width.unwrap_or(9.);
 
+            let mut logs = vec![];
             let mut texts = vec![];
 
+            // Log the resolved value
+            logs.push(Log::String(format!("{val:#?}")));
+
+            // Render Nodes
             let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
             let root_width = rs[&root_n] - ls[&root_n];
 
@@ -4821,7 +4829,7 @@ pub mod frontend {
                 crossing_number: Some(crossing_number), 
                 viewbox_width: root_width,
                 nodes,
-                logs: vec![],
+                logs,
             })
         }
     }
