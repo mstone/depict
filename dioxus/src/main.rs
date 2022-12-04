@@ -97,7 +97,19 @@ pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
     let logs = drawing.logs;
     cx.render(rsx!{
         logs.iter().map(|m| match m {
-            Log::String(s) => rsx!{div { style: "white-space: pre;", "{s}" }},
+            Log::String{name, val} => rsx!{
+                div { 
+                    key: "debug_{name}",
+                    div {
+                        style: "font-weight: 700;",
+                        "{name}"
+                    }
+                    div {
+                        style: "white-space: pre;",
+                        "{val}" 
+                    }
+                }
+            },
         })
     })
 }
@@ -443,7 +455,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         div {
             style: "width: 100%;",
             div {
-                style: "display: flex;",
+                style: "display: flex; gap: 20px;",
                 div {
                     style: "position: relative; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
                     width: "{viewbox_width}px",

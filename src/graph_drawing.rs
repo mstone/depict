@@ -4479,7 +4479,7 @@ pub mod frontend {
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Log {
-            String(String)
+            String { name: String, val: String, }
         }
 
         #[derive(Clone, Debug)]
@@ -4536,7 +4536,10 @@ pub mod frontend {
             let mut texts = vec![];
 
             // Log the resolved value
-            logs.push(Log::String(format!("{val:#?}")));
+            logs.push(Log::String{name: "VAL".into(), val: format!("{val:#?}")});
+            logs.push(Log::String{name: "sol_by_loc".into(), val: format!("{sol_by_loc:#?}")});
+            logs.push(Log::String{name: "sol_by_hop".into(), val: format!("{sol_by_hop:#?}")});
+            logs.reverse();
 
             // Render Nodes
             let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
