@@ -5,7 +5,7 @@ use std::panic::catch_unwind;
 
 use depict::graph_drawing::error::{Error, OrErrExt, Kind};
 use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
-use depict::graph_drawing::frontend::dom::{draw, Drawing, Label, Node};
+use depict::graph_drawing::frontend::dom::{draw, Drawing, Label, Node, Log};
 use depict::graph_drawing::frontend::dioxus::{render, as_data_svg};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
@@ -93,6 +93,15 @@ pub struct AppProps {
     drawing_receiver: Cell<Option<UnboundedReceiver<Drawing>>>,
 }
 
+pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
+    let logs = drawing.logs;
+    cx.render(rsx!{
+        logs.iter().map(|m| match m {
+            Log::String(s) => rsx!{div { "{s}" }},
+        })
+    })
+}
+
 pub fn app(cx: Scope<AppProps>) -> Element {
     let model = use_state(&cx, || String::from(PLACEHOLDER));
     let drawing = use_state(&cx, Drawing::default);
@@ -115,6 +124,10 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     // window.devtool();
 
     let nodes = render(cx, drawing.get().clone());
+    let logs = render_logs(cx, drawing.get().clone());
+
+    let mut show_logs = use_state(&cx, || false);
+
     let model_sender = cx.props.model_sender.clone().unwrap();
     model_sender.unbounded_send(model.get().clone()).unwrap();
 
@@ -418,6 +431,15 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             }))
                         }
                     }
+                }
+                div {
+                    button {
+                        onclick: move |_| show_logs.modify(|v| !v),
+                        "Show debug logs"
+                    }
+                    show_logs.then(|| rsx!{
+                        logs
+                    })
                 }
             }
         }
