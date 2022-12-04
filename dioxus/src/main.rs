@@ -97,7 +97,7 @@ pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
     let logs = drawing.logs;
     cx.render(rsx!{
         logs.iter().map(|m| match m {
-            Log::String(s) => rsx!{div { "{s}" }},
+            Log::String(s) => rsx!{div { style: "white-space: pre;", "{s}" }},
         })
     })
 }
