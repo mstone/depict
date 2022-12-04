@@ -437,18 +437,21 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         onclick: move |_| show_logs.modify(|v| !v),
                         "Show debug logs"
                     }
-                    show_logs.then(|| rsx!{
-                        logs
-                    })
                 }
             }
         }
         div {
             style: "width: 100%;",
             div {
-                style: "position: relative; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
-                width: "{viewbox_width}px",
-                nodes
+                style: "display: flex;",
+                div {
+                    style: "position: relative; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
+                    width: "{viewbox_width}px",
+                    nodes
+                }
+                show_logs.then(|| rsx!{
+                    logs
+                })
             }
         }
     })   
