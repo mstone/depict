@@ -927,11 +927,10 @@ pub mod eval {
 
     /// What depiction do the given depict-expressions denote?
     pub fn eval<'s, 't>(exprs: &'t [Item<'s>]) -> Val<Cow<'s, str>> {
-        // let mut body: Option<Vec<Val<Cow<'s, str>>>> = None;
         let mut body: Option<Body<_>> = None;
+        let mut model = vec![];
 
         for expr in exprs {
-            let _: &'t Item<'s> = expr;
             match expr {
                 Item::Colon(l, r) => {
                     if l.len() == 1 && matches!(l[0], Item::Text(..)){
@@ -945,9 +944,9 @@ pub mod eval {
                                     let label = fst.label().unwrap_or(name);
                                     fst.set_label(Some(label.clone()));
                                 });
-                                body.get_or_insert_with(Default::default).append(&mut rbody);
+                                model.append(&mut rbody);
                             } else {
-                                body.get_or_insert_with(Default::default).push(Val::Process{
+                                model.push(Val::Process{
                                     name: None, 
                                     label: Some(name.clone()), 
                                     body: None,
@@ -957,7 +956,7 @@ pub mod eval {
                     } else {
                         match &l[..] {
                             [Item::Comma(ls)] => {
-                                body.get_or_insert_with(Default::default).push(Val::Chain{
+                                model.push(Val::Chain{
                                     name: None,
                                     rel: eval_rel(&ls[..]),
                                     path: eval_path(&ls[..]),
@@ -965,7 +964,7 @@ pub mod eval {
                                 });
                             }
                             _ => {
-                                body.get_or_insert_with(Default::default).push(Val::Chain{
+                                model.push(Val::Chain{
                                     name: None,
                                     rel: eval_rel(&l[..]),
                                     path: eval_path(&l[..]),
@@ -977,19 +976,19 @@ pub mod eval {
                 },
                 Item::Comma(ls) => {
                     if let Some(seq_body) = eval_seq(ls) {
-                        body.get_or_insert_with(Default::default).append(&mut seq_body.into());
+                        model.append(&mut seq_body.into());
                     }
                 }
                 Item::Seq(ls)  => {
                     match &ls[..] {
                         [Item::Comma(ls)] => {
                             if let Some(seq_body) = eval_seq(ls) {
-                                body.get_or_insert_with(Default::default).append(&mut seq_body.into());
+                                model.append(&mut seq_body.into());
                             }
                         },
                         _ => {
                             if let Some(seq_body) = eval_seq(ls) {
-                                body.get_or_insert_with(Default::default).append(&mut seq_body.into());
+                                model.append(&mut seq_body.into());
                             }
                         }
                     }
@@ -1001,7 +1000,7 @@ pub mod eval {
                         } else { 
                             Body::Any(nest_val.into()) 
                         };
-                        body.get_or_insert_with(Default::default).push(Val::Process{
+                        model.push(Val::Process{
                             name: None,
                             label: None,
                             body: Some(nest_val),
@@ -1009,7 +1008,7 @@ pub mod eval {
                     }
                 }
                 Item::Text(s) => {
-                    body.get_or_insert_with(Default::default).push(Val::Process{
+                    model.push(Val::Process{
                         name: None, 
                         label: Some(s.clone()), 
                         body: None,
@@ -1019,6 +1018,9 @@ pub mod eval {
             }
         }
 
+        if !model.is_empty() {
+            body = Some(Body::All(model));
+        }
         Val::Process{ 
             name: None, 
             label: None, 
