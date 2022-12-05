@@ -1042,19 +1042,25 @@ pub mod eval {
             let l = |a: &'static str| { p().set_label(Some(a.into())).clone() };
             let mp = |p: &Val<_>| { Val::Process{name: None, label: None, body: Some(Body::All(vec![p.clone()]))}};
             let t = |a: &'static str| { Item::Text(Cow::from(a)) };
-            let sq = |a: &[Item<'static>]| { Item::Sq(a.iter().cloned().collect::<Vec<_>>()) };
-            let seq = |a: &[Item<'static>]| { Item::Seq(a.iter().cloned().collect::<Vec<_>>()) };
+            let vi = |a: &[Item<'static>]| { a.iter().cloned().collect::<Vec<_>>() };
+            let sq = |a: &[Item<'static>]| { Item::Sq(vi(a)) };
+            let seq = |a: &[Item<'static>]| { Item::Seq(vi(a)) };
             let hc = |a: &[Val<_>]| { Val::Chain{ name: None, rel: Rel::Horizontal, path: a.iter().cloned().collect::<Vec<_>>(), labels: vec![], }};
+            let col = |a: &[Item<'static>], b: &[Item<'static>]| { Item::Colon(vi(a), vi(b)) };
 
+            //
             assert_eq!(eval(&[]), p());
 
+            // a
             assert_eq!(eval(&[t(a)]), mp(p().set_label(Some(a.into()))));
 
+            // [ a b ]
             assert_eq!(
                 eval(&[sq(&[t(a), t(b)])]), 
                 mp(p().set_body(Some(Body::All(vec![ l(a), l(b) ]))))
             );
 
+            // a b -
             assert_eq!(
                 eval(&[seq(&[t(a), t(b), t(dash)])]),
                 mp(
@@ -1062,11 +1068,20 @@ pub mod eval {
                 )
             );
 
+            // a [ - b c ]
             assert_eq!(
                 eval(&[seq(&[t(a), sq(&[seq(&[t(dash), t(b), t(c)])])])]),
                 mp(l(a).set_body(Some(Body::All(vec![
                     hc(&[l(b), l(c)])
                 ]))))
+            );
+
+            // a: b; a [ c ]
+            assert_eq!(
+                eval(&[col(&[t(a)], &[t(b)]), seq(&[t(a), sq(&[t(c)])])]),
+                mp(l(b)
+                    .set_name(a.into())
+                    .set_body(Some(Body::All(vec![l(c)]))))
             );
         }
     }
