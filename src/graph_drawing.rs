@@ -925,10 +925,47 @@ pub mod eval {
         }
     }
 
+    struct Model<'s> {
+        processes: Vec<Val<Cow<'s, str>>>,
+        names: HashMap<Cow<'s, str>, usize>,
+    }
+
+    impl<'s> Model<'s> {
+        fn append(&mut self, rhs: &mut Vec<Val<Cow<'s, str>>>) {
+            for val in rhs.drain(..) {
+                self.push(val)
+            }
+        }
+
+        fn push(&mut self, rhs: Val<Cow<'s, str>>) {
+            self.processes.push(rhs);
+            // TODO: cases:
+            //    rhs has name and we have seen it
+            //    rhs has label and we have seen it
+            //    rhs has name and we have not seen it
+            //    rhs has label and we have not seen it
+        }
+
+        fn to_vec(self) -> Vec<Val<Cow<'s, str>>> {
+            self.processes
+        }
+
+        fn is_empty(&self) -> bool {
+            self.processes.is_empty()
+        }
+
+        fn new() -> Self {
+            Self {
+                processes: vec![],
+                names: HashMap::new(),
+            }
+        }
+    }
+
     /// What depiction do the given depict-expressions denote?
     pub fn eval<'s, 't>(exprs: &'t [Item<'s>]) -> Val<Cow<'s, str>> {
         let mut body: Option<Body<_>> = None;
-        let mut model = vec![];
+        let mut model = Model::new();
 
         for expr in exprs {
             match expr {
@@ -1019,7 +1056,7 @@ pub mod eval {
         }
 
         if !model.is_empty() {
-            body = Some(Body::All(model));
+            body = Some(Body::All(model.to_vec()));
         }
         Val::Process{ 
             name: None, 
