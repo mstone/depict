@@ -1070,35 +1070,45 @@ pub mod eval {
         use super::*;
         use crate::parser::Item;
 
-        #[test]
-        fn test_eval() {
-            let a = "a";
-            let b = "b";
-            let c = "c";
-            let d = "d";
-            let dash = "-";
-            let p = || Val::Process{name: None, label: None, body: None};
-            let l = |a: &'static str| { p().set_label(Some(a.into())).clone() };
-            let mp = |p: &Val<_>| { Val::Process{name: None, label: None, body: Some(Body::All(vec![p.clone()]))}};
-            let t = |a: &'static str| { Item::Text(Cow::from(a)) };
-            let vi = |a: &[Item<'static>]| { a.iter().cloned().collect::<Vec<_>>() };
-            let sq = |a: &[Item<'static>]| { Item::Sq(vi(a)) };
-            let seq = |a: &[Item<'static>]| { Item::Seq(vi(a)) };
-            let hc = |a: &[Val<_>]| { Val::Chain{ name: None, rel: Rel::Horizontal, path: a.iter().cloned().collect::<Vec<_>>(), labels: vec![], }};
-            let col = |a: &[Item<'static>], b: &[Item<'static>]| { Item::Colon(vi(a), vi(b)) };
+        const a: &'static str = "a";
+        const b: &'static str = "b";
+        const c: &'static str = "c";
+        const d: &'static str = "d";
+        const dash: &'static str = "-";
+        fn p<'s>() -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: None} }
+        fn l<'s>(x: &'static str) -> Val<Cow<'s, str>> { p().set_label(Some(x.into())).clone() }
+        fn mp<'s>(p: &Val<Cow<'s, str>>) -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: Some(Body::All(vec![p.clone()]))}}
+        fn t<'s>(x: &'static str) -> Item<'s> { Item::Text(Cow::from(x)) }
+        fn vi<'s>(x: &[Item<'static>]) -> Vec<Item<'s>> { x.iter().cloned().collect::<Vec<_>>() }
+        fn sq<'s>(x: &[Item<'static>]) -> Item<'s>{ Item::Sq(vi(x)) }
+        fn seq<'s>(x: &[Item<'static>]) -> Item<'s> { Item::Seq(vi(x)) }
+        fn hc<'s>(x: &[Val<Cow<'s, str>>]) -> Val<Cow<'s, str>> { Val::Chain{ name: None, rel: Rel::Horizontal, path: x.iter().cloned().collect::<Vec<_>>(), labels: vec![], }}
+        fn col<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Colon(vi(x), vi(y)) }
 
+        #[test]
+        fn test_eval_empty() {
             //
             assert_eq!(eval(&[]), p());
+        }
 
+
+        #[test]
+        fn test_eval_single() {
             // a
             assert_eq!(eval(&[t(a)]), mp(p().set_label(Some(a.into()))));
+        }
 
+        #[test]
+        fn test_eval_vert_chain() {
             // [ a b ]
             assert_eq!(
                 eval(&[sq(&[t(a), t(b)])]), 
                 mp(p().set_body(Some(Body::All(vec![ l(a), l(b) ]))))
             );
+        }
 
+        #[test]
+        fn test_eval_horz_chain() {
             // a b -
             assert_eq!(
                 eval(&[seq(&[t(a), t(b), t(dash)])]),
@@ -1106,7 +1116,10 @@ pub mod eval {
                     &hc(&[l(a), l(b)])
                 )
             );
+        }
 
+        #[test]
+        fn test_eval_single_nest_horz_chain() {
             // a [ - b c ]
             assert_eq!(
                 eval(&[seq(&[t(a), sq(&[seq(&[t(dash), t(b), t(c)])])])]),
@@ -1114,7 +1127,10 @@ pub mod eval {
                     hc(&[l(b), l(c)])
                 ]))))
             );
+        }
 
+        #[test]
+        fn test_eval_nest_merge() {
             // a: b; a [ c ]
             assert_eq!(
                 eval(&[col(&[t(a)], &[t(b)]), seq(&[t(a), sq(&[t(c)])])]),
