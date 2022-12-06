@@ -518,6 +518,15 @@ pub mod eval {
         All(Vec<Val<V>>),
     }
 
+    impl<V> AsMut<Vec<Val<V>>> for Body<V> {
+        fn as_mut(&mut self) -> &mut Vec<Val<V>> {
+            match self {
+                Body::Any(b) => b,
+                Body::All(b) => b,
+            }
+        }
+    }
+
     impl<V> IntoIterator for Body<V> {
         type Item = Val<V>;
 
@@ -925,6 +934,15 @@ pub mod eval {
         }
     }
 
+    fn merge<'s>(existing_process: &mut Val<Cow<'s, str>>, rhs: &mut Val<Cow<'s, str>>) {
+        eprintln!("EVAL_MERGE: {existing_process:#?} {rhs:#?}");
+        if let (Val::Process { name, label, body }, Val::Process { name: rname, label: rlabel, body: rbody }) = (existing_process, rhs) {
+            let rbody = <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(rbody.get_or_insert_with(Default::default).as_mut());
+            <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(body.get_or_insert_with(Default::default).as_mut()).append(rbody);
+        }
+    }
+
+    #[derive(Clone, Debug)]
     struct Model<'s> {
         processes: Vec<Val<Cow<'s, str>>>,
         names: HashMap<Cow<'s, str>, usize>,
@@ -937,8 +955,58 @@ pub mod eval {
             }
         }
 
-        fn push(&mut self, rhs: Val<Cow<'s, str>>) {
-            self.processes.push(rhs);
+        fn push(&mut self, mut rhs: Val<Cow<'s, str>>) {
+            use std::collections::hash_map::Entry::*;
+            eprintln!("PUSH {rhs:#?}");
+            let rhs_name = match &rhs {
+                Val::Process { name, label, body } => {
+                    // the only unnamed process is the administrative / top-level wrapper process
+                    if name.is_none() && label.is_none() {
+                        self.processes.push(rhs);
+                        return
+                    }
+                    name.clone().or_else(|| label.as_ref().cloned()).unwrap().clone()
+                },
+                Val::Chain { name, rel, path, labels } => {
+                    if let Some(name) = name {
+                        name.clone()
+                    } else {
+                        self.processes.push(rhs);
+                        return
+                    }
+                },
+            };
+            let index_entry = self.names.entry(rhs_name.clone());
+            match index_entry {
+                Occupied(oe) => {
+                    let mut existing_process = self.processes.get_mut(*oe.get()).unwrap();
+                    merge(existing_process, &mut rhs);
+                },
+                Vacant(ve) => {
+                    // if we have no names entry for rhs_name, that could be because
+                    // rhs is really new, or it could be because rhs is renaming an existing
+                    // process.
+                    if let Val::Process { name: Some(rhs_name2), label: Some(rhs_label), .. } = &rhs {
+                        let index_entry2 = self.names.entry(rhs_label.clone());
+                        match index_entry2 {
+                            Occupied(oe2) => {
+                                let existing_process_index = *oe2.get();
+                                let mut existing_process = self.processes.get_mut(existing_process_index).unwrap();
+                                std::mem::swap(existing_process, &mut rhs);
+                                merge(&mut existing_process, &mut rhs);
+                                self.names.insert(rhs_name, existing_process_index);
+                            },
+                            Vacant(ve2) => {
+                                self.names.insert(rhs_name, self.processes.len());
+                                self.processes.push(rhs);
+                            },
+                        }
+                    } else {
+                        ve.insert(self.processes.len());
+                        self.processes.push(rhs);
+                    }
+                },
+            }
             // TODO: cases:
             //    rhs has name and we have seen it
             //    rhs has label and we have seen it
@@ -1054,6 +1122,8 @@ pub mod eval {
                 _ => {},
             }
         }
+
+        eprintln!("EVAL MODEL: {model:#?}");
 
         if !model.is_empty() {
             body = Some(Body::All(model.to_vec()));
