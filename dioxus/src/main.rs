@@ -119,14 +119,15 @@ fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
         Record::Group{name, val} => cx.render(rsx!{
             div {
                 key: "debug_{name}",
-                div {
-                    style: "padding-left: 4px; border-left: 1px gray solid;",
-                    div {
+                details {
+                    style: "padding-left: 4px;",
+                    open: "true",
+                    summary {
                         style: "font-weight: 700;",
                         "{name}"
                     }
                     div {
-                        style: "white-space: pre; margin-left: 10px;",
+                        style: "white-space: pre; margin-left: 10px; border-left: 1px gray solid;",
                         val.into_iter().map(|r| render_many(cx, r))
                     }
                 }
