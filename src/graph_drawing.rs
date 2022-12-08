@@ -682,29 +682,32 @@ pub mod eval {
             match self {
                 Val::Process { name, label, body } => {
                     let pname = &as_string2(name, label, "").into();
-                    l.with_group(format!("Process: {pname}"), |l| {
-                        match body {
-                            Some(body) if body.len() > 0 => match body {
-                                Body::Any(bs) => {
-                                    l.with_group("Body: Any", |l| {
-                                        for b in bs.iter() {
-                                            b.log(pname, l)?
-                                        }
-                                        Ok(())
-                                    })
+                    l.with_names(
+                        format!("Process: {pname}"), 
+                        vec![pname],
+                        |l| {
+                            match body {
+                                Some(body) if body.len() > 0 => match body {
+                                    Body::Any(bs) => {
+                                        l.with_group("Body: Any", |l| {
+                                            for b in bs.iter() {
+                                                b.log(pname, l)?
+                                            }
+                                            Ok(())
+                                        })
+                                    },
+                                    Body::All(bs) => {
+                                        l.with_group("Body: All", |l| {
+                                            for b in bs.iter() {
+                                                b.log(pname, l)?
+                                            }
+                                            Ok(())
+                                        })
+                                    },
                                 },
-                                Body::All(bs) => {
-                                    l.with_group("Body: All", |l| {
-                                        for b in bs.iter() {
-                                            b.log(pname, l)?
-                                        }
-                                        Ok(())
-                                    })
-                                },
-                            },
-                            _ => Ok(()),
-                        }
-                    })
+                                _ => Ok(()),
+                            }
+                        })
                 },
                 Val::Chain { name, rel, path, labels } => {
                     let name = as_string1(name, "").into();
@@ -5238,7 +5241,8 @@ pub mod frontend {
                         children.push(cx.render(rsx! {
                             div {
                                 key: "{key}",
-                                style: "position: absolute; padding-top: 3px; padding-bottom: 3px; box-sizing: border-box; border: 1px solid black; text-align: center; z-index: 10; background-color: #fff;", // bg-opacity-50
+                                class: "box highlight_{label}",
+                                style: "position: absolute; padding-top: 3px; padding-bottom: 3px; box-sizing: border-box; border: 1px solid black; text-align: center; z-index: 10;", // bg-opacity-50
                                 top: "{vpos}px",
                                 left: "{hpos}px",
                                 width: "{width}px",
@@ -5258,6 +5262,7 @@ pub mod frontend {
                         children.push(cx.render(rsx!{
                             div {
                                 key: "{key}",
+                                class: "arrow highlight_{key}",
                                 style: "position: absolute;",
                                 z_index: "{z_index}",
                                 svg {
