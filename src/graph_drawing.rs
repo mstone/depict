@@ -4648,6 +4648,8 @@ pub mod frontend {
             let container_depths = &depiction.vcg.container_depths;
             let nesting_depths = &depiction.vcg.nesting_depths;
             let solved_locs = &depiction.layout_solution.solved_locs;
+            let horizontal_problem = &depiction.horizontal_problem;
+            let vertical_problem = &depiction.vertical_problem;
 
             let char_width = &depiction.geometry_problem.char_width.unwrap_or(9.);
 
@@ -4659,8 +4661,10 @@ pub mod frontend {
             logs.push(Log::String{name: "sol_by_loc".into(), val: format!("{sol_by_loc:#?}")});
             logs.push(Log::String{name: "sol_by_hop".into(), val: format!("{sol_by_hop:#?}")});
             logs.push(Log::String{name: "solved_locs".into(), val: format!("{solved_locs:#?}")});
-            logs.push(Log::String{name: "size_by_loc".into(), val: format!{"{size_by_loc:#?}"}});
-            logs.push(Log::String{name: "size_by_hop".into(), val: format!{"{size_by_hop:#?}"}});
+            logs.push(Log::String{name: "size_by_loc".into(), val: format!("{size_by_loc:#?}")});
+            logs.push(Log::String{name: "size_by_hop".into(), val: format!("{size_by_hop:#?}")});
+            logs.push(Log::String{name: "horizontal_problem".into(), val: format!("{horizontal_problem:#?}")});
+            logs.push(Log::String{name: "vertical_problem".into(), val: format!("{vertical_problem:#?}")});
             logs.push(Log::Group{name: "coordinates".into(), val: vec![
                 Log::String{name: "rs".into(), val: format!{"{rs:#?}"}},
                 Log::String{name: "ls".into(), val: format!{"{ls:#?}"}},
