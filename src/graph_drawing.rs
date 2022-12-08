@@ -666,6 +666,13 @@ pub mod eval {
         }
     }
 
+    use crate::graph_drawing::frontend::log;
+    impl<'s, 't> log::Log for &'t Val<Cow<'s, str>> {
+        fn log(&self, name: String, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.log_string(name, format!("{self:#?}"))
+        }
+    }
+
     fn eval_path<'s, 't>(path: &'t [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
         eprintln!("EVAL_PATH: {path:?}");
         path.iter().filter_map(|i| {
@@ -4573,12 +4580,60 @@ pub mod frontend {
         })
     }
 
+    pub mod log {
+
+        #[derive(Clone, Debug, PartialEq, PartialOrd)]
+        pub enum Record {
+            String { name: String, val: String, },
+            Group { name: String, val: Vec<Record>, },
+        }
+
+        #[derive(Clone, Debug, thiserror::Error)]
+        #[error("LogError")]
+        pub struct Error {
+
+        }
+
+        pub trait Log {
+            fn log(&self, name: String, l: &mut Logger) -> Result<(), Error>;
+        }
+
+        #[derive(Clone, Debug, Default)]
+        pub struct Logger {
+            logs: Vec<Record>,
+        }
+
+        impl Logger {
+            pub fn new() -> Self {
+                Self { logs: vec![] }
+            }
+
+            pub fn log_string(&mut self, name: impl Into<String>, val: impl std::fmt::Debug) -> Result<(), Error> {
+                self.logs.push(Record::String{name: name.into(), val: format!("{val:#?}")});
+                Ok(())
+            }
+
+            pub fn with_group<F>(&mut self, name: impl Into<String>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
+                let mut nested_logger = Logger::new();
+                f(&mut nested_logger)?;
+                self.logs.push(Record::Group{name: name.into(), val: nested_logger.logs});
+                Ok(())
+            }
+
+            pub fn to_vec(self) -> Vec<Record> {
+                self.logs
+            }
+        }
+    }
+
     pub mod dom {
         use std::{borrow::Cow};
 
         use tracing::{instrument, event};
 
         use crate::graph_drawing::{error::{OrErrExt, Kind, Error}, layout::Loc, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}};
+
+        use super::log;
 
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -4595,18 +4650,12 @@ pub mod frontend {
             Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_size: HopSize },
         }
 
-        #[derive(Clone, Debug, PartialEq, PartialOrd)]
-        pub enum Log {
-            String { name: String, val: String, },
-            Group { name: String, val: Vec<Log>, },
-        }
-
         #[derive(Clone, Debug)]
         pub struct Drawing {
             pub crossing_number: Option<usize>,
             pub viewbox_width: f64,
             pub nodes: Vec<Node>,
-            pub logs: Vec<Log>,
+            pub logs: Vec<log::Record>,
         }
 
         impl Default for Drawing {
@@ -4653,24 +4702,27 @@ pub mod frontend {
 
             let char_width = &depiction.geometry_problem.char_width.unwrap_or(9.);
 
-            let mut logs = vec![];
             let mut texts = vec![];
 
+            use crate::graph_drawing::frontend::log;
+
+            let mut logs = log::Logger::new();
             // Log the resolved value
-            logs.push(Log::String{name: "VAL".into(), val: format!("{val:#?}")});
-            logs.push(Log::String{name: "sol_by_loc".into(), val: format!("{sol_by_loc:#?}")});
-            logs.push(Log::String{name: "sol_by_hop".into(), val: format!("{sol_by_hop:#?}")});
-            logs.push(Log::String{name: "solved_locs".into(), val: format!("{solved_locs:#?}")});
-            logs.push(Log::String{name: "size_by_loc".into(), val: format!("{size_by_loc:#?}")});
-            logs.push(Log::String{name: "size_by_hop".into(), val: format!("{size_by_hop:#?}")});
-            logs.push(Log::String{name: "horizontal_problem".into(), val: format!("{horizontal_problem:#?}")});
-            logs.push(Log::String{name: "vertical_problem".into(), val: format!("{vertical_problem:#?}")});
-            logs.push(Log::Group{name: "coordinates".into(), val: vec![
-                Log::String{name: "rs".into(), val: format!{"{rs:#?}"}},
-                Log::String{name: "ls".into(), val: format!{"{ls:#?}"}},
-                Log::String{name: "bs".into(), val: format!{"{bs:#?}"}},
-                Log::String{name: "ts".into(), val: format!{"{ts:#?}"}},
-            ]});
+            logs.log_string("VAL", val);
+            logs.log_string("sol_by_loc", sol_by_loc);
+            logs.log_string("sol_by_hop", sol_by_hop);
+            logs.log_string("solved_locs", solved_locs);
+            logs.log_string("size_by_loc", size_by_loc);
+            logs.log_string("size_by_hop", size_by_hop);
+            logs.log_string("horizontal_problem", horizontal_problem);
+            logs.log_string("vertical_problem", vertical_problem);
+            logs.with_group("coordinates", |logs| {
+                logs.log_string("rs", rs)?;
+                logs.log_string("ls", ls)?;
+                logs.log_string("bs", bs)?;
+                logs.log_string("ts", ts)
+            });
+            let mut logs = logs.to_vec();
             logs.reverse();
 
             // Render Nodes

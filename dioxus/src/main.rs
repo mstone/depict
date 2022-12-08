@@ -4,8 +4,9 @@ use std::io::{self};
 use std::panic::catch_unwind;
 
 use depict::graph_drawing::error::{Error, OrErrExt, Kind};
+use depict::graph_drawing::frontend::log::Record;
 use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
-use depict::graph_drawing::frontend::dom::{draw, Drawing, Label, Node, Log};
+use depict::graph_drawing::frontend::dom::{draw, Drawing, Label, Node};
 use depict::graph_drawing::frontend::dioxus::{render, as_data_svg};
 use dioxus::core::exports::futures_channel;
 use dioxus::prelude::*;
@@ -93,9 +94,9 @@ pub struct AppProps {
     drawing_receiver: Cell<Option<UnboundedReceiver<Drawing>>>,
 }
 
-pub fn render_one<P>(cx: Scope<P>, log: Log) -> Option<VNode> {
-    match log {
-        Log::String{name, val} => cx.render(rsx!{
+pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
+    match record {
+        Record::String{name, val} => cx.render(rsx!{
             div {
                 key: "debug_{name}",
                 div {
@@ -116,8 +117,8 @@ pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
     let logs = drawing.logs;
     cx.render(rsx!{
         logs.into_iter().map(|m| match m {
-            Log::String{..} => render_one(cx, m),
-            Log::Group{name, val} => cx.render(rsx!{
+            Record::String{..} => render_one(cx, m),
+            Record::Group{name, val} => cx.render(rsx!{
                 div { 
                     key: "debug_{name}",
                     div {
