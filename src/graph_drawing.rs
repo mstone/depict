@@ -3188,7 +3188,7 @@ pub mod geometry {
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
 
-    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, EnumKind)]
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, EnumKind)]
     #[enum_kind(AnySolKind)]
     pub enum AnySol {
         L(LocSol),
@@ -3198,7 +3198,9 @@ pub mod geometry {
         B(LocSol),
         H(VerticalRank),
         V(SolvedHorizontalRank),
-        F(usize)
+        F(usize),
+        #[default]
+        Default,
     }
 
     impl Fresh for AnySol {
@@ -3218,6 +3220,7 @@ pub mod geometry {
                 AnySol::H(ovr) => write!(f, "h{}", ovr.0),
                 AnySol::V(shr) => write!(f, "v{}", shr.0),
                 AnySol::F(idx) => write!(f, "f{}", idx),
+                AnySol::Default => write!(f, "def"),
             }
         }
     }
@@ -3400,6 +3403,14 @@ pub mod geometry {
             nesting_bottom_padding
         }
     }
+
+    #[derive(Debug, Default)]
+    pub struct OptimizationProblem<S: Sol, C: Coeff> {
+        v: Vars<S>,
+        c: Constraints<S, C>, 
+        pd: Vec<Monomial<S, C>>, 
+        q: Vec<Monomial<S, C>>,
+    }
     
     #[derive(Debug, Default)]
     pub struct GeometrySolution {
@@ -3514,12 +3525,22 @@ pub mod geometry {
 
 
     fn solve_problem<S: Sol, C: Coeff>(
-        v: &Vars<S>,
-        c: &Constraints<S, C>, 
-        pd: &Vec<Monomial<S, C>>, 
-        q: &Vec<Monomial<S, C>>,
-        settings: &osqp::Settings,
+        optimization_problem: &OptimizationProblem<S, C>
     ) -> Result<Vec<(Var<S>, f64)>, Error> {
+        let OptimizationProblem{v, c, pd, q} = optimization_problem;
+
+        let settings = &osqp::Settings::default()
+            .adaptive_rho(false)
+            // .check_termination(Some(200))
+            // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
+            // .adaptive_rho_interval(Some(25))
+            // .eps_abs(1e-4)
+            // .eps_rel(1e-4)
+            // .max_iter(128_000)
+            // .max_iter(400)
+            // .polish(true)
+            .verbose(true);
+        
         let n = v.len();
 
         let sparse_pd = &pd[..];
@@ -3622,7 +3643,7 @@ pub mod geometry {
         layout_problem: &'s LayoutProblem<V>,
         layout_solution: &'s LayoutSolution,
         geometry_problem: &'s GeometryProblem<V>,
-    ) -> Result<GeometrySolution, Error> where 
+    ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error> where 
         V: Display + Graphic + Len,
         E: Graphic
     {
@@ -4231,75 +4252,25 @@ pub mod geometry {
             //     qv.push(10000. as f64 * Monomial::from(var));
             // }
         }
-
-        let solutions_h;
-        loop {
-            // let mut eps_abs = 1e-4_f64;
-            // let mut eps_rel = 1e-4_f64;
-            eprintln!("SOLVE HORIZONTAL");
-            solutions_h = solve_problem(&vh, &ch, &pdh, &qh, &osqp::Settings::default()
-                .adaptive_rho(false)
-                // .rho(1e2_f64)
-                // .check_termination(Some(4000))
-                // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
-                // .adaptive_rho_interval(Some(25))
-                // .eps_abs(eps_abs)
-                // .eps_rel(eps_rel)
-                // .max_iter(128_000_000)
-                // .scaled_termination(false)
-                // .max_iter(400)
-                // .polish(true)
-                .verbose(true))?;
-            
-            // let mut constraints_satisfied = true;
-            for container in containers.iter() {
-                let locc = &node_to_loc[&Loc::Node(container.clone())];
-                let nc = sol_by_loc[locc];
-                for node in nodes_by_container[container].iter() {
-                    let locn = &node_to_loc[&Loc::Node(node.clone())];
-                    let nn = sol_by_loc[locn];
-                    let vlnc = vh.get::<OrderedFloat<f64>>(l(nc));
-                    let vlnn = vh.get::<OrderedFloat<f64>>(l(nn));
-                    let vrnn = vh.get::<OrderedFloat<f64>>(r(nn));
-                    let vrnc = vh.get::<OrderedFloat<f64>>(r(nc));
-                    let lnc = &solutions_h[vlnc.var.index].1;
-                    let lnn = &solutions_h[vlnn.var.index].1;
-                    let rnc = &solutions_h[vrnc.var.index].1;
-                    let rnn = &solutions_h[vrnn.var.index].1;
-                    if lnc + 39. >= *lnn {
-                        eprintln!("CONSTRAINT VIOLATION: lnc-lnn conflict, {container}, {node}");
-                        // constraints_satisfied = false;
-                    }
-                    if rnn + 39. >= *rnc {
-                        eprintln!("CONSTRAINT VIOLATION: rnn-rnc conflict, {container}, {node}");
-                        // constraints_satisfied = false;
-                    }
-                    if rnc - lnc < 21. {
-                        eprintln!("CONSTRAINT VIOLATION: container too narrow, {container}");
-                        // constraints_satisfied = false;
-                    }
-                }
-            }
-            // if constraints_satisfied {
-                break
-            // } else {
-            //     eps_abs = eps_abs / 10.;
-            //     eps_rel = eps_rel / 10.;
-            // }
-        }
         
         eprintln!("SOLVE VERTICAL");
-        let solutions_v = solve_problem(&vv, &cv, &pdv, &qv, &osqp::Settings::default()
-            .adaptive_rho(false)
-            // .check_termination(Some(200))
-            // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
-            // .adaptive_rho_interval(Some(25))
-            // .eps_abs(1e-4)
-            // .eps_rel(1e-4)
-            // .max_iter(128_000)
-            // .max_iter(400)
-            // .polish(true)
-            .verbose(true))?;
+        let horizontal_problem = OptimizationProblem { v: vh, c: ch, pd: pdh, q: qh, };
+        let vertical_problem = OptimizationProblem { v: vv, c: cv, pd: pdv, q: qv, };
+        Ok((horizontal_problem, vertical_problem))
+    }
+
+    pub fn solve_optimization_problems(
+        horizontal_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>, 
+        vertical_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>
+    ) -> Result<GeometrySolution, Error> { 
+        let OptimizationProblem{v: vh, c: ch, pd: pdh, q: qh} = horizontal_problem;
+        let OptimizationProblem{v: vv, c: cv, pd: pdv, q: qv} = vertical_problem;
+
+        eprintln!("SOLVE HORIZONTAL");
+        let solutions_h = solve_problem(&horizontal_problem)?;
+           
+        eprintln!("SOLVE VERTICAL");
+        let solutions_v = solve_problem(&vertical_problem)?;
 
         let ls = extract_variable(&vh, &solutions_h, AnySolKind::L, "ls".into(), |s| { 
             if let AnySol::L(l) = s { l } else { panic!() }
@@ -4332,6 +4303,7 @@ pub mod frontend {
     use std::{fmt::Display, borrow::Cow, collections::HashMap, cmp::max_by};
 
     use logos::Logos;
+    use ordered_float::OrderedFloat;
     use self_cell::self_cell;
     use sorted_vec::SortedVec;
     use tracing::{event, Level};
@@ -4339,7 +4311,7 @@ pub mod frontend {
 
     use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
-    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize}, error::{Error, Kind, OrErrExt}, eval::Val};
+    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val};
 
     pub fn estimate_widths<I>(
         vcg: &Vcg<I, I>, 
@@ -4477,6 +4449,8 @@ pub mod frontend {
         pub layout_problem: LayoutProblem<Cow<'s, str>>,
         pub layout_solution: LayoutSolution,
         pub geometry_problem: GeometryProblem<Cow<'s, str>>,
+        pub horizontal_problem: OptimizationProblem<AnySol, OrderedFloat<f64>>,
+        pub vertical_problem: OptimizationProblem<AnySol, OrderedFloat<f64>>,
         pub geometry_solution: GeometrySolution,
     }
 
@@ -4576,7 +4550,9 @@ pub mod frontend {
     
             estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
     
-            let geometry_solution = position_sols(&vcg, &layout_problem, &layout_solution, &geometry_problem)?;
+            let (horizontal_problem, vertical_problem) = position_sols(&vcg, &layout_problem, &layout_solution, &geometry_problem)?;
+
+            let geometry_solution = solve_optimization_problems(&horizontal_problem, &vertical_problem)?;
     
             debug(&layout_problem, &layout_solution);
             
@@ -4590,6 +4566,8 @@ pub mod frontend {
                 layout_problem,
                 layout_solution,
                 geometry_problem,
+                horizontal_problem,
+                vertical_problem,
                 geometry_solution,
             })
         })
