@@ -35,7 +35,6 @@
     flake-utils.lib.simpleFlake {
       inherit self nixpkgs;
       name = "depict";
-      systems = flake-utils.lib.allSystems;
       preOverlays = [ 
         rust-overlay.overlays.default
       ];
@@ -172,9 +171,9 @@
                 wabt
                 deploy-rs.packages.${final.system}.deploy-rs
                 (terraform_1.withPlugins (p: with p; [aws gandi vultr]))
-                nixbom.legacyPackages.${final.system}.nixbom
+                #nixbom.legacyPackages.${final.system}.nixbom
                 cargo-expand
-                cargo-include-licenses.legacyPackages.${final.system}.defaultPackage
+                #cargo-include-licenses.legacyPackages.${final.system}.defaultPackage
                 cargo-license
                 cargo-outdated
                 cargo-udeps
@@ -229,9 +228,13 @@
                 '' else ''
                   cargo test --release -p depict-server
                 '';
+              cargoClippyExtraArgs = "";
+              cargoCheckExtraArgs = "";
             };
             cargoCheckCommand = if isWasm then "" else "cargo check --release -p ${subpkg}";
             cargoBuildCommand = if isWasm then "cargo build --release -p ${subpkg} --target wasm32-unknown-unknown" else "cargo build --release -p ${subpkg}";
+            cargoClippyExtraArgs = "";
+            cargoCheckExtraArgs = "";
 
             inherit buildInputs;
             dontUseCmakeConfigure = true;
