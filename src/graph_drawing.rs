@@ -3344,7 +3344,12 @@ pub mod geometry {
         fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_group(name, |l| {
                 for ((ovr, ohr), v) in self.iter() {
-                    l.log_string(format!("{ovr}v, {ohr}h"), v)?;
+                    l.log_names(
+                        format!("{ovr}v, {ohr}h"), 
+                        None,
+                        vec![format!("{ovr}v"), format!("{ohr}h")],
+                        v
+                    )?;
                 }
                 Ok(())
             })
@@ -4650,8 +4655,8 @@ pub mod frontend {
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Record {
-            String { name: String, val: String, },
-            Group { name: String, val: Vec<Record>, },
+            String { name: String, ty: Option<String>, names: Vec<String>, val: String, },
+            Group { name: String, ty: Option<String>, names: Vec<String>, val: Vec<Record>, },
         }
 
         #[derive(Clone, Debug, thiserror::Error)]
@@ -4667,22 +4672,35 @@ pub mod frontend {
         #[derive(Clone, Debug, Default)]
         pub struct Logger {
             logs: Vec<Record>,
+            names: Vec<String>,
         }
 
         impl Logger {
             pub fn new() -> Self {
-                Self { logs: vec![] }
+                Self { logs: vec![], names: vec![] }
+            }
+
+            pub fn log_names(&mut self, name: impl Into<String>, ty: Option<String>, names: Vec<impl Into<String>>, val: impl std::fmt::Debug) -> Result<(), Error> {
+                self.logs.push(Record::String{name: name.into(), ty, names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), val: format!("{val:#?}")});
+                Ok(())
             }
 
             pub fn log_string(&mut self, name: impl Into<String>, val: impl std::fmt::Debug) -> Result<(), Error> {
-                self.logs.push(Record::String{name: name.into(), val: format!("{val:#?}")});
+                self.logs.push(Record::String{name: name.into(), ty: None, names: vec![], val: format!("{val:#?}")});
                 Ok(())
             }
 
             pub fn with_group<F>(&mut self, name: impl Into<String>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
                 let mut nested_logger = Logger::new();
                 f(&mut nested_logger)?;
-                self.logs.push(Record::Group{name: name.into(), val: nested_logger.logs});
+                self.logs.push(Record::Group{name: name.into(), ty: None, names: vec![], val: nested_logger.logs});
+                Ok(())
+            }
+
+            pub fn with_names<F>(&mut self, name: impl Into<String>, names: Vec<impl Into<String>>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
+                let mut nested_logger = Logger::new();
+                f(&mut nested_logger)?;
+                self.logs.push(Record::Group{name: name.into(), ty: None, names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), val: nested_logger.logs});
                 Ok(())
             }
 

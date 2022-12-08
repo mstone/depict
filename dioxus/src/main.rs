@@ -96,19 +96,23 @@ pub struct AppProps {
 
 pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
     match record {
-        Record::String{name, val} => cx.render(rsx!{
-            div {
-                key: "debug_{name}",
+        Record::String{name, ty, names, val} => {
+            let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
+            cx.render(rsx!{
                 div {
-                    style: "font-weight: 700;",
-                    "{name}"
+                    key: "debug_{name}",
+                    class: "{classes}",
+                    div {
+                        style: "font-weight: 700;",
+                        "{name}"
+                    }
+                    div {
+                        style: "white-space: pre; margin-left: 10px;",
+                        "{val}"
+                    }
                 }
-                div {
-                    style: "white-space: pre; margin-left: 10px;",
-                    "{val}"
-                }
-            }
-        }),
+            })
+        },
         _ => None,
     }
 }
@@ -116,23 +120,28 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
 fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
     match record {
         Record::String{..} => render_one(cx, record),
-        Record::Group{name, val} => cx.render(rsx!{
-            div {
-                key: "debug_{name}",
-                details {
-                    style: "padding-left: 4px;",
-                    open: "true",
-                    summary {
-                        style: "font-weight: 700;",
-                        "{name}"
-                    }
-                    div {
-                        style: "white-space: pre; margin-left: 10px; border-left: 1px gray solid;",
-                        val.into_iter().map(|r| render_many(cx, r))
+        Record::Group{name, ty, names, val} => {
+            let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
+            eprintln!("LOG: record: {name} {ty:?} {names:#?}");
+            cx.render(rsx!{
+                div {
+                    key: "debug_{name}",
+                    class: "{classes}",
+                    details {
+                        style: "padding-left: 4px;",
+                        open: "true",
+                        summary {
+                            style: "font-weight: 700;",
+                            "{name}"
+                        }
+                        div {
+                            style: "white-space: pre; margin-left: 10px; border-left: 1px gray solid;",
+                            val.into_iter().map(|r| render_many(cx, r))
+                        }
                     }
                 }
-            }
-        })
+            })
+        },
     }
 }
 
@@ -183,6 +192,9 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let example = "font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;";
 
     cx.render(rsx!{
+        style {
+            ".highlight_0h {{ color: red; }};"
+        }
         div {
             // key: "editor",
             style: "width: 100%; z-index: 20; padding: 1rem;",
