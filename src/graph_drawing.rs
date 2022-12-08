@@ -716,7 +716,10 @@ pub mod eval {
                             }
                             Ok(())
                         })?;
-                        l.log_string("labels", labels)
+                        if !labels.is_empty() {
+                            l.log_string("labels", labels)?;
+                        }
+                        Ok(())
                     })
                 },
             }
