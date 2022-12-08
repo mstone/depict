@@ -481,9 +481,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                     width: "{viewbox_width}px",
                     nodes
                 }
-                show_logs.then(|| rsx!{
-                    logs
-                })
+                div {
+                    style: "display: flex; gap: 20px; overflow-x: auto;",
+                    show_logs.then(|| rsx!{
+                        logs
+                    })
+                }
             }
         }
     })   
