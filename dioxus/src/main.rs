@@ -93,11 +93,31 @@ pub struct AppProps {
     drawing_receiver: Cell<Option<UnboundedReceiver<Drawing>>>,
 }
 
+pub fn render_one<P>(cx: Scope<P>, log: Log) -> Option<VNode> {
+    match log {
+        Log::String{name, val} => cx.render(rsx!{
+            div {
+                key: "debug_{name}",
+                div {
+                    style: "font-weight: 700;",
+                    "{name}"
+                }
+                div {
+                    style: "white-space: pre;",
+                    "{val}"
+                }
+            }
+        }),
+        _ => None,
+    }
+}
+
 pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
     let logs = drawing.logs;
     cx.render(rsx!{
-        logs.iter().map(|m| match m {
-            Log::String{name, val} => rsx!{
+        logs.into_iter().map(|m| match m {
+            Log::String{..} => render_one(cx, m),
+            Log::Group{name, val} => cx.render(rsx!{
                 div { 
                     key: "debug_{name}",
                     div {
@@ -106,10 +126,10 @@ pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
                     }
                     div {
                         style: "white-space: pre;",
-                        "{val}" 
+                        val.into_iter().map(|m| render_one(cx, m))
                     }
                 }
-            },
+            })
         })
     })
 }

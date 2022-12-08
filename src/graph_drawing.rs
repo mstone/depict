@@ -4619,7 +4619,8 @@ pub mod frontend {
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Log {
-            String { name: String, val: String, }
+            String { name: String, val: String, },
+            Group { name: String, val: Vec<Log>, },
         }
 
         #[derive(Clone, Debug)]
@@ -4680,6 +4681,14 @@ pub mod frontend {
             logs.push(Log::String{name: "sol_by_loc".into(), val: format!("{sol_by_loc:#?}")});
             logs.push(Log::String{name: "sol_by_hop".into(), val: format!("{sol_by_hop:#?}")});
             logs.push(Log::String{name: "solved_locs".into(), val: format!("{solved_locs:#?}")});
+            logs.push(Log::String{name: "size_by_loc".into(), val: format!{"{size_by_loc:#?}"}});
+            logs.push(Log::String{name: "size_by_hop".into(), val: format!{"{size_by_hop:#?}"}});
+            logs.push(Log::Group{name: "coordinates".into(), val: vec![
+                Log::String{name: "rs".into(), val: format!{"{rs:#?}"}},
+                Log::String{name: "ls".into(), val: format!{"{ls:#?}"}},
+                Log::String{name: "bs".into(), val: format!{"{bs:#?}"}},
+                Log::String{name: "ts".into(), val: format!{"{ts:#?}"}},
+            ]});
             logs.reverse();
 
             // Render Nodes
