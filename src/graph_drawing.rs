@@ -3334,6 +3334,19 @@ pub mod geometry {
         pub nesting_top_padding: Option<f64>,
         pub nesting_bottom_padding: Option<f64>,
     }
+
+    use crate::graph_drawing::frontend::log;
+
+    impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
+        fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_group(name, |l| {
+                for ((ovr, ohr), v) in self.iter() {
+                    l.log_string(format!("{ovr}v, {ohr}h"), v)?;
+                }
+                Ok(())
+            })
+        }
+    }
     
     /// ovr, ohr
     pub type LocIx = (VerticalRank, OriginalHorizontalRank);
@@ -4760,7 +4773,7 @@ pub mod frontend {
             // Log the resolved value
             // logs.log_string("VAL", val);
             val.log("VAL", &mut logs);
-            logs.log_string("sol_by_loc", sol_by_loc);
+            sol_by_loc.log("sol_by_loc", &mut logs);
             logs.log_string("sol_by_hop", sol_by_hop);
             logs.log_string("solved_locs", solved_locs);
             logs.log_string("size_by_loc", size_by_loc);
