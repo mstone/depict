@@ -668,8 +668,8 @@ pub mod eval {
 
     use crate::graph_drawing::frontend::log;
     impl<'s, 't> log::Log for &'t Val<Cow<'s, str>> {
-        fn log(&self, name: String, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.log_string(name, format!("{self:#?}"))
+        fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.log_string(name.into(), self)
         }
     }
 
@@ -4595,7 +4595,7 @@ pub mod frontend {
         }
 
         pub trait Log {
-            fn log(&self, name: String, l: &mut Logger) -> Result<(), Error>;
+            fn log(&self, name: impl Into<String>, l: &mut Logger) -> Result<(), Error>;
         }
 
         #[derive(Clone, Debug, Default)]
@@ -4633,7 +4633,7 @@ pub mod frontend {
 
         use crate::graph_drawing::{error::{OrErrExt, Kind, Error}, layout::Loc, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}};
 
-        use super::log;
+        use super::log::{self, Log};
 
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -4708,7 +4708,8 @@ pub mod frontend {
 
             let mut logs = log::Logger::new();
             // Log the resolved value
-            logs.log_string("VAL", val);
+            // logs.log_string("VAL", val);
+            val.log("VAL", &mut logs);
             logs.log_string("sol_by_loc", sol_by_loc);
             logs.log_string("sol_by_hop", sol_by_hop);
             logs.log_string("solved_locs", solved_locs);
