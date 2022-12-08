@@ -666,10 +666,60 @@ pub mod eval {
         }
     }
 
+    fn as_string1<'s>(o1: &Option<Cow<'s, str>>, o2: &'static str) -> impl Into<String> + 's {
+        let o2 = Cow::from(o2);
+        o1.as_ref().or_else(|| Some(&o2)).unwrap().clone()
+    }
+
+    fn as_string2<'s>(o1: &Option<Cow<'s, str>>, o2: &Option<Cow<'s, str>>, o3: &'static str) -> impl Into<String> + 's {
+        let o3 = Cow::from(o3);
+        o1.as_ref().or_else(|| o2.as_ref()).or_else(|| Some(&o3)).unwrap().clone()
+    }
+
     use crate::graph_drawing::frontend::log;
     impl<'s, 't> log::Log for &'t Val<Cow<'s, str>> {
         fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.log_string(name.into(), self)
+            match self {
+                Val::Process { name, label, body } => {
+                    let pname = &as_string2(name, label, "").into();
+                    l.with_group(format!("Process: {pname}"), |l| {
+                        match body {
+                            Some(body) if body.len() > 0 => match body {
+                                Body::Any(bs) => {
+                                    l.with_group("Body: Any", |l| {
+                                        for b in bs.iter() {
+                                            b.log(pname, l)?
+                                        }
+                                        Ok(())
+                                    })
+                                },
+                                Body::All(bs) => {
+                                    l.with_group("Body: All", |l| {
+                                        for b in bs.iter() {
+                                            b.log(pname, l)?
+                                        }
+                                        Ok(())
+                                    })
+                                },
+                            },
+                            _ => Ok(()),
+                        }
+                    })
+                },
+                Val::Chain { name, rel, path, labels } => {
+                    let name = as_string1(name, "").into();
+                    l.with_group(format!("Chain: {name}"), |l| {
+                        l.log_string("rel", rel)?;
+                        l.with_group("path", |l| {
+                            for p in path.iter() {
+                                p.log("", l)?
+                            }
+                            Ok(())
+                        })?;
+                        l.log_string("labels", labels)
+                    })
+                },
+            }
         }
     }
 

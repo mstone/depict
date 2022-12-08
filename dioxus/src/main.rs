@@ -104,7 +104,7 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
                     "{name}"
                 }
                 div {
-                    style: "white-space: pre;",
+                    style: "white-space: pre; margin-left: 10px;",
                     "{val}"
                 }
             }
@@ -113,25 +113,32 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
     }
 }
 
-pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
-    let logs = drawing.logs;
-    cx.render(rsx!{
-        logs.into_iter().map(|m| match m {
-            Record::String{..} => render_one(cx, m),
-            Record::Group{name, val} => cx.render(rsx!{
-                div { 
-                    key: "debug_{name}",
+fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
+    match record {
+        Record::String{..} => render_one(cx, record),
+        Record::Group{name, val} => cx.render(rsx!{
+            div {
+                key: "debug_{name}",
+                div {
+                    style: "padding-left: 4px; border-left: 1px gray solid;",
                     div {
                         style: "font-weight: 700;",
                         "{name}"
                     }
                     div {
-                        style: "white-space: pre;",
-                        val.into_iter().map(|m| render_one(cx, m))
+                        style: "white-space: pre; margin-left: 10px;",
+                        val.into_iter().map(|r| render_many(cx, r))
                     }
                 }
-            })
+            }
         })
+    }
+}
+
+pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
+    let logs = drawing.logs;
+    cx.render(rsx!{
+        logs.into_iter().map(|r| render_many(cx, r))
     })
 }
 
