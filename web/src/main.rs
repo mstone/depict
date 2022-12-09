@@ -496,8 +496,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         div {
             style: "width: 100%;",
             div {
-                style: "position: relative; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
-                width: "{viewbox_width}px",
+                style: "position: relative; width: {viewbox_width}px; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
                 nodes
             }
         }
