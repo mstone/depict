@@ -8,17 +8,19 @@ use depict::graph_drawing::frontend::log::Record;
 use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
 use depict::graph_drawing::frontend::dom::{draw, Drawing, Label, Node};
 use depict::graph_drawing::frontend::dioxus::{render, as_data_svg};
-use dioxus::core::exports::futures_channel;
+
+use anyhow;
+
 use dioxus::prelude::*;
+use dioxus_desktop::{self, Config, WindowBuilder};
+
+use futures::StreamExt;
 
 // use dioxus_desktop::tao::dpi::{LogicalSize};
 // use dioxus_desktop::use_window;
 use tao::dpi::LogicalSize;
 
 use color_spantrace::colorize;
-
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-use futures::StreamExt;
 
 use indoc::indoc;
 
@@ -30,71 +32,11 @@ const PLACEHOLDER: &str = indoc!("
 k [ - s b ]
 - c s
 ");
-// c: a b [ z ]
-// c: a b, [ z ]
-// c: a b [ ]
-// c: a b, [ ]
-// c: a, b [ z ]
-
-/*
-a [ b t: / qqqq, qqqq, qqqq, qqqq ; - t u: foo, foo, foo, foo ]
-*/
-/*
-a [ b [ - c e ] ]
-z c
-*/
-/*
-a [ b c ] 
-*/
-/*
-a [  - b c: z ] 
-d b
-*/
-/*
-a [ b c ]
-a d
-*/
-/*
-p a > : foo / bar
-pn: p
-q pn
-q a
-*/
-/* 
-p q
-r q >: sdf / zlk
-r t
-*/
-/*
-a [ b ]
-a c
-");
-*/
-/*
-a [ b [ c ] ]
-a d
-p q r
-");
-*/
-
-// person microwave food: open, start, stop / beep : heat
-// person food: stir
-// LEFT test person: aaaaaaaaaa / bbbbbbb
-// ");
-// driver wheel car: turn / wheel angle
-// driver accel car: accelerate / pedal position
-// driver brakes car: brake /  pedal position
-// driver screen computer: press screen / read display
-// computer thermostat car: set temperature / measure temperature
-// ");
 
 pub struct AppProps {
-    model_sender: Option<UnboundedSender<String>>,
-    #[allow(clippy::type_complexity)]
-    drawing_receiver: Cell<Option<UnboundedReceiver<Drawing>>>,
 }
 
-pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
+pub fn render_one<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Error> {
     match record {
         Record::String{name, ty, names, val} => {
             let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
@@ -113,11 +55,11 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
                 }
             })
         },
-        _ => None,
+        _ => cx.render(rsx!{""}),
     }
 }
 
-fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
+fn render_many<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Error> {
     match record {
         Record::String{..} => render_one(cx, record),
         Record::Group{name, ty, names, val} => {
@@ -145,7 +87,7 @@ fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
     }
 }
 
-pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
+pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Result<VNode, anyhow::Error> {
     let logs = drawing.logs;
     cx.render(rsx!{
         logs.into_iter().map(|r| render_many(cx, r))
@@ -156,13 +98,47 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let model = use_state(&cx, || String::from(PLACEHOLDER));
     let drawing = use_state(&cx, Drawing::default);
 
-    use_coroutine(&cx, |_: UnboundedReceiver<()>| {
-        let receiver = cx.props.drawing_receiver.take();
-        let drawing = drawing.to_owned();
+    let drawing_sender = use_coroutine(cx, |mut rx| { 
+        let drawing = drawing.clone();
         async move {
-            if let Some(mut receiver) = receiver {
-                while let Some(msg) = receiver.next().await {
-                    drawing.set(msg);
+            while let Some(msg) = rx.next().await {
+                drawing.set(msg);
+            }
+        }
+    });
+
+    let model_sender = use_coroutine(cx, |mut rx| {
+        let drawing_sender = drawing_sender.clone();
+        async move {
+            let mut prev_model: Option<String> = None;
+            while let Some(model) = rx.next().await {
+                if Some(&model) != prev_model.as_ref() {
+                    let model_str: &str = &model;
+                    let nodes = if model_str.trim().is_empty() {
+                        Ok(Ok(Drawing::default()))
+                    } else {
+                        catch_unwind(|| {
+                            draw(model.clone())
+                        })
+                    };
+                    let model = model.clone();
+                    match nodes {
+                        Ok(Ok(drawing)) => {
+                            prev_model = Some(model);
+                            drawing_sender.send(drawing);
+                        },
+                        Ok(Err(err)) => {
+                            if let Some(st) = err.span_trace() {
+                                let st_col = colorize(st);
+                                event!(Level::ERROR, ?err, %st_col, "DRAWING ERROR SPANTRACE");
+                            } else {
+                                event!(Level::ERROR, ?err, "DRAWING ERROR");
+                            }
+                        }
+                        Err(_) => {
+                            event!(Level::ERROR, ?nodes, "PANIC");
+                        }
+                    }
                 }
             }
         }
@@ -178,8 +154,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let mut show_logs = use_state(&cx, || false);
 
-    let model_sender = cx.props.model_sender.clone().unwrap();
-    model_sender.unbounded_send(model.get().clone()).unwrap();
+    model_sender.send(model.get().clone());
 
     let viewbox_width = drawing.get().viewbox_width;
     let _crossing_number = cx.render(rsx!(match drawing.get().crossing_number {
@@ -226,7 +201,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         oninput: move |e| { 
                             event!(Level::TRACE, "INPUT");
                             model.set(e.value.clone());
-                            model_sender.unbounded_send(e.value.clone()).unwrap(); 
+                            model_sender.send(e.value.clone());
                         },
                         "{model}"
                     }
@@ -526,77 +501,31 @@ pub fn main() -> io::Result<()> {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let (model_sender, mut model_receiver) = futures_channel::mpsc::unbounded::<String>();
-    let (drawing_sender, drawing_receiver) = futures_channel::mpsc::unbounded::<Drawing>();
+    let mut menu_bar = tao::menu::MenuBar::new();
+    let mut app_menu = tao::menu::MenuBar::new();
+    let mut edit_menu = tao::menu::MenuBar::new();
 
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async move {
-                let mut prev_model: Option<String> = None;
-                while let Some(model) = model_receiver.next().await {
-                    if Some(&model) != prev_model.as_ref() {
-                        let model_str: &str = &model;
-                        let nodes = if model_str.trim().is_empty() {
-                            Ok(Ok(Drawing::default()))
-                        } else {
-                            catch_unwind(|| {
-                                draw(model.clone())
-                            })
-                        };
-                        let model = model.clone();
-                        match nodes {
-                            Ok(Ok(drawing)) => {
-                                prev_model = Some(model);
-                                drawing_sender.unbounded_send(drawing).unwrap();
-                            },
-                            Ok(Err(err)) => {
-                                if let Some(st) = err.span_trace() {
-                                    let st_col = colorize(st);
-                                    event!(Level::ERROR, ?err, %st_col, "DRAWING ERROR SPANTRACE");
-                                } else {
-                                    event!(Level::ERROR, ?err, "DRAWING ERROR");
-                                }
-                            }
-                            Err(_) => {
-                                event!(Level::ERROR, ?nodes, "PANIC");
-                            }
-                        }
-                    }
-                }
-            });
-    });
-    
-    dioxus::desktop::launch_with_props(app, 
-        AppProps { 
-            model_sender: Some(model_sender), 
-            drawing_receiver: Cell::new(Some(drawing_receiver)) 
-        },
-        |c| c.with_window(|c| {
-            let mut menu_bar = tao::menu::MenuBar::new();
-            let mut app_menu = tao::menu::MenuBar::new();
-            let mut edit_menu = tao::menu::MenuBar::new();
+    edit_menu.add_native_item(tao::menu::MenuItem::Undo);
+    edit_menu.add_native_item(tao::menu::MenuItem::Redo);
+    edit_menu.add_native_item(tao::menu::MenuItem::Separator);
+    edit_menu.add_native_item(tao::menu::MenuItem::Cut);
+    edit_menu.add_native_item(tao::menu::MenuItem::Copy);
+    edit_menu.add_native_item(tao::menu::MenuItem::Paste);
+    edit_menu.add_native_item(tao::menu::MenuItem::Separator);
+    edit_menu.add_native_item(tao::menu::MenuItem::SelectAll);
 
-            edit_menu.add_native_item(tao::menu::MenuItem::Undo);
-            edit_menu.add_native_item(tao::menu::MenuItem::Redo);
-            edit_menu.add_native_item(tao::menu::MenuItem::Separator);
-            edit_menu.add_native_item(tao::menu::MenuItem::Cut);
-            edit_menu.add_native_item(tao::menu::MenuItem::Copy);
-            edit_menu.add_native_item(tao::menu::MenuItem::Paste);
-            edit_menu.add_native_item(tao::menu::MenuItem::Separator);
-            edit_menu.add_native_item(tao::menu::MenuItem::SelectAll);
+    app_menu.add_native_item(tao::menu::MenuItem::CloseWindow);
+    app_menu.add_native_item(tao::menu::MenuItem::Quit);
+    menu_bar.add_submenu("Depict", true, app_menu);
+    menu_bar.add_submenu("Edit", true, edit_menu);
 
-            app_menu.add_native_item(tao::menu::MenuItem::CloseWindow);
-            app_menu.add_native_item(tao::menu::MenuItem::Quit);
-            menu_bar.add_submenu("Depict", true, app_menu);
-            menu_bar.add_submenu("Edit", true, edit_menu);
-
-            c
+    dioxus_desktop::launch_with_props(app,
+        AppProps {},
+        Config::new().with_window(
+            WindowBuilder::new()
                 .with_inner_size(LogicalSize::new(1200.0f64, 700.0f64))
                 .with_menu(menu_bar)
-        }));
+        ));
 
     // let mut vdom = VirtualDom::new(app);
     // let _ = vdom.rebuild();
