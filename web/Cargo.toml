@@ -11,7 +11,8 @@ repository = "https://github.com/mstone/depict"
 [dependencies]
 console_error_panic_hook = "0.1"
 depict = { path = "..", version = "0.2", default-features = false, features = [ "client", "dioxus", "osqp-rust" ] }
-dioxus = { version = "0.2", features = ["fermi", "web"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus" }
+dioxus-web = { git = "https://github.com/DioxusLabs/dioxus" }
 futures = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 indoc = "1.0"

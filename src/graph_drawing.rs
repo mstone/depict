@@ -5350,7 +5350,7 @@ pub mod frontend {
                 }
             }
             // dbg!(cx.render(rsx!(children)))
-            cx.render(rsx!(children))
+            Some(cx.render(rsx!(children.into_iter())).unwrap())
         }
     }
 }

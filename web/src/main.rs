@@ -10,7 +10,7 @@ use depict::{graph_drawing::{
     frontend::dioxus::{render, as_data_svg}
 }};
 
-use dioxus::{prelude::*, core::to_owned};
+use dioxus::{prelude::*};
 
 use futures::StreamExt;
 use indoc::indoc;
@@ -71,6 +71,18 @@ unsafe extern "C" fn printf(format: *const ::std::os::raw::c_char, mut args: ...
     );
     log::info!("{s}");
     bytes_written
+}
+
+#[no_mangle]
+unsafe extern "C" fn putchar(c: ::std::os::raw::c_int) -> ::std::os::raw::c_int {
+    let c2 = std::char::from_u32(c as u32).unwrap();
+    log::info!("{c2}");
+    c
+}
+
+#[no_mangle]
+unsafe extern "C" fn puts(s: *const ::std::os::raw::c_char) -> ::std::os::raw::c_int {
+    printf("%s".as_ptr() as *const i8, s)
 }
 
 fn now() -> i64 {
@@ -496,11 +508,11 @@ fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     console_error_panic_hook::set_once();
 
-    dioxus::web::launch_with_props(
+    dioxus_web::launch_with_props(
         app, 
         AppProps { 
         }, 
-        |c| c
+        dioxus_web::Config::new()
     ); 
 }
 

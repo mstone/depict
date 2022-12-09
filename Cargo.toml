@@ -21,7 +21,7 @@ proptest = "1"
 
 [dependencies]
 derive_more = "0.99"
-dioxus = { version = "0.2", optional = true }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", optional = true }
 enum-kinds = "0.5.1"
 include_dir = "0.7"
 itertools = "0.10"
