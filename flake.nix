@@ -171,9 +171,9 @@
                 wabt
                 deploy-rs.packages.${final.system}.deploy-rs
                 (terraform_1.withPlugins (p: with p; [aws gandi vultr]))
-                #nixbom.legacyPackages.${final.system}.nixbom
+                nixbom.legacyPackages.${final.system}.nixbom
                 cargo-expand
-                #cargo-include-licenses.legacyPackages.${final.system}.defaultPackage
+                cargo-include-licenses.legacyPackages.${final.system}.defaultPackage
                 cargo-license
                 cargo-outdated
                 cargo-udeps
