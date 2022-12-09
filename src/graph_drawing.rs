@@ -5242,12 +5242,7 @@ pub mod frontend {
                             div {
                                 key: "{key}",
                                 class: "box highlight_{label}",
-                                style: "position: absolute; padding-top: 3px; padding-bottom: 3px; box-sizing: border-box; border: 1px solid black; text-align: center; z-index: 10;", // bg-opacity-50
-                                top: "{vpos}px",
-                                left: "{hpos}px",
-                                width: "{width}px",
-                                height: "{height}px",
-                                z_index: "{z_index}",
+                                style: "position: absolute; top: {vpos}px; left: {hpos}px; width: {width}px; height: {height}px; z-index: {z_index}; padding-top: 3px; padding-bottom: 3px; box-sizing: border-box; border: 1px solid black; text-align: center; z-index: 10;", // bg-opacity-50
                                 span {
                                     "{label}"
                                 }
@@ -5263,8 +5258,7 @@ pub mod frontend {
                             div {
                                 key: "{key}",
                                 class: "arrow highlight_{key}",
-                                style: "position: absolute;",
-                                z_index: "{z_index}",
+                                style: "position: absolute; z-index: {z_index};",
                                 svg {
                                     fill: "none",
                                     stroke: "{stroke_color}",
@@ -5331,13 +5325,9 @@ pub mod frontend {
                                         //     _ => "",
                                         // };
                                         rsx!(div {
-                                            style: "position: absolute;",
-                                            left: "{hpos}px",
-                                            // width: "{width}px",
-                                            top: "calc({vpos}px + {offset})",
+                                            style: "position: absolute; left: {hpos}px; top: calc({vpos}px + {offset});", // width: "{width}px",
                                             div {
-                                                style: "white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
-                                                transform: "{translate}",
+                                                style: "white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; transform: {translate}; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
                                                 "{text}"
                                             }
                                         })
