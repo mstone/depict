@@ -193,7 +193,13 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     cx.render(rsx!{
         style {
-            ".highlight_0h {{ color: red; }};"
+            ".box.highlight_s {{ background-color: blue; color: white; }}"
+        }
+        style {
+            ".highlight_s {{ color: blue; }}"
+        }
+        style {
+            ".highlight_0h {{ color: red; }}"
         }
         div {
             // key: "editor",
