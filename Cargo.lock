@@ -864,7 +864,7 @@ dependencies = [
 [[package]]
 name = "dioxus"
 version = "0.2.4"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
  "dioxus-core",
  "dioxus-core-macro",
@@ -876,7 +876,7 @@ dependencies = [
 [[package]]
 name = "dioxus-core"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
  "anyhow",
  "bumpalo",
@@ -887,12 +887,13 @@ dependencies = [
  "longest-increasing-subsequence",
  "serde",
  "slab",
+ "smallbox",
 ]
 
 [[package]]
 name = "dioxus-core-macro"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
  "dioxus-rsx",
  "proc-macro2",
@@ -903,7 +904,7 @@ dependencies = [
 [[package]]
 name = "dioxus-desktop"
 version = "0.2.3"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
  "core-foundation",
  "dioxus-core",
@@ -928,7 +929,7 @@ dependencies = [
 [[package]]
 name = "dioxus-hooks"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
  "dioxus-core",
  "futures-channel",
@@ -938,7 +939,7 @@ dependencies = [
 [[package]]
 name = "dioxus-html"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
  "async-trait",
  "dioxus-core",
@@ -954,19 +955,20 @@ dependencies = [
 [[package]]
 name = "dioxus-interpreter-js"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
  "js-sys",
+ "sledgehammer_bindgen",
+ "sledgehammer_utils",
  "wasm-bindgen",
  "web-sys",
 ]
 
 [[package]]
 name = "dioxus-rsx"
-version = "0.0.0"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+version = "0.0.1"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
- "dioxus-core",
  "proc-macro2",
  "quote",
  "serde",
@@ -976,7 +978,7 @@ dependencies = [
 [[package]]
 name = "dioxus-web"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#937eb1f0f0e3e71b09a6b74a1d8f70fba0e75bdf"
+source = "git+https://github.com/DioxusLabs/dioxus#1b7fe3fcde243ee83c7ff198afbac90e096bffdc"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -990,6 +992,7 @@ dependencies = [
  "log",
  "once_cell",
  "rustc-hash",
+ "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "smallstr",
@@ -1935,6 +1938,15 @@ name = "longest-increasing-subsequence"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3bd0dd2cd90571056fdb71f6275fada10131182f84899f4b2a916e565d81d86"
+
+[[package]]
+name = "lru"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6e8aaa3f231bb4bd57b84b2d5dc3ae7f350265df8aa96492e0bc394a1571909"
+dependencies = [
+ "hashbrown",
+]
 
 [[package]]
 name = "mac"
@@ -3022,6 +3034,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "sledgehammer_bindgen"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d0531b307fcb756541e1262daf24544886f193c7773694d1d3b388287e5153e"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "sledgehammer_utils"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bded7f44df7c0e2ba7352fa511cd36c9fa817665d8e05b221ff43534543431a5"
+dependencies = [
+ "lru",
+ "once_cell",
+ "rustc-hash",
+ "ux",
+]
+
+[[package]]
+name = "smallbox"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4679d6eef28b85020158619fc09769de89e90886c5de7157587d87cb72648faa"
+
+[[package]]
 name = "smallstr"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3212,9 +3252,9 @@ dependencies = [
 
 [[package]]
 name = "tao"
-version = "0.15.6"
+version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c8fab9f2ba9a6d7ad55b46f812984b6ab203d774c162163ac297edc9567404b"
+checksum = "a1fa15735311b4816d030ff54da58560b047daca0970e1031aed5502e84231a8"
 dependencies = [
  "bitflags",
  "cairo-rs",
@@ -3656,6 +3696,12 @@ checksum = "422ee0de9031b5b948b97a8fc04e3aa35230001a722ddd27943e0be31564ce4c"
 dependencies = [
  "getrandom 0.2.8",
 ]
+
+[[package]]
+name = "ux"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cb3ff47e36907a6267572c1e398ff32ef78ac5131de8aa272e53846592c207e"
 
 [[package]]
 name = "valuable"

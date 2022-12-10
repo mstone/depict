@@ -62,6 +62,8 @@
             '';
           };
 
+          wasm = with final; with pkgs; (lib.depict { isShell = false; subpkg = "depict-web"; subdir = "web"; isWasm = true; });
+
           web = with final; with pkgs; let
             subpkg = "depict-web";
             webBin = (lib.depict { isShell = false; subpkg = subpkg; subdir = "web"; isWasm = true; });
@@ -197,49 +199,25 @@
                 libappindicator-gtk3
               ]);
             in with final; with pkgs; cranelib.buildPackage {
-            pname = "${subpkg}";
-            version = depictVersion;
+              pname = "${subpkg}";
+              version = depictVersion;
 
-            src = self;
+              src = cranelib.cleanCargoSource ./.;
 
-            cargoArtifacts = cranelib.buildDepsOnly { 
-              src = self;
+              cargoArtifacts = cranelib.buildDepsOnly {
+                inherit buildInputs;
+                src = cranelib.cleanCargoSource ./.;
+                #src = ./.;
+                cargoCheckCommand = if isWasm then "" else "cargo check";
+                cargoBuildCommand = if isWasm then "cargo build --release -p depict-web --target wasm32-unknown-unknown" else "cargo build --release";
+                doCheck = false;
+              };
 
               inherit buildInputs;
-              dontUseCmakeConfigure = true;
 
-              cargoCheckCommand = if isWasm then "" else 
-                if final.lib.hasSuffix "darwin" final.system then ''
-                  cargo check --release -p depict-desktop -p depict-server; 
-                  cargo check --release -p depict-web --target wasm32-unknown-unknown
-                '' else ''
-                  cargo check --release -p depict-server
-                '';
-              cargoBuildCommand = if isWasm then "cargo build --release -p depict-web --target wasm32-unknown-unknown" else
-                if final.lib.hasSuffix "darwin" final.system then ''
-                  cargo build --release -p depict-desktop -p depict-server; 
-                  cargo build --release -p depict-web --target wasm32-unknown-unknown
-                '' else ''
-                  cargo build --release -p depict-server
-                '';
-              cargoTestCommand = if isWasm then "" else
-                if final.lib.hasSuffix "darwin" final.system then ''
-                  cargo test --release -p depict-desktop -p depict-server;
-                '' else ''
-                  cargo test --release -p depict-server
-                '';
-              cargoClippyExtraArgs = "";
-              cargoCheckExtraArgs = "";
-            };
-            cargoCheckCommand = if isWasm then "" else "cargo check --release -p ${subpkg}";
-            cargoBuildCommand = if isWasm then "cargo build --release -p ${subpkg} --target wasm32-unknown-unknown" else "cargo build --release -p ${subpkg}";
-            cargoClippyExtraArgs = "";
-            cargoCheckExtraArgs = "";
+              cargoExtraArgs = if isWasm then "--target wasm32-unknown-unknown -p ${subpkg}" else "-p ${subpkg}"; 
 
-            inherit buildInputs;
-            dontUseCmakeConfigure = true;
-
-            doCheck = false;
+              doCheck = false;
           };
         };
       };
