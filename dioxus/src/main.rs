@@ -165,16 +165,19 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let data_svg = as_data_svg(drawing.get().clone());
     let keyword = "font-weight: bold; color: rgb(207, 34, 46);";
     let example = "font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;";
+    let box_highlight_s = ".box.highlight_s { background-color: blue; color: white; }";
+    let highlight_s = ".highlight_s { color: blue; }";
+    let highlight_0h = ".highlight_0h { color: red; }";
 
     cx.render(rsx!{
         style {
-            ".box.highlight_s {{ background-color: blue; color: white; }}"
+            "{box_highlight_s}"
         }
         style {
-            ".highlight_s {{ color: blue; }}"
+            "{highlight_s}"
         }
         style {
-            ".highlight_0h {{ color: red; }}"
+            "{highlight_0h}"
         }
         div {
             // key: "editor",
