@@ -4,6 +4,7 @@ use std::io::{self};
 use std::panic::catch_unwind;
 
 use depict::graph_drawing::error::{Error, OrErrExt, Kind};
+use depict::graph_drawing::eval::{Val, Body};
 use depict::graph_drawing::frontend::log::Record;
 use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
 use depict::graph_drawing::frontend::dom::{draw, Drawing, Label, Node};
@@ -94,9 +95,89 @@ pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Result<VNode, anyhow::E
     })
 }
 
+pub fn parse_highlights<'s>(data: &'s Cow<'s, str>) -> Result<Val<Cow<'s, str>>, Error> {
+    use depict::parser::{Parser, Token};
+    use depict::graph_drawing::eval::{eval, index, resolve};
+    use logos::Logos;
+    use std::collections::HashMap;
+    use tracing_error::InstrumentResult;
+
+    if data.trim().is_empty() {
+        return Ok(Val::default())
+    }
+    let data = &data;
+
+    let mut p = Parser::new();
+    {
+        let lex = Token::lexer(data);
+        let tks = lex.collect::<Vec<_>>();
+        event!(Level::TRACE, ?tks, "HIGHLIGHT LEX");
+    }
+    let mut lex = Token::lexer(data);
+    while let Some(tk) = lex.next() {
+        p.parse(tk)
+            .map_err(|_| {
+                Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+            })
+            .in_current_span()?
+    }
+
+    let items = p.end_of_input()
+        .map_err(|_| {
+            Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
+        })?;
+
+    event!(Level::TRACE, ?items, "HIGHLIGHT PARSE");
+    eprintln!("HIGHLIGHT PARSE {items:#?}");
+
+    let mut val = eval(&items[..]);
+
+    event!(Level::TRACE, ?val, "HIGHLIGHT EVAL");
+    eprintln!("HIGHLIGHT EVAL {val:#?}");
+
+    let mut scopes = HashMap::new();
+    let val2 = val.clone();
+    index(&val2, &mut vec![], &mut scopes);
+    resolve(&mut val, &mut vec![], &scopes);
+
+    eprintln!("HIGHLIGHT SCOPES: {scopes:#?}");
+    eprintln!("HIGHLIGHT RESOLVE: {val:#?}");
+    Ok(val)
+}
+
+pub fn render_highlight_styles<'s, 't, P>(cx: Scope<'t, P>, highlight_val: Val<Cow<'s, str>>) -> Result<VNode<'t>, anyhow::Error> {
+    if let Val::Process { name, label, body: Some(Body::All(bs)) } = highlight_val {
+        cx.render(rsx!{(
+            bs.iter().map(|b| {
+                match b {
+                    Val::Process { name: pname, .. } => {
+                        let style = ".box.highlight_{pname} { color: red; }";
+                        rsx!{
+                            style {
+                                "{style}"
+                            }
+                        }
+                    },
+                    Val::Chain{ name: cname, .. } => {
+                        let style = ".arrow.highlight_{cname} { color: red; }";
+                        rsx!{
+                            style {
+                                "{style}"
+                            }
+                        }
+                    }
+                }
+            })
+        )})
+    } else {
+        cx.render(rsx!{()})
+    }
+}
+
 pub fn app(cx: Scope<AppProps>) -> Element {
     let model = use_state(&cx, || String::from(PLACEHOLDER));
     let drawing = use_state(&cx, Drawing::default);
+    let highlight = use_state(&cx, || String::new());
 
     let drawing_sender = use_coroutine(cx, |mut rx| { 
         let drawing = drawing.clone();
@@ -169,16 +250,14 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let highlight_s = ".highlight_s { color: blue; }";
     let highlight_0h = ".highlight_0h { color: red; }";
 
+    // parse and eval the highlight string to get a sub-model to highlight
+    let highlight_data = Cow::from(highlight.get());
+    let highlight_val = parse_highlights(&highlight_data)?;
+
+    let highlight_styles = render_highlight_styles(cx, highlight_val)?;
+
     cx.render(rsx!{
-        style {
-            "{box_highlight_s}"
-        }
-        style {
-            "{highlight_s}"
-        }
-        style {
-            "{highlight_0h}"
-        }
+        highlight_styles
         div {
             // key: "editor",
             style: "width: 100%; z-index: 20; padding: 1rem;",
@@ -207,6 +286,23 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             model_sender.send(e.value.clone());
                         },
                         "{model}"
+                    }
+                }
+                div {
+                    "Sub-model to Highlight"
+                }
+                div {
+                    textarea {
+                        style: "border-width 1px; border-color: #000;",
+                        rows: "1",
+                        cols: "80",
+                        autocomplete: "off",
+                        "autocapitalize": "off",
+                        spellcheck: "false",
+                        oninput: move |e| {
+                            event!(Level::TRACE, "HIGHLIGHT INPUT");
+                            highlight.set(e.value.clone());
+                        }
                     }
                 }
                 div { 
