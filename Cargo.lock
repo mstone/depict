@@ -864,7 +864,7 @@ dependencies = [
 [[package]]
 name = "dioxus"
 version = "0.2.4"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "dioxus-core",
  "dioxus-core-macro",
@@ -876,7 +876,7 @@ dependencies = [
 [[package]]
 name = "dioxus-core"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "anyhow",
  "bumpalo",
@@ -893,7 +893,7 @@ dependencies = [
 [[package]]
 name = "dioxus-core-macro"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "dioxus-rsx",
  "proc-macro2",
@@ -904,7 +904,7 @@ dependencies = [
 [[package]]
 name = "dioxus-desktop"
 version = "0.2.3"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "core-foundation",
  "dioxus-core",
@@ -929,7 +929,7 @@ dependencies = [
 [[package]]
 name = "dioxus-hooks"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "dioxus-core",
  "futures-channel",
@@ -939,7 +939,7 @@ dependencies = [
 [[package]]
 name = "dioxus-html"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "async-trait",
  "dioxus-core",
@@ -955,7 +955,7 @@ dependencies = [
 [[package]]
 name = "dioxus-interpreter-js"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "js-sys",
  "sledgehammer_bindgen",
@@ -967,7 +967,7 @@ dependencies = [
 [[package]]
 name = "dioxus-rsx"
 version = "0.0.1"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -978,7 +978,7 @@ dependencies = [
 [[package]]
 name = "dioxus-web"
 version = "0.2.1"
-source = "git+https://github.com/DioxusLabs/dioxus#4a3c7aae18fbc6a3f0b2375c4c35ead8e98dc3d2"
+source = "git+https://github.com/DioxusLabs/dioxus#5dc86fe0b744ea330dd68add8525f9e8bb0f69cf"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",

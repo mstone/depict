@@ -4734,7 +4734,7 @@ pub mod frontend {
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Node {
             Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: LocSol, estimated_size: NodeSize },
-            Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, estimated_size: HopSize },
+            Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, classes: String, estimated_size: HopSize },
         }
 
         #[derive(Clone, Debug)]
@@ -5029,7 +5029,9 @@ pub mod frontend {
                     if let (Some(label_text), Some(label_hpos), Some(label_width), Some(label_vpos)) = (label_text, label_hpos, label_width, label_vpos) {
                         label = Some(Label{text: label_text, hpos: label_hpos, width: label_width, vpos: label_vpos})
                     }
-                    arrows.push(Node::Svg{key, path, z_index, rel: ew.to_string(), label, hops: hn0, estimated_size: estimated_size0.unwrap()});
+                    let classes = format!("arrow vertical {ew} {vl}_{wl} {vl}_{wl}_{ew}");
+
+                    arrows.push(Node::Svg{key, path, z_index, rel: ew.to_string(), label, hops: hn0, classes, estimated_size: estimated_size0.unwrap()});
                 }
             }
             let forward_voffset = 6.;
@@ -5041,6 +5043,7 @@ pub mod frontend {
 
                 if let Some(forward) = &lvl.forward {
                     let key = format!("{vl}_{wl}_forward_{m}");
+                    let classes = format!("arrow horizontal forward {vl}_{wl} {vl}_{wl}_forward");
                     let locl = &node_to_loc[&Loc::Node(vl.clone())];
                     let locr = &node_to_loc[&Loc::Node(wl.clone())];
                     let nl = sol_by_loc[locl];
@@ -5060,10 +5063,11 @@ pub mod frontend {
                         None
                     };
                     let estimated_size = HopSize{ width: 0., left: wl, right: wr, height: 0., top: 0., bottom: 0. };
-                    arrows.push(Node::Svg{key, path, z_index, label, rel: "forward".into(), hops: vec![], estimated_size });
+                    arrows.push(Node::Svg{key, path, z_index, label, rel: "forward".into(), hops: vec![], classes, estimated_size });
                 }
                 if let Some(reverse) = &lvl.reverse {
                     let key = format!("{vl}_{wl}_reverse_{m}");
+                    let classes = format!("arrow horizontal reverse {vl}_{wl} {vl}_{wl}_reverse");
                     let locl = &node_to_loc[&Loc::Node(vl.clone())];
                     let locr = &node_to_loc[&Loc::Node(wl.clone())];
                     let nl = sol_by_loc[locl];
@@ -5083,7 +5087,7 @@ pub mod frontend {
                         None
                     };
                     let estimated_size = HopSize{ width: 0., left: wl, right: wr, height: 0., top: 0., bottom: 0. };
-                    arrows.push(Node::Svg{key, path, z_index, label, rel: "reverse".into(), hops: vec![], estimated_size });
+                    arrows.push(Node::Svg{key, path, z_index, label, rel: "reverse".into(), hops: vec![], classes, estimated_size });
                 }
             }
 
@@ -5175,9 +5179,10 @@ pub mod frontend {
                                     .add(Text::new(label)))
                             );
                     },
-                    Node::Svg{path, rel, label, ..} => {
+                    Node::Svg{path, rel, label, classes, ..} => {
                         
                         let mut path_elt = Path::new()
+                            .set("class", classes)
                             .set("d", path)
                             .set("stroke", "black");
                         
@@ -5249,22 +5254,23 @@ pub mod frontend {
                             }
                         }));
                     },
-                    Node::Svg{key, path, z_index, rel, label, ..} => {
+                    Node::Svg{key, path, z_index, rel, label, classes, ..} => {
                         let marker_id = if rel == "actuates" || rel == "forward" { "arrowhead" } else { "arrowheadrev" };
                         let marker_orient = if rel == "actuates" || rel == "forward" { "auto" } else { "auto-start-reverse" };
                         let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
-                        let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
+                        // let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
+                        
                         children.push(cx.render(rsx!{
                             div {
                                 key: "{key}",
-                                class: "arrow highlight_{key}",
+                                class: "{classes}",
                                 style: "position: absolute; z-index: {z_index};",
                                 svg {
                                     fill: "none",
-                                    stroke: "{stroke_color}",
+                                    // stroke: "{stroke_color}",
                                     stroke_linecap: "round",
                                     stroke_linejoin: "round",
-                                    stroke_width: "1",
+                                    // stroke_width: "1",
                                     view_box: "0 0 {viewbox_width} {viewbox_height}",
                                     width: "{viewbox_width}px",
                                     height: "{viewbox_height}px",
@@ -5299,7 +5305,7 @@ pub mod frontend {
                                             _ => {
                                                 rsx!(path {
                                                     d: "{path}",
-                                                    stroke_dasharray: "{stroke_dasharray}",
+                                                    // stroke_dasharray: "{stroke_dasharray}",
                                                 })
                                             }
                                         }

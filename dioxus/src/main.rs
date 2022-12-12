@@ -95,17 +95,16 @@ pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Result<VNode, anyhow::E
     })
 }
 
-pub fn parse_highlights<'s>(data: &'s Cow<'s, str>) -> Result<Val<Cow<'s, str>>, Error> {
+pub fn parse_highlights<'s>(data: &'s str) -> Result<Val<Cow<'s, str>>, Error> {
     use depict::parser::{Parser, Token};
     use depict::graph_drawing::eval::{eval, index, resolve};
     use logos::Logos;
     use std::collections::HashMap;
     use tracing_error::InstrumentResult;
-
+    
     if data.trim().is_empty() {
         return Ok(Val::default())
     }
-    let data = &data;
 
     let mut p = Parser::new();
     {
@@ -145,39 +144,10 @@ pub fn parse_highlights<'s>(data: &'s Cow<'s, str>) -> Result<Val<Cow<'s, str>>,
     Ok(val)
 }
 
-pub fn render_highlight_styles<'s, 't, P>(cx: Scope<'t, P>, highlight_val: Val<Cow<'s, str>>) -> Result<VNode<'t>, anyhow::Error> {
-    if let Val::Process { name, label, body: Some(Body::All(bs)) } = highlight_val {
-        cx.render(rsx!{(
-            bs.iter().map(|b| {
-                match b {
-                    Val::Process { name: pname, .. } => {
-                        let style = ".box.highlight_{pname} { color: red; }";
-                        rsx!{
-                            style {
-                                "{style}"
-                            }
-                        }
-                    },
-                    Val::Chain{ name: cname, .. } => {
-                        let style = ".arrow.highlight_{cname} { color: red; }";
-                        rsx!{
-                            style {
-                                "{style}"
-                            }
-                        }
-                    }
-                }
-            })
-        )})
-    } else {
-        cx.render(rsx!{()})
-    }
-}
-
 pub fn app(cx: Scope<AppProps>) -> Element {
     let model = use_state(&cx, || String::from(PLACEHOLDER));
     let drawing = use_state(&cx, Drawing::default);
-    let highlight = use_state(&cx, || String::new());
+    let highlight = use_state(&cx, || String::from(""));
 
     let drawing_sender = use_coroutine(cx, |mut rx| { 
         let drawing = drawing.clone();
@@ -246,18 +216,104 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let data_svg = as_data_svg(drawing.get().clone());
     let keyword = "font-weight: bold; color: rgb(207, 34, 46);";
     let example = "font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;";
-    let box_highlight_s = ".box.highlight_s { background-color: blue; color: white; }";
-    let highlight_s = ".highlight_s { color: blue; }";
-    let highlight_0h = ".highlight_0h { color: red; }";
 
     // parse and eval the highlight string to get a sub-model to highlight
-    let highlight_data = Cow::from(highlight.get());
-    let highlight_val = parse_highlights(&highlight_data)?;
+    let highlight_styles = match parse_highlights(&highlight.get()[..]) {
+        Ok(Val::Process { name, label, body: Some(Body::All(bs)) }) => {
+            // cx.render(rsx!{"OOPS"})
+            cx.render(rsx!{
+                bs.iter().map(|b| {
+                    match b {
+                        Val::Process { name: Some(pname), .. } => {
+                            let style = format!(".box.highlight_{pname} {{ color: red; }}");
+                            eprintln!("STYLE: {style}");
+                            rsx!{
+                                style {
+                                    "{style}"
+                                }
+                            }
+                        },
+                        Val::Process { label: Some(pname), .. } => {
+                            let style = format!(".box.highlight_{pname} {{ color: red; }}");
+                            eprintln!("STYLE: {style}");
+                            rsx!{
+                                style {
+                                    "{style}"
+                                }
+                            }
+                        },
+                        Val::Chain{ name: Some(cname), .. } => {
+                            let style = format!(".arrow.highlight_{cname} {{ color: red; }}");
+                            eprintln!("STYLE: {style}");
+                            rsx!{
+                                style {
+                                    "{style}"
+                                }
+                            }
+                        }
+                        Val::Chain{ path, .. } => {
+                            rsx!{
+                                path.windows(2).map(|pq| {
+                                    match &pq[0] {
+                                        Val::Process { name: Some(pname), .. } | Val::Process { label: Some(pname), .. } => {
+                                            match &pq[1] {
+                                                Val::Process { name: Some(qname), .. } | Val::Process { label: Some(qname), .. } => {
+                                                    let style = format!(".arrow.{pname}_{qname} svg {{ stroke: pink; }}");
+                                                    eprintln!("STYLE: {style}");
+                                                    rsx!{
+                                                        style {
+                                                            "{style}"
+                                                        }
+                                                    }
+                                                }
+                                                _ => {
+                                                    eprintln!("UNSTYLE CHAIN WINDOW: {pq:#?}");
+                                                    rsx!{()}
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            eprintln!("UNSTYLE CHAIN: {pq:#?}");
+                                            rsx!{()}
+                                        }
+                                    }
+                                })
+                            }
+                        }
+                        _ => {
+                            eprintln!("UNSTYLE: {b:#?}");
+                            rsx!{()}
+                        }
+                    }
+                })
+            })
+        },
+        Err(e) => {
+            let e = format!("{e:#?}");
+            cx.render(rsx!{
+                div {
+                    e
+                }
+            })
+        },
+        _ => {
+            cx.render(rsx!{()})
+        }
+    };
 
-    let highlight_styles = render_highlight_styles(cx, highlight_val)?;
-
+    let style_default = "
+        svg { stroke: currentColor; stroke-width: 1; } 
+        .fake svg { stroke: hsl(0, 0%, 50%); } 
+        path { stroke-dasharray: none; } 
+        .arrow.fake path { stroke-dasharray: 5; }
+    ";
     cx.render(rsx!{
-        highlight_styles
+        head {
+            style {
+                "{style_default}"
+            }
+            highlight_styles
+        }
         div {
             // key: "editor",
             style: "width: 100%; z-index: 20; padding: 1rem;",
