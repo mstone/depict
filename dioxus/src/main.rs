@@ -679,6 +679,7 @@ pub fn main() -> io::Result<()> {
         Config::new().with_window(
             WindowBuilder::new()
                 .with_inner_size(LogicalSize::new(1200.0f64, 700.0f64))
+                .with_title("Depict")
                 .with_menu(menu_bar)
         ));
 
