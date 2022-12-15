@@ -4741,6 +4741,7 @@ pub mod frontend {
         pub struct Drawing {
             pub crossing_number: Option<usize>,
             pub viewbox_width: f64,
+            pub viewbox_height: f64,
             pub nodes: Vec<Node>,
             pub logs: Vec<log::Record>,
         }
@@ -4750,6 +4751,7 @@ pub mod frontend {
                 Self { 
                     crossing_number: Default::default(), 
                     viewbox_width: 1024.0,
+                    viewbox_height: 400.0,
                     nodes: Default::default(),
                     logs: vec![],
                 }
@@ -4816,6 +4818,7 @@ pub mod frontend {
             // Render Nodes
             let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
             let root_width = rs[&root_n] - ls[&root_n];
+            let viewbox_height = (bs.values().copied().map(ordered_float::OrderedFloat).max().unwrap_or_default() - ts.values().copied().map(ordered_float::OrderedFloat).min().unwrap_or_default()).0;
 
             for (loc, node) in loc_to_node.iter() {
                 let (ovr, ohr) = loc;
@@ -5107,6 +5110,7 @@ pub mod frontend {
             Ok(Drawing{
                 crossing_number: Some(crossing_number), 
                 viewbox_width: root_width,
+                viewbox_height: viewbox_height,
                 nodes,
                 logs,
             })
@@ -5116,6 +5120,7 @@ pub mod frontend {
     #[cfg(feature="dioxus")]
     pub mod dioxus {
         use dioxus::prelude::*;
+        use anyhow;
 
         use super::dom::{Drawing, Node, Label};
 
@@ -5347,6 +5352,209 @@ pub mod frontend {
             }
             // dbg!(cx.render(rsx!(children)))
             Some(cx.render(rsx!(children.into_iter())).unwrap())
+        }
+
+        pub fn syntax_guide<P>(cx: Scope<P>) -> Result<VNode, anyhow::Error> {
+            cx.render(rsx!{
+                div {
+                    div {
+                        style: "display: flex; flex-direction: row; justify-content: space-between; font-size: 0.875rem; line-height: 1.25rem;",
+                        div {
+                            details {
+                                // open: "true",
+                                summary {
+                                    span {
+                                        style: "color: #000;",
+                                        "Syntax + Examples"
+                                    }
+                                }
+                                div {
+                                    p {
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "nodes"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            ":"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "actions"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            "/"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "feedback"
+                                        }
+                                        " "
+                                    }
+                                    p {
+                                        style: "text-align: right;",
+                                        span {
+                                            class: "example",
+                                            "person microwave food: open start stop / beep : heat"
+                                        },
+                                    }
+                                    p {
+                                        span {
+                                            class: "keyword",
+                                            "-"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "nodes"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            ":"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "flows"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            "/"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "responses"
+                                        }
+                                        " "
+                                    }
+                                    p {
+                                        style: "text-align: right;",
+                                        span {
+                                            class: "example",
+                                            "- left right: input / reply"
+                                        },
+                                    }
+                                    p {
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "container"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            "["
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "components"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            "]"
+                                        }
+                                        " "
+                                    }
+                                    p {
+                                        style: "text-align: right;",
+                                        span {
+                                            class: "example",
+                                            "plane [ pilot navigator ]"
+                                        },
+                                    }
+                                    p {
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "abbreviation"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            ":"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "..."
+                                        }
+                                        " "
+                                    }
+                                    p {
+                                        style: "text-align: right;",
+                                        span {
+                                            class: "example",
+                                            "c: controller; p: process; c p: setpoint / feedback"
+                                        },
+                                    }
+                                    p {
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "nodes"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            ":"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "long-label"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            ","
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "labels"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            "/"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "long-label"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            ","
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "labels"
+                                        }
+                                        " "
+                                    }
+                                    p {
+                                        style: "text-align: right;",
+                                        span {
+                                            class: "example",
+                                            "controller process: a long action, / a long feedback, another feedback"
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            })
         }
     }
 }

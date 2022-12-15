@@ -208,15 +208,14 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     model_sender.send(model.get().clone());
 
     let viewbox_width = drawing.get().viewbox_width;
+    let viewbox_height = drawing.get().viewbox_height;
     let _crossing_number = cx.render(rsx!(match drawing.get().crossing_number {
         Some(cn) => rsx!(span { "{cn}" }),
         None => rsx!(div{}),
     }));
 
     let data_svg = as_data_svg(drawing.get().clone());
-    let keyword = "font-weight: bold; color: rgb(207, 34, 46);";
-    let example = "font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;";
-
+    
     // parse and eval the highlight string to get a sub-model to highlight
     let highlight_styles = match parse_highlights(&highlight.get()[..]) {
         Ok(Val::Process { name, label, body: Some(Body::All(bs)) }) => {
@@ -224,17 +223,8 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             cx.render(rsx!{
                 bs.iter().map(|b| {
                     match b {
-                        Val::Process { name: Some(pname), .. } => {
-                            let style = format!(".box.highlight_{pname} {{ color: red; }}");
-                            eprintln!("STYLE: {style}");
-                            rsx!{
-                                style {
-                                    "{style}"
-                                }
-                            }
-                        },
-                        Val::Process { label: Some(pname), .. } => {
-                            let style = format!(".box.highlight_{pname} {{ color: red; }}");
+                        Val::Process { name: Some(pname), .. } | Val::Process { label: Some(pname), .. } => {
+                            let style = format!(".box.highlight_{pname} {{ background-color: red; color: white; }} .highlight_{pname} {{ color: red; }}");
                             eprintln!("STYLE: {style}");
                             rsx!{
                                 style {
@@ -258,7 +248,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                                         Val::Process { name: Some(pname), .. } | Val::Process { label: Some(pname), .. } => {
                                             match &pq[1] {
                                                 Val::Process { name: Some(qname), .. } | Val::Process { label: Some(qname), .. } => {
-                                                    let style = format!(".arrow.{pname}_{qname} svg {{ stroke: pink; }}");
+                                                    let style = format!(".arrow.{pname}_{qname} svg > path {{ stroke: red; }}");
                                                     eprintln!("STYLE: {style}");
                                                     rsx!{
                                                         style {
@@ -301,11 +291,15 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         }
     };
 
+    let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
+
     let style_default = "
         svg { stroke: currentColor; stroke-width: 1; } 
         .fake svg { stroke: hsl(0, 0%, 50%); } 
         path { stroke-dasharray: none; } 
         .arrow.fake path { stroke-dasharray: 5; }
+        .keyword { font-weight: bold; color: rgb(207, 34, 46); }
+        .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
     ";
     cx.render(rsx!{
         head {
@@ -361,214 +355,71 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         }
                     }
                 }
-                div { 
+                div {
                     style: "display: flex; flex-direction: row; justify-content: space-between;",
+                    syntax_guide,
                     div {
-                        style: "font-size: 0.875rem; line-height: 1.25rem; width: calc(100% - 8rem);",
-                        div {
-                            details {
-                                // open: "true",
-                                summary {
-                                    span {
-                                        style: "color: #000;",
-                                        "Syntax + Examples"
-                                    }
+                        details {
+                            style: "display: flex; flex-direction: column; align-self: end; font-size: 0.875rem; line-height: 1.25rem;",
+                            summary {
+                                span {
+                                    "Tools",
                                 }
-                                div {
-                                    p {
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "nodes"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ":"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "actions"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "/"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "feedback"
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "person microwave food: open start stop / beep : heat"
-                                        },
-                                    }
-                                    p {
-                                        span {
-                                            style: "{keyword}",
-                                            "-"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "nodes"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ":"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "flows"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "/"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "responses"
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "- left right: input / reply"
-                                        },
-                                    }
-                                    p {
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "container"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "["
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "components"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "]"
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "plane [ pilot navigator ]"
-                                        },
-                                    }
-                                    p {
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "abbreviation"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ":"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "..."
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "c: controller; p: process; c p: setpoint / feedback"
-                                        },
-                                    }
-                                    p {
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "nodes"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ":"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "long-label"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ","
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "labels"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "/"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "long-label"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ","
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "labels"
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "controller process: a long action, / a long feedback, another feedback"
-                                        },
+                            },
+                            // EXPORT
+                            div {
+                                a {
+                                    href: "{data_svg}",
+                                    download: "depict.svg",
+                                    "Export SVG"
+                                }
+                            }
+                            // LICENSES
+                            div {
+                                details {
+                                    summary {
+                                        style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity));",
+                                        "Licenses",
+                                    },
+                                    div {
+                                        (depict::licenses::LICENSES.dirs().map(|dir| {
+                                            let path = dir.path().display();
+                                            cx.render(rsx!{
+                                                div {
+                                                    key: "{path}",
+                                                    span {
+                                                        style: "font-style: italic; text-decoration: underline;",
+                                                        "{path}"
+                                                    },
+                                                    ul {
+                                                        dir.files().map(|f| {
+                                                            let file_path = f.path();
+                                                            let file_contents = f.contents_utf8().unwrap();
+                                                            cx.render(rsx!{
+                                                                details {
+                                                                    key: "{file_path:?}",
+                                                                    style: "white-space: pre;",
+                                                                    summary {
+                                                                        "{file_path:?}"
+                                                                    }
+                                                                    "{file_contents}"
+                                                                }
+                                                            })
+                                                        })
+                                                    }
+                                                }
+                                            })
+                                        }))
                                     }
                                 }
                             }
-                        }
-                    }
-                    div {
-                        style: "display: flex; flex-direction: column; align-items: end;",
-                        a {
-                            href: "{data_svg}",
-                            download: "depict.svg",
-                            "Export SVG"
-                        }
-                        span {
-                            style: "font-style: italic; font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity));",
-                            "('Copy Link' to use)"
+                            // LOG CONTROLS
+                            div {
+                                button {
+                                    onclick: move |_| show_logs.modify(|v| !v),
+                                    "Show debug logs"
+                                }
+                            }
                         }
                     }
                 }
@@ -583,70 +434,23 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                 //         crossing_number
                 //     }
                 // }
-                div {
-                    details {
-                        summary {
-                            style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); text-align: right;",
-                            "Licenses",
-                        },
-                        div {
-                            (depict::licenses::LICENSES.dirs().map(|dir| {
-                                let path = dir.path().display();
-                                cx.render(rsx!{
-                                    div {
-                                        key: "{path}",
-                                        span {
-                                            style: "font-style: italic; text-decoration: underline;",
-                                            "{path}"
-                                        },
-                                        ul {
-                                            dir.files().map(|f| {
-                                                let file_path = f.path();
-                                                let file_contents = f.contents_utf8().unwrap();
-                                                cx.render(rsx!{
-                                                    details {
-                                                        key: "{file_path:?}",
-                                                        style: "white-space: pre;",
-                                                        summary {
-                                                            "{file_path:?}"
-                                                        }
-                                                        "{file_contents}"
-                                                    }
-                                                })
-                                            })
-                                        }
-                                    }
-                                })
-                            }))
-                        }
-                    }
-                }
-                div {
-                    button {
-                        onclick: move |_| show_logs.modify(|v| !v),
-                        "Show debug logs"
-                    }
-                }
             }
         }
+        // DRAWING
         div {
-            style: "width: 100%;",
             div {
-                style: "display: flex; gap: 20px;",
-                div {
-                    style: "position: relative; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
-                    width: "{viewbox_width}px",
-                    nodes
-                }
-                div {
-                    style: "display: flex; gap: 20px; overflow-x: auto;",
-                    show_logs.then(|| rsx!{
-                        logs
-                    })
-                }
+                style: "position: relative; width: {viewbox_width}px; height: {viewbox_height}px; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000; margin-bottom: 40px;",
+                nodes
             }
         }
-    })   
+        // LOGS
+        div {
+            style: "display: flex; flex-direction: row; overflow-x: auto;",
+            show_logs.then(|| rsx!{
+                logs
+            })
+        }
+    })
 }
 
 pub fn main() -> io::Result<()> {    

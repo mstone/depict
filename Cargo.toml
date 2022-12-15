@@ -20,6 +20,7 @@ client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 proptest = "1"
 
 [dependencies]
+anyhow = { version = "*" }
 derive_more = "0.99"
 dioxus = { git = "https://github.com/DioxusLabs/dioxus", optional = true }
 enum-kinds = "0.5.1"

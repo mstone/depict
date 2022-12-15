@@ -705,6 +705,7 @@ dependencies = [
 name = "depict"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
  "derive_more",
  "dioxus",
  "enum-kinds",
