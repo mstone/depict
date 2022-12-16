@@ -682,7 +682,7 @@ pub mod eval {
             match self {
                 Val::Process { name, label, body } => {
                     let pname = &as_string2(name, label, "").into();
-                    l.with_names(
+                    l.with_group(
                         "Process",
                         pname,
                         vec![pname],
@@ -690,7 +690,7 @@ pub mod eval {
                             match body {
                                 Some(body) if body.len() > 0 => match body {
                                     Body::Any(bs) => {
-                                        l.with_names("", "Body: Any", Vec::<String>::new(), |l| {
+                                        l.with_group("", "Body: Any", Vec::<String>::new(), |l| {
                                             for b in bs.iter() {
                                                 b.log(pname, l)?
                                             }
@@ -698,7 +698,7 @@ pub mod eval {
                                         })
                                     },
                                     Body::All(bs) => {
-                                        l.with_names("", "Body: All", Vec::<String>::new(), |l| {
+                                        l.with_group("", "Body: All", Vec::<String>::new(), |l| {
                                             for b in bs.iter() {
                                                 b.log(pname, l)?
                                             }
@@ -712,9 +712,9 @@ pub mod eval {
                 },
                 Val::Chain { name, rel, path, labels } => {
                     let name = as_string1(name, "").into();
-                    l.with_names("Chain", name, Vec::<String>::new(), |l| {
+                    l.with_group("Chain", name, Vec::<String>::new(), |l| {
                         l.log_string("rel", rel)?;
-                        l.with_names("", "path", Vec::<String>::new(), |l| {
+                        l.with_group("", "path", Vec::<String>::new(), |l| {
                             for p in path.iter() {
                                 p.log("", l)?
                             }
@@ -3346,7 +3346,7 @@ pub mod geometry {
 
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
         fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_names("SolToLoc", name, Vec::<String>::new(), |l| {
+            l.with_group("SolToLoc", name, Vec::<String>::new(), |l| {
                 for ((ovr, ohr), v) in self.iter() {
                     l.log_names(
                         format!("{ovr}v, {ohr}h"), 
@@ -4693,7 +4693,7 @@ pub mod frontend {
                 Ok(())
             }
 
-            pub fn with_names<F>(&mut self, ty: impl Into<String>, name: impl Into<String>, names: Vec<impl Into<String>>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
+            pub fn with_group<F>(&mut self, ty: impl Into<String>, name: impl Into<String>, names: Vec<impl Into<String>>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
                 let mut nested_logger = Logger::new();
                 f(&mut nested_logger)?;
                 self.logs.push(Record::Group{name: name.into(), ty: Some(ty.into()), names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), val: nested_logger.logs});
@@ -4799,7 +4799,7 @@ pub mod frontend {
             logs.log_string("size_by_hop", size_by_hop);
             logs.log_string("horizontal_problem", horizontal_problem);
             logs.log_string("vertical_problem", vertical_problem);
-            logs.with_names("Coordinates", "", Vec::<String>::new(), |logs| {
+            logs.with_group("Coordinates", "", Vec::<String>::new(), |logs| {
                 logs.log_string("rs", rs)?;
                 logs.log_string("ls", ls)?;
                 logs.log_string("bs", bs)?;
