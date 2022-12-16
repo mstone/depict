@@ -2566,6 +2566,42 @@ pub mod layout {
             write!(f, "Border({}, {}, {}, {})", self.vl, self.ovr, self.ohr, self.pair)
         }
     }
+
+    impl<V: Graphic + Display> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
+        fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_group("LocToNode", "", Vec::<String>::new(), |l| {
+                for ((ovr, ohr), loc) in self.iter() {
+                    match loc {
+                        Loc::Node(process) => {
+                            l.log_names(
+                                format!("{ovr}v, {ohr}h"),
+                                Some("Node".into()),
+                                vec![format!("{ovr}v"), format!("{ohr}h"), format!("{process}")],
+                                format!("{process}"),
+                            );
+                        },
+                        Loc::Hop(lvl, vl, wl) => {
+                            l.log_names(
+                                format!("{ovr}v, {ohr}h"),
+                                Some("Hop".into()),
+                                vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}"), format!("{wl}"), format!("{lvl}v")],
+                                format!("{lvl}, {vl}->{wl}")
+                            );
+                        }
+                        Loc::Border(Border{vl, ovr: bovr, ohr: bohr, pair}) => {
+                            l.log_names(
+                                format!("{ovr}v, {ohr}h"),
+                                Some("Border".into()),
+                                vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}")],
+                                format!("{vl}, {bovr}v, {bohr}h, {pair}p")
+                            );
+                        },
+                    }
+                }
+                Ok(())
+            })
+        }
+    }
     
     #[derive(Clone, Debug, Default)]
     pub struct LayoutProblem<V: Graphic + Display> {
@@ -3188,6 +3224,7 @@ pub mod layout {
     pub use heaps::minimize_edge_crossing;
 
     use super::eval::Rel;
+    use super::frontend::log;
     use super::index::SolvedHorizontalRank;
 }
 
@@ -3348,6 +3385,7 @@ pub mod geometry {
         fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_group("SolToLoc", name, Vec::<String>::new(), |l| {
                 for ((ovr, ohr), v) in self.iter() {
+                    // todo: use loc_to_node
                     l.log_names(
                         format!("{ovr}v, {ohr}h"), 
                         None,
@@ -4792,6 +4830,7 @@ pub mod frontend {
             // Log the resolved value
             // logs.log_string("VAL", val);
             val.log("VAL", &mut logs);
+            loc_to_node.log("loc_to_node", &mut logs);
             sol_by_loc.log("sol_by_loc", &mut logs);
             logs.log_string("sol_by_hop", sol_by_hop);
             logs.log_string("solved_locs", solved_locs);
