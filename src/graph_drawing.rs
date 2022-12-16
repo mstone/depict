@@ -4693,13 +4693,6 @@ pub mod frontend {
                 Ok(())
             }
 
-            pub fn with_group<F>(&mut self, name: impl Into<String>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
-                let mut nested_logger = Logger::new();
-                f(&mut nested_logger)?;
-                self.logs.push(Record::Group{name: name.into(), ty: None, names: vec![], val: nested_logger.logs});
-                Ok(())
-            }
-
             pub fn with_names<F>(&mut self, ty: impl Into<String>, name: impl Into<String>, names: Vec<impl Into<String>>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
                 let mut nested_logger = Logger::new();
                 f(&mut nested_logger)?;
@@ -4806,7 +4799,7 @@ pub mod frontend {
             logs.log_string("size_by_hop", size_by_hop);
             logs.log_string("horizontal_problem", horizontal_problem);
             logs.log_string("vertical_problem", vertical_problem);
-            logs.with_group("coordinates", |logs| {
+            logs.with_names("Coordinates", "", Vec::<String>::new(), |logs| {
                 logs.log_string("rs", rs)?;
                 logs.log_string("ls", ls)?;
                 logs.log_string("bs", bs)?;
