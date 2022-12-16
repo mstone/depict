@@ -690,7 +690,7 @@ pub mod eval {
                             match body {
                                 Some(body) if body.len() > 0 => match body {
                                     Body::Any(bs) => {
-                                        l.with_group("Body: Any", |l| {
+                                        l.with_names("", "Body: Any", Vec::<String>::new(), |l| {
                                             for b in bs.iter() {
                                                 b.log(pname, l)?
                                             }
@@ -698,7 +698,7 @@ pub mod eval {
                                         })
                                     },
                                     Body::All(bs) => {
-                                        l.with_group("Body: All", |l| {
+                                        l.with_names("", "Body: All", Vec::<String>::new(), |l| {
                                             for b in bs.iter() {
                                                 b.log(pname, l)?
                                             }
@@ -712,9 +712,9 @@ pub mod eval {
                 },
                 Val::Chain { name, rel, path, labels } => {
                     let name = as_string1(name, "").into();
-                    l.with_group(format!("Chain: {name}"), |l| {
+                    l.with_names("Chain", name, Vec::<String>::new(), |l| {
                         l.log_string("rel", rel)?;
-                        l.with_group("path", |l| {
+                        l.with_names("", "path", Vec::<String>::new(), |l| {
                             for p in path.iter() {
                                 p.log("", l)?
                             }
@@ -3346,7 +3346,7 @@ pub mod geometry {
 
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
         fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_group(name, |l| {
+            l.with_names("SolToLoc", name, Vec::<String>::new(), |l| {
                 for ((ovr, ohr), v) in self.iter() {
                     l.log_names(
                         format!("{ovr}v, {ohr}h"), 
