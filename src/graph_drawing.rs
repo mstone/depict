@@ -683,7 +683,8 @@ pub mod eval {
                 Val::Process { name, label, body } => {
                     let pname = &as_string2(name, label, "").into();
                     l.with_names(
-                        format!("Process: {pname}"), 
+                        "Process",
+                        pname,
                         vec![pname],
                         |l| {
                             match body {
@@ -4675,12 +4676,11 @@ pub mod frontend {
         #[derive(Clone, Debug, Default)]
         pub struct Logger {
             logs: Vec<Record>,
-            names: Vec<String>,
         }
 
         impl Logger {
             pub fn new() -> Self {
-                Self { logs: vec![], names: vec![] }
+                Self { logs: vec![] }
             }
 
             pub fn log_names(&mut self, name: impl Into<String>, ty: Option<String>, names: Vec<impl Into<String>>, val: impl std::fmt::Debug) -> Result<(), Error> {
@@ -4700,10 +4700,10 @@ pub mod frontend {
                 Ok(())
             }
 
-            pub fn with_names<F>(&mut self, name: impl Into<String>, names: Vec<impl Into<String>>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
+            pub fn with_names<F>(&mut self, ty: impl Into<String>, name: impl Into<String>, names: Vec<impl Into<String>>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
                 let mut nested_logger = Logger::new();
                 f(&mut nested_logger)?;
-                self.logs.push(Record::Group{name: name.into(), ty: None, names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), val: nested_logger.logs});
+                self.logs.push(Record::Group{name: name.into(), ty: Some(ty.into()), names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), val: nested_logger.logs});
                 Ok(())
             }
 

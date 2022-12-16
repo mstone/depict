@@ -74,8 +74,15 @@ fn render_many<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Error> 
                         style: "padding-left: 4px;",
                         open: "true",
                         summary {
-                            style: "font-weight: 700;",
-                            "{name}"
+                            ty.map(|ty| rsx!{
+                                span {
+                                    style: "font-weight: 700;",
+                                    "{ty}: ",
+                                }
+                            }),
+                            span {
+                                "{name}"
+                            }
                         }
                         div {
                             style: "white-space: pre; margin-left: 10px; border-left: 1px gray solid;",
