@@ -40,10 +40,11 @@ pub struct AppProps {
 pub fn render_one<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Error> {
     match record {
         Record::String{name, ty, names, val} => {
+            let ty = ty.unwrap_or("None".into());
             let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
             cx.render(rsx!{
                 div {
-                    key: "debug_{name}",
+                    key: "debug_{ty}_{name}",
                     class: "{classes}",
                     div {
                         style: "font-weight: 700;",
@@ -65,10 +66,11 @@ fn render_many<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Error> 
         Record::String{..} => render_one(cx, record),
         Record::Group{name, ty, names, val} => {
             let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
+            let ty2 = ty.clone().unwrap_or("None".into());
             eprintln!("LOG: record: {name} {ty:?} {names:#?}");
             cx.render(rsx!{
                 div {
-                    key: "debug_{name}",
+                    key: "debug_{ty2}_{name}",
                     class: "{classes}",
                     details {
                         style: "padding-left: 4px;",
