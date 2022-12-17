@@ -3386,17 +3386,17 @@ pub mod geometry {
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
         type Cx = String;
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_group("SolToLoc", cx, Vec::<String>::new(), |l| {
-                for ((ovr, ohr), v) in self.iter() {
-                    // todo: use loc_to_node
-                    l.log_names(
-                        format!("{ovr}v, {ohr}h"), 
-                        None,
-                        vec![format!("{ovr}v"), format!("{ohr}h")],
-                        v
-                    )?;
-                }
-                Ok(())
+            l.with_collection("sol_by_loc", "SolByLoc", vec!["all_locs".into()], self.iter(), |(ovr, ohr), sol, l| {
+                // todo: use loc_to_node
+                // vec![format!("{ovr}v"), format!("{ohr}h")],
+                l.log_pair(
+                    "sol_by_loc",
+                    "Loc",
+                    format!("{ovr}v, {ohr}h"),
+                    "",
+                    "LocSol",
+                    format!("{sol}")
+                )
             })
         }
     }
@@ -4699,7 +4699,7 @@ pub mod frontend {
     pub mod log {
         use std::collections::HashMap;
 
-        use petgraph::{Graph, graph::NodeIndex};
+        use petgraph::{Graph, graph::NodeIndex, dot::Dot};
 
         use crate::graph_drawing::layout::or_insert;
 
@@ -4784,6 +4784,16 @@ pub mod frontend {
 
             pub fn to_vec(self) -> Vec<Record> {
                 self.logs
+            }
+
+            pub fn ty_dot(&self) -> String {
+                let ty_dot = Dot::new(&self.ty_graph);
+                format!("{ty_dot:?}")
+            }
+
+            pub fn val_dot(&self) -> String {
+                let val_dot = Dot::new(&self.val_graph);
+                format!("{val_dot:?}")
             }
         }
     }
@@ -4888,6 +4898,13 @@ pub mod frontend {
                 logs.log_string("bs", bs)?;
                 logs.log_string("ts", ts)
             });
+
+            let ty_dot = logs.ty_dot();
+            eprintln!("TY DOT:\n{ty_dot}");
+
+            let val_dot = logs.val_dot();
+            eprintln!("VAL DOT:\n{val_dot}");
+
             let mut logs = logs.to_vec();
             logs.reverse();
 
