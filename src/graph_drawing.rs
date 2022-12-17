@@ -666,33 +666,34 @@ pub mod eval {
         }
     }
 
-    fn as_string1<'s>(o1: &Option<Cow<'s, str>>, o2: &'static str) -> impl Into<String> + 's {
+    fn as_string1<'s>(o1: &Option<Cow<'s, str>>, o2: &'static str) -> Cow<'s, str> {
         let o2 = Cow::from(o2);
         o1.as_ref().or_else(|| Some(&o2)).unwrap().clone()
     }
 
-    fn as_string2<'s>(o1: &Option<Cow<'s, str>>, o2: &Option<Cow<'s, str>>, o3: &'static str) -> impl Into<String> + 's {
+    fn as_string2<'s>(o1: &Option<Cow<'s, str>>, o2: &Option<Cow<'s, str>>, o3: &'static str) -> Cow<'s, str> {
         let o3 = Cow::from(o3);
         o1.as_ref().or_else(|| o2.as_ref()).or_else(|| Some(&o3)).unwrap().clone()
     }
 
     use crate::graph_drawing::frontend::log;
     impl<'s, 't> log::Log for &'t Val<Cow<'s, str>> {
-        fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
+        type Cx = Cow<'s, str>;
+        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
             match self {
                 Val::Process { name, label, body } => {
-                    let pname = &as_string2(name, label, "").into();
+                    let pname = &as_string2(name, label, "");
                     l.with_group(
                         "Process",
-                        pname,
-                        vec![pname],
+                        pname.clone(),
+                        vec![pname.to_string()],
                         |l| {
                             match body {
                                 Some(body) if body.len() > 0 => match body {
                                     Body::Any(bs) => {
                                         l.with_group("", "Body: Any", Vec::<String>::new(), |l| {
                                             for b in bs.iter() {
-                                                b.log(pname, l)?
+                                                b.log(pname.clone(), l)?
                                             }
                                             Ok(())
                                         })
@@ -700,7 +701,7 @@ pub mod eval {
                                     Body::All(bs) => {
                                         l.with_group("", "Body: All", Vec::<String>::new(), |l| {
                                             for b in bs.iter() {
-                                                b.log(pname, l)?
+                                                b.log(pname.clone(), l)?
                                             }
                                             Ok(())
                                         })
@@ -711,12 +712,12 @@ pub mod eval {
                         })
                 },
                 Val::Chain { name, rel, path, labels } => {
-                    let name = as_string1(name, "").into();
+                    let name = as_string1(name, "").clone();
                     l.with_group("Chain", name, Vec::<String>::new(), |l| {
                         l.log_string("rel", rel)?;
                         l.with_group("", "path", Vec::<String>::new(), |l| {
                             for p in path.iter() {
-                                p.log("", l)?
+                                p.log("".into(), l)?
                             }
                             Ok(())
                         })?;
@@ -2568,7 +2569,8 @@ pub mod layout {
     }
 
     impl<V: Graphic + Display> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
-        fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
+        type Cx = ();
+        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_group("LocToNode", "", Vec::<String>::new(), |l| {
                 for ((ovr, ohr), loc) in self.iter() {
                     match loc {
@@ -3382,8 +3384,9 @@ pub mod geometry {
     use crate::graph_drawing::frontend::log;
 
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
-        fn log(&self, name: impl Into<String>, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_group("SolToLoc", name, Vec::<String>::new(), |l| {
+        type Cx = String;
+        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_group("SolToLoc", cx, Vec::<String>::new(), |l| {
                 for ((ovr, ohr), v) in self.iter() {
                     // todo: use loc_to_node
                     l.log_names(
@@ -4694,6 +4697,11 @@ pub mod frontend {
     }
 
     pub mod log {
+        use std::collections::HashMap;
+
+        use petgraph::{Graph, graph::NodeIndex};
+
+        use crate::graph_drawing::layout::or_insert;
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Record {
@@ -4708,17 +4716,53 @@ pub mod frontend {
         }
 
         pub trait Log {
-            fn log(&self, name: impl Into<String>, l: &mut Logger) -> Result<(), Error>;
+            type Cx;
+            fn log(&self, cx: Self::Cx, l: &mut Logger) -> Result<(), Error>;
         }
 
         #[derive(Clone, Debug, Default)]
         pub struct Logger {
             logs: Vec<Record>,
+            ty_graph: Graph<String, ()>,
+            ty_node_to_ix: HashMap<String, NodeIndex>,
+            val_graph: Graph<(String, String, String), ()>,
+            val_node_to_ix: HashMap<(String, String, String), NodeIndex>,
         }
 
         impl Logger {
             pub fn new() -> Self {
-                Self { logs: vec![] }
+                Self { 
+                    logs: vec![],
+                    ty_graph: Graph::new(),
+                    ty_node_to_ix: HashMap::new(),
+                    val_graph: Graph::new(),
+                    val_node_to_ix: HashMap::new(),
+                }
+            }
+
+            pub fn with_collection<K, V, F>(&mut self, name: impl Into<String>, ty: impl Into<String>, ty_deps: Vec<String>, pairs: impl IntoIterator<Item=(K, V)>, mut f: F) -> Result<(), Error> where F: FnMut(K, V, &mut Logger) -> Result<(), Error> {
+                let tx = or_insert(&mut self.ty_graph, &mut self.ty_node_to_ix, ty.into());
+                for ty_dep in ty_deps {
+                    let tdx = or_insert(&mut self.ty_graph, &mut self.ty_node_to_ix, ty_dep);
+                    self.ty_graph.add_edge(tdx, tx, ());
+                }
+                for (k, v) in pairs.into_iter() {
+                    f(k, v, self)?
+                }
+                Ok(())
+            }
+
+            pub fn log_pair(&mut self, src_collection: impl Into<String>, src_ty: impl Into<String>, src_val: impl Into<String>, dst_collection: impl Into<String>, dst_ty: impl Into<String>, dst_val: impl Into<String>) -> Result<(), Error> {
+                let src_collection = src_collection.into();
+                let src_ty = src_ty.into();
+                let src_val = src_val.into();
+                let dst_collection = dst_collection.into();
+                let dst_ty = dst_ty.into();
+                let dst_val = dst_val.into();
+                let sx = or_insert(&mut self.val_graph, &mut self.val_node_to_ix, (src_collection, src_ty, src_val));
+                let dx = or_insert(&mut self.val_graph, &mut self.val_node_to_ix, (dst_collection, dst_ty, dst_val));
+                self.val_graph.add_edge(sx, dx, ());
+                Ok(())
             }
 
             pub fn log_names(&mut self, name: impl Into<String>, ty: Option<String>, names: Vec<impl Into<String>>, val: impl std::fmt::Debug) -> Result<(), Error> {
@@ -4829,9 +4873,9 @@ pub mod frontend {
             let mut logs = log::Logger::new();
             // Log the resolved value
             // logs.log_string("VAL", val);
-            val.log("VAL", &mut logs);
-            loc_to_node.log("loc_to_node", &mut logs);
-            sol_by_loc.log("sol_by_loc", &mut logs);
+            val.log("VAL".into(), &mut logs);
+            loc_to_node.log((), &mut logs);
+            sol_by_loc.log("sol_by_loc".into(), &mut logs);
             logs.log_string("sol_by_hop", sol_by_hop);
             logs.log_string("solved_locs", solved_locs);
             logs.log_string("size_by_loc", size_by_loc);
