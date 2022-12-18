@@ -2571,36 +2571,39 @@ pub mod layout {
     impl<V: Graphic + Display> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
         type Cx = ();
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_group("LocToNode", "", Vec::<String>::new(), |l| {
-                for ((ovr, ohr), loc) in self.iter() {
-                    match loc {
-                        Loc::Node(process) => {
-                            l.log_names(
-                                format!("{ovr}v, {ohr}h"),
-                                Some("Node".into()),
-                                vec![format!("{ovr}v"), format!("{ohr}h"), format!("{process}")],
-                                format!("{process}"),
-                            );
-                        },
-                        Loc::Hop(lvl, vl, wl) => {
-                            l.log_names(
-                                format!("{ovr}v, {ohr}h"),
-                                Some("Hop".into()),
-                                vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}"), format!("{wl}"), format!("{lvl}v")],
-                                format!("{lvl}, {vl}->{wl}")
-                            );
-                        }
-                        Loc::Border(Border{vl, ovr: bovr, ohr: bohr, pair}) => {
-                            l.log_names(
-                                format!("{ovr}v, {ohr}h"),
-                                Some("Border".into()),
-                                vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}")],
-                                format!("{vl}, {bovr}v, {bohr}h, {pair}p")
-                            );
-                        },
+            l.with_collection("loc_to_node", "LocToNode", vec!["vx_rank".into(), "locs_by_level".into()], self.iter(), |(ovr, ohr), loc, l| {
+                match loc {
+                    Loc::Node(process) => {
+                        l.log_pair(
+                            "loc_to_node",
+                            "Loc",
+                            format!("{ovr}v, {ohr}h"),
+                            "Loc::Node",
+                            // vec![format!("{ovr}v"), format!("{ohr}h"), format!("{process}")],
+                            format!("{process}"),
+                        )
+                    },
+                    Loc::Hop(lvl, vl, wl) => {
+                        l.log_pair(
+                            "loc_to_node",
+                            "Loc",
+                            format!("{ovr}v, {ohr}h"),
+                            "Loc::Hop",
+                            // vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}"), format!("{wl}"), format!("{lvl}v")],
+                            format!("{lvl}, {vl}->{wl}")
+                        )
                     }
+                    Loc::Border(Border{vl, ovr: bovr, ohr: bohr, pair}) => {
+                        l.log_pair(
+                            "loc_to_node",
+                            "Loc",
+                            format!("{ovr}v, {ohr}h"),
+                            "Loc::Border",
+                            // vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}")],
+                            format!("{vl}, {bovr}v, {bohr}h, {pair}p")
+                        )
+                    },
                 }
-                Ok(())
             })
         }
     }
@@ -3393,7 +3396,6 @@ pub mod geometry {
                     "sol_by_loc",
                     "Loc",
                     format!("{ovr}v, {ohr}h"),
-                    "",
                     "LocSol",
                     format!("{sol}")
                 )
@@ -4725,8 +4727,8 @@ pub mod frontend {
             logs: Vec<Record>,
             ty_graph: Graph<String, ()>,
             ty_node_to_ix: HashMap<String, NodeIndex>,
-            val_graph: Graph<(String, String, String), ()>,
-            val_node_to_ix: HashMap<(String, String, String), NodeIndex>,
+            val_graph: Graph<(String, String), String>,
+            val_node_to_ix: HashMap<(String, String), NodeIndex>,
         }
 
         impl Logger {
@@ -4752,16 +4754,15 @@ pub mod frontend {
                 Ok(())
             }
 
-            pub fn log_pair(&mut self, src_collection: impl Into<String>, src_ty: impl Into<String>, src_val: impl Into<String>, dst_collection: impl Into<String>, dst_ty: impl Into<String>, dst_val: impl Into<String>) -> Result<(), Error> {
-                let src_collection = src_collection.into();
+            pub fn log_pair(&mut self, collection: impl Into<String>, src_ty: impl Into<String>, src_val: impl Into<String>, dst_ty: impl Into<String>, dst_val: impl Into<String>) -> Result<(), Error> {
+                let collection = collection.into();
                 let src_ty = src_ty.into();
                 let src_val = src_val.into();
-                let dst_collection = dst_collection.into();
                 let dst_ty = dst_ty.into();
                 let dst_val = dst_val.into();
-                let sx = or_insert(&mut self.val_graph, &mut self.val_node_to_ix, (src_collection, src_ty, src_val));
-                let dx = or_insert(&mut self.val_graph, &mut self.val_node_to_ix, (dst_collection, dst_ty, dst_val));
-                self.val_graph.add_edge(sx, dx, ());
+                let sx = or_insert(&mut self.val_graph, &mut self.val_node_to_ix, (src_ty, src_val));
+                let dx = or_insert(&mut self.val_graph, &mut self.val_node_to_ix, (dst_ty, dst_val));
+                self.val_graph.add_edge(sx, dx, collection);
                 Ok(())
             }
 
