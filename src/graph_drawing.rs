@@ -3430,9 +3430,31 @@ pub mod geometry {
             })
         }
     }
+
+    impl log::Log for HashMap<LocIx, NodeSize> {
+        type Cx = ();
+
+        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_collection("size_by_loc", "SizeByLoc", vec!["???".into()], self.iter(), |(ovr, ohr), size, l| {
+                l.log_pair("size_by_loc", "Loc", format!("{ovr}v, {ohr}h"), "NodeSize", format!("{size:?}"))
+            })
+        }
+    }
+
+    impl<V: Graphic + Display> log::Log for HashMap<HopIx<V>, HopSize> {
+        type Cx = ();
+
+        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_collection("size_by_hop", "SizeByHop", vec!["???".into()], self.iter(), |(ovr, ohr, vl, wl), size, l| {
+                l.log_pair("size_by_hop", "Loc", format!("{ovr}v, {ohr}h"), "HopSize", format!("{size:?}"))
+            })
+        }
+    }
     
     /// ovr, ohr
     pub type LocIx = (VerticalRank, OriginalHorizontalRank);
+
+    pub type HopIx<V: Graphic + Display> = (VerticalRank, OriginalHorizontalRank, V, V);
     
     /// ovr, ohr -> loc
     pub type LocNodeMap<V> = HashMap<LocIx, Loc<V, V>>;
@@ -4917,9 +4939,8 @@ pub mod frontend {
             sol_by_loc.log((), &mut logs);
             sol_by_hop.log((), &mut logs);
             solved_locs.log((), &mut logs);
-            logs.log_string("solved_locs", solved_locs);
-            logs.log_string("size_by_loc", size_by_loc);
-            logs.log_string("size_by_hop", size_by_hop);
+            size_by_loc.log((), &mut logs);
+            size_by_hop.log((), &mut logs);
             logs.log_string("horizontal_problem", horizontal_problem);
             logs.log_string("vertical_problem", vertical_problem);
             logs.with_group("Coordinates", "", Vec::<String>::new(), |logs| {
