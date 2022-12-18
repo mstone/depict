@@ -2625,6 +2625,18 @@ pub mod layout {
         pub solved_locs: BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
     }
 
+    impl log::Log for BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> {
+        type Cx = ();
+
+        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_collection("solved_locs", "SolvedLocs", vec!["layout_problem".into()], self.iter(), |lvl, row, l| {
+                l.with_collection(format!("solved_locs[{lvl}]"), "SolvedLocs[i]", vec!["solved_locs".into()], row.iter(), |ohr, shr, l| {
+                    l.log_pair("solved_locs", "Loc", format!("{lvl}v, {ohr}h"), "SolvedHorizontalRank", format!("{lvl}v, {shr}s"))
+                })
+            })
+        }
+    }
+
     pub type RankedPaths<V> = BTreeMap<VerticalRank, SortedVec<(V, V)>>;
 
     /// Set up a [LayoutProblem] problem
@@ -3387,7 +3399,7 @@ pub mod geometry {
     use crate::graph_drawing::frontend::log;
 
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
-        type Cx = String;
+        type Cx = ();
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_collection("sol_by_loc", "SolByLoc", vec!["all_locs".into()], self.iter(), |(ovr, ohr), sol, l| {
                 // todo: use loc_to_node
@@ -3397,6 +3409,22 @@ pub mod geometry {
                     "Loc",
                     format!("{ovr}v, {ohr}h"),
                     "LocSol",
+                    format!("{sol}")
+                )
+            })
+        }
+    }
+
+    impl<V: Graphic + Display> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol> {
+        type Cx = ();
+
+        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_collection("sol_by_hop", "SolByHop", vec!["all_locs".into()], self.iter(), |(ovr, ohr, vl, wl), sol, l| {
+                l.log_pair(
+                    "sol_by_hop",
+                    "Loc",
+                    format!("{ovr}v, {ohr}h"),
+                    "HopSol",
                     format!("{sol}")
                 )
             })
@@ -4886,8 +4914,9 @@ pub mod frontend {
             // logs.log_string("VAL", val);
             val.log("VAL".into(), &mut logs);
             loc_to_node.log((), &mut logs);
-            sol_by_loc.log("sol_by_loc".into(), &mut logs);
-            logs.log_string("sol_by_hop", sol_by_hop);
+            sol_by_loc.log((), &mut logs);
+            sol_by_hop.log((), &mut logs);
+            solved_locs.log((), &mut logs);
             logs.log_string("solved_locs", solved_locs);
             logs.log_string("size_by_loc", size_by_loc);
             logs.log_string("size_by_hop", size_by_hop);
