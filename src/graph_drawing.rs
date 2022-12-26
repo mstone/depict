@@ -3586,6 +3586,20 @@ pub mod geometry {
         pd: Vec<Monomial<S, C>>, 
         q: Vec<Monomial<S, C>>,
     }
+
+    impl<S: Sol, C: Coeff> log::Log for OptimizationProblem<S, C> {
+        type Cx = String;
+
+        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_collection(cx.clone(), "OptimizationProblem.Vars", Vec::<String>::new(), self.v.iter(), |sol, var, l| {
+                l.log_pair(format!("{cx}.v"), "AnySol", format!("{sol}"), "Var", format!("v{}", var.index))
+            })?;
+            l.with_set(cx.clone(), "OptimizationProblem.Constraints", Vec::<String>::new(), self.c.iter(), |(lower, monomials, upper), l| {
+                // l.log_pair(format!("{cx}.c"), "AnySol", format!("{sol}"), "Var", format!("v{}", var.index))
+                Ok(())
+            })
+        }
+    }
     
     #[derive(Debug, Default)]
     pub struct GeometrySolution {
@@ -4804,6 +4818,18 @@ pub mod frontend {
                 Ok(())
             }
 
+            pub fn with_set<V, F>(&mut self, name: impl Into<String>, ty: impl Into<String>, ty_deps: Vec<String>, elements: impl IntoIterator<Item=(V)>, mut f: F) -> Result<(), Error> where F: FnMut(V, &mut Logger) -> Result<(), Error> {
+                let tx = or_insert(&mut self.ty_graph, &mut self.ty_node_to_ix, ty.into());
+                for ty_dep in ty_deps {
+                    let tdx = or_insert(&mut self.ty_graph, &mut self.ty_node_to_ix, ty_dep);
+                    self.ty_graph.add_edge(tdx, tx, ());
+                }
+                for v in elements.into_iter() {
+                    f(v, self)?
+                }
+                Ok(())
+            }
+
             pub fn log_pair(&mut self, collection: impl Into<String>, src_ty: impl Into<String>, src_val: impl Into<String>, dst_ty: impl Into<String>, dst_val: impl Into<String>) -> Result<(), Error> {
                 let collection = collection.into();
                 let src_ty = src_ty.into();
@@ -4941,7 +4967,7 @@ pub mod frontend {
             solved_locs.log((), &mut logs);
             size_by_loc.log((), &mut logs);
             size_by_hop.log((), &mut logs);
-            logs.log_string("horizontal_problem", horizontal_problem);
+            horizontal_problem.log("horizontal_problem".into(), &mut logs);
             logs.log_string("vertical_problem", vertical_problem);
             logs.with_group("Coordinates", "", Vec::<String>::new(), |logs| {
                 logs.log_string("rs", rs)?;
