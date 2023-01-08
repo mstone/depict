@@ -5524,7 +5524,7 @@ pub mod frontend {
             Some(cx.render(rsx!(children.into_iter())).unwrap())
         }
 
-        pub fn syntax_guide<P>(cx: Scope<P>) -> Result<VNode, anyhow::Error> {
+        pub fn syntax_guide<P>(cx: Scope<P>) -> Option<VNode> {
             cx.render(rsx!{
                 div {
                     div {

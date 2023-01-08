@@ -37,7 +37,7 @@ k [ - s b ]
 pub struct AppProps {
 }
 
-pub fn render_one<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Error> {
+pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
     match record {
         Record::String{name, ty, names, val} => {
             let ty = ty.unwrap_or("None".into());
@@ -61,7 +61,7 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Erro
     }
 }
 
-fn render_many<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Error> {
+fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
     match record {
         Record::String{..} => render_one(cx, record),
         Record::Group{name, ty, names, val} => {
@@ -97,7 +97,7 @@ fn render_many<P>(cx: Scope<P>, record: Record) -> Result<VNode, anyhow::Error> 
     }
 }
 
-pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Result<VNode, anyhow::Error> {
+pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
     let logs = drawing.logs;
     cx.render(rsx!{
         logs.into_iter().map(|r| render_many(cx, r))
