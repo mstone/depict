@@ -2571,7 +2571,7 @@ pub mod layout {
     impl<V: Graphic + Display> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
         type Cx = ();
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("loc_to_node", "LocToNode", self.iter(), |(ovr, ohr), loc, l| {
+            l.with_map("loc_to_node", "LocToNode", self.iter(), |(ovr, ohr), loc, l| {
                 match loc {
                     Loc::Node(process) => {
                         l.log_pair(
@@ -2632,8 +2632,8 @@ pub mod layout {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("solved_locs", "SolvedLocs", self.iter(), |lvl, row, l| {
-                l.with_collection(format!("solved_locs[{lvl}]"), "SolvedLocs[i]", row.iter(), |ohr, shr, l| {
+            l.with_map("solved_locs", "SolvedLocs", self.iter(), |lvl, row, l| {
+                l.with_map(format!("solved_locs[{lvl}]"), "SolvedLocs[i]", row.iter(), |ohr, shr, l| {
                     l.log_pair(
                         "solved_locs",
                         "Loc",
@@ -2657,6 +2657,7 @@ pub mod layout {
         paths_by_rank: &'s RankedPaths<V>,
         vcg: &Vcg<V, V>,
         hcg: Hcg<V>,
+        logs: &mut log::Logger,
     ) -> Result<LayoutProblem<V>, Error>
             where 
         V: Display + Graphic, 
@@ -3412,7 +3413,7 @@ pub mod geometry {
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
         type Cx = ();
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("sol_by_loc", "SolByLoc", self.iter(), |(ovr, ohr), sol, l| {
+            l.with_map("sol_by_loc", "SolByLoc", self.iter(), |(ovr, ohr), sol, l| {
                 // todo: use loc_to_node
                 // vec![format!("{ovr}v"), format!("{ohr}h")],
                 l.log_pair(
@@ -3432,7 +3433,7 @@ pub mod geometry {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("sol_by_hop", "SolByHop", self.iter(), |(ovr, ohr, vl, wl), sol, l| {
+            l.with_map("sol_by_hop", "SolByHop", self.iter(), |(ovr, ohr, vl, wl), sol, l| {
                 l.log_pair(
                     "sol_by_hop",
                     "Loc",
@@ -3450,7 +3451,7 @@ pub mod geometry {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("size_by_loc", "SizeByLoc", self.iter(), |(ovr, ohr), size, l| {
+            l.with_map("size_by_loc", "SizeByLoc", self.iter(), |(ovr, ohr), size, l| {
                 l.log_pair(
                     "size_by_loc",
                     "Loc",
@@ -3467,7 +3468,7 @@ pub mod geometry {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, vl, wl), size, l| {
+            l.with_map("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, vl, wl), size, l| {
                 l.log_pair(
                     "size_by_hop",
                     "Loc",
@@ -3623,7 +3624,7 @@ pub mod geometry {
         type Cx = String;
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection(cx.clone(), "OptimizationProblem.Vars", self.v.iter(), |sol, var, l| {
+            l.with_map(cx.clone(), "OptimizationProblem.Vars", self.v.iter(), |sol, var, l| {
                 l.log_pair(
                     format!("{cx}.v"),
                     "AnySol",
@@ -4701,7 +4702,7 @@ pub mod frontend {
         }
     }
 
-    pub fn render<'s>(data: Cow<'s, str>) -> Result<RenderCell, Error> {
+    pub fn render<'s, 't>(data: Cow<'s, str>, logs: &'t mut log::Logger) -> Result<RenderCell<'s>, Error> {
         RenderCell::try_new(data, |data| {
             let mut p = Parser::new();
             {
@@ -4778,7 +4779,7 @@ pub mod frontend {
 
             fixup_hcg_rank(&hcg, &mut paths_by_rank);
     
-            let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, hcg)?;
+            let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, hcg, logs)?;
 
             // ... adjust problem for horizontal edges
     
@@ -4842,7 +4843,7 @@ pub mod frontend {
                 }
             }
 
-            pub fn with_collection<K, V, F>(
+            pub fn with_map<K, V, F>(
                 &mut self,
                 name: impl Into<String>,
                 ty: impl Into<String>,
@@ -5008,7 +5009,11 @@ pub mod frontend {
 
         #[instrument(skip(data))]
         pub fn draw(data: String) -> Result<Drawing, Error> {
-            let render_cell = super::render(Cow::Owned(data))?;
+            use crate::graph_drawing::frontend::log;
+
+            let mut logs = log::Logger::new();
+
+            let render_cell = super::render(Cow::Owned(data), &mut logs)?;
             let depiction = render_cell.borrow_dependent();
             
             let val = &depiction.val;
@@ -5041,12 +5046,10 @@ pub mod frontend {
 
             let mut texts = vec![];
 
-            use crate::graph_drawing::frontend::log;
-
-            let mut logs = log::Logger::new();
             // Log the resolved value
             // logs.log_string("VAL", val);
             val.log("VAL".into(), &mut logs);
+            
             loc_to_node.log((), &mut logs);
             sol_by_loc.log((), &mut logs);
             sol_by_hop.log((), &mut logs);
