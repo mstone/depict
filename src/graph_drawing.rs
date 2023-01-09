@@ -2571,15 +2571,16 @@ pub mod layout {
     impl<V: Graphic + Display> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
         type Cx = ();
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("loc_to_node", "LocToNode", vec!["vx_rank".into(), "locs_by_level".into()], self.iter(), |(ovr, ohr), loc, l| {
+            l.with_collection("loc_to_node", "LocToNode", self.iter(), |(ovr, ohr), loc, l| {
                 match loc {
                     Loc::Node(process) => {
                         l.log_pair(
                             "loc_to_node",
                             "Loc",
+                            Vec::<String>::new(),
                             format!("{ovr}v, {ohr}h"),
                             "Loc::Node",
-                            // vec![format!("{ovr}v"), format!("{ohr}h"), format!("{process}")],
+                            vec![format!("{ovr}v"), format!("{ohr}h"), format!("{process}")],
                             format!("{process}"),
                         )
                     },
@@ -2587,9 +2588,10 @@ pub mod layout {
                         l.log_pair(
                             "loc_to_node",
                             "Loc",
+                            Vec::<String>::new(),
                             format!("{ovr}v, {ohr}h"),
                             "Loc::Hop",
-                            // vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}"), format!("{wl}"), format!("{lvl}v")],
+                            vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}"), format!("{wl}"), format!("{lvl}v")],
                             format!("{lvl}, {vl}->{wl}")
                         )
                     }
@@ -2597,9 +2599,10 @@ pub mod layout {
                         l.log_pair(
                             "loc_to_node",
                             "Loc",
+                            Vec::<String>::new(),
                             format!("{ovr}v, {ohr}h"),
                             "Loc::Border",
-                            // vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}")],
+                            vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}")],
                             format!("{vl}, {bovr}v, {bohr}h, {pair}p")
                         )
                     },
@@ -2629,9 +2632,17 @@ pub mod layout {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("solved_locs", "SolvedLocs", vec!["layout_problem".into()], self.iter(), |lvl, row, l| {
-                l.with_collection(format!("solved_locs[{lvl}]"), "SolvedLocs[i]", vec!["solved_locs".into()], row.iter(), |ohr, shr, l| {
-                    l.log_pair("solved_locs", "Loc", format!("{lvl}v, {ohr}h"), "SolvedHorizontalRank", format!("{lvl}v, {shr}s"))
+            l.with_collection("solved_locs", "SolvedLocs", self.iter(), |lvl, row, l| {
+                l.with_collection(format!("solved_locs[{lvl}]"), "SolvedLocs[i]", row.iter(), |ohr, shr, l| {
+                    l.log_pair(
+                        "solved_locs",
+                        "Loc",
+                        Vec::<String>::new(),
+                        format!("{lvl}v, {ohr}h"),
+                        "SolvedHorizontalRank",
+                        Vec::<String>::new(),
+                        format!("{lvl}v, {shr}s")
+                    )
                 })
             })
         }
@@ -3401,14 +3412,16 @@ pub mod geometry {
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
         type Cx = ();
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("sol_by_loc", "SolByLoc", vec!["all_locs".into()], self.iter(), |(ovr, ohr), sol, l| {
+            l.with_collection("sol_by_loc", "SolByLoc", self.iter(), |(ovr, ohr), sol, l| {
                 // todo: use loc_to_node
                 // vec![format!("{ovr}v"), format!("{ohr}h")],
                 l.log_pair(
                     "sol_by_loc",
                     "Loc",
+                    Vec::<String>::new(),
                     format!("{ovr}v, {ohr}h"),
                     "LocSol",
+                    Vec::<String>::new(),
                     format!("{sol}")
                 )
             })
@@ -3419,12 +3432,14 @@ pub mod geometry {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("sol_by_hop", "SolByHop", vec!["all_locs".into()], self.iter(), |(ovr, ohr, vl, wl), sol, l| {
+            l.with_collection("sol_by_hop", "SolByHop", self.iter(), |(ovr, ohr, vl, wl), sol, l| {
                 l.log_pair(
                     "sol_by_hop",
                     "Loc",
+                    Vec::<String>::new(),
                     format!("{ovr}v, {ohr}h"),
                     "HopSol",
+                    Vec::<String>::new(),
                     format!("{sol}")
                 )
             })
@@ -3435,8 +3450,15 @@ pub mod geometry {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("size_by_loc", "SizeByLoc", vec!["???".into()], self.iter(), |(ovr, ohr), size, l| {
-                l.log_pair("size_by_loc", "Loc", format!("{ovr}v, {ohr}h"), "NodeSize", format!("{size:?}"))
+            l.with_collection("size_by_loc", "SizeByLoc", self.iter(), |(ovr, ohr), size, l| {
+                l.log_pair(
+                    "size_by_loc",
+                    "Loc",
+                    Vec::<String>::new(),
+                    format!("{ovr}v, {ohr}h"),
+                    "NodeSize",
+                    Vec::<String>::new(),
+                    format!("{size:?}"))
             })
         }
     }
@@ -3445,8 +3467,16 @@ pub mod geometry {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection("size_by_hop", "SizeByHop", vec!["???".into()], self.iter(), |(ovr, ohr, vl, wl), size, l| {
-                l.log_pair("size_by_hop", "Loc", format!("{ovr}v, {ohr}h"), "HopSize", format!("{size:?}"))
+            l.with_collection("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, vl, wl), size, l| {
+                l.log_pair(
+                    "size_by_hop",
+                    "Loc",
+                    Vec::<String>::new(),
+                    format!("{ovr}v, {ohr}h"),
+                    "HopSize",
+                    Vec::<String>::new(),
+                    format!("{size:?}")
+                )
             })
         }
     }
@@ -3587,15 +3617,33 @@ pub mod geometry {
         q: Vec<Monomial<S, C>>,
     }
 
+    use std::fmt::Write;
+
     impl<S: Sol, C: Coeff> log::Log for OptimizationProblem<S, C> {
         type Cx = String;
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_collection(cx.clone(), "OptimizationProblem.Vars", Vec::<String>::new(), self.v.iter(), |sol, var, l| {
-                l.log_pair(format!("{cx}.v"), "AnySol", format!("{sol}"), "Var", format!("v{}", var.index))
+            l.with_collection(cx.clone(), "OptimizationProblem.Vars", self.v.iter(), |sol, var, l| {
+                l.log_pair(
+                    format!("{cx}.v"),
+                    "AnySol",
+                    Vec::<String>::new(),
+                    format!("{sol}"),
+                    "Var",
+                    Vec::<String>::new(),
+                    format!("v{}", var.index)
+                )
             })?;
-            l.with_set(cx.clone(), "OptimizationProblem.Constraints", Vec::<String>::new(), self.c.iter(), |(lower, monomials, upper), l| {
-                // l.log_pair(format!("{cx}.c"), "AnySol", format!("{sol}"), "Var", format!("v{}", var.index))
+            l.with_set(cx.clone(), "OptimizationProblem.Constraints", self.c.iter(), |(lower, monomials, upper), l| {
+                let mut s = String::new();
+                write!(s, "{lower} <= ");
+                for term in monomials.iter() {
+                    write!(s, "{term} ");
+                }
+                if *upper != f64::INFINITY {
+                    writeln!(s, "<= {upper}");
+                }
+                l.log_element(format!("{cx}.c"), "Constraint", Vec::<String>::new(), s)?;
                 Ok(())
             })
         }
@@ -3719,7 +3767,8 @@ pub mod geometry {
         let OptimizationProblem{v, c, pd, q} = optimization_problem;
 
         let settings = &osqp::Settings::default()
-            .adaptive_rho(false)
+            // .adaptive_rho(false)
+            // .rho(6.)
             // .check_termination(Some(200))
             // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
             // .adaptive_rho_interval(Some(25))
@@ -4763,16 +4812,11 @@ pub mod frontend {
     }
 
     pub mod log {
-        use std::collections::HashMap;
-
-        use petgraph::{Graph, graph::NodeIndex, dot::Dot};
-
-        use crate::graph_drawing::layout::or_insert;
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Record {
-            String { name: String, ty: Option<String>, names: Vec<String>, val: String, },
-            Group { name: String, ty: Option<String>, names: Vec<String>, val: Vec<Record>, },
+            String { name: Option<String>, ty: Option<String>, names: Vec<String>, val: String, },
+            Group { name: Option<String>, ty: Option<String>, names: Vec<String>, val: Vec<Record>, },
         }
 
         #[derive(Clone, Debug, thiserror::Error)]
@@ -4789,88 +4833,130 @@ pub mod frontend {
         #[derive(Clone, Debug, Default)]
         pub struct Logger {
             logs: Vec<Record>,
-            ty_graph: Graph<String, ()>,
-            ty_node_to_ix: HashMap<String, NodeIndex>,
-            val_graph: Graph<(String, String), String>,
-            val_node_to_ix: HashMap<(String, String), NodeIndex>,
         }
 
         impl Logger {
             pub fn new() -> Self {
                 Self { 
                     logs: vec![],
-                    ty_graph: Graph::new(),
-                    ty_node_to_ix: HashMap::new(),
-                    val_graph: Graph::new(),
-                    val_node_to_ix: HashMap::new(),
                 }
             }
 
-            pub fn with_collection<K, V, F>(&mut self, name: impl Into<String>, ty: impl Into<String>, ty_deps: Vec<String>, pairs: impl IntoIterator<Item=(K, V)>, mut f: F) -> Result<(), Error> where F: FnMut(K, V, &mut Logger) -> Result<(), Error> {
-                let tx = or_insert(&mut self.ty_graph, &mut self.ty_node_to_ix, ty.into());
-                for ty_dep in ty_deps {
-                    let tdx = or_insert(&mut self.ty_graph, &mut self.ty_node_to_ix, ty_dep);
-                    self.ty_graph.add_edge(tdx, tx, ());
-                }
-                for (k, v) in pairs.into_iter() {
-                    f(k, v, self)?
-                }
+            pub fn with_collection<K, V, F>(
+                &mut self,
+                name: impl Into<String>,
+                ty: impl Into<String>,
+                pairs: impl IntoIterator<Item=(K, V)>,
+                mut f: F
+            ) -> Result<(), Error> where 
+                F: FnMut(K, V, &mut Logger) -> Result<(), Error> 
+            {
+                self.with_group(ty.into(), name.into(), Vec::<String>::new(), |l| {
+                    for (k, v) in pairs.into_iter() {
+                        f(k, v, l)?
+                    }
+                    Ok(())
+                })?;
                 Ok(())
             }
 
-            pub fn with_set<V, F>(&mut self, name: impl Into<String>, ty: impl Into<String>, ty_deps: Vec<String>, elements: impl IntoIterator<Item=(V)>, mut f: F) -> Result<(), Error> where F: FnMut(V, &mut Logger) -> Result<(), Error> {
-                let tx = or_insert(&mut self.ty_graph, &mut self.ty_node_to_ix, ty.into());
-                for ty_dep in ty_deps {
-                    let tdx = or_insert(&mut self.ty_graph, &mut self.ty_node_to_ix, ty_dep);
-                    self.ty_graph.add_edge(tdx, tx, ());
-                }
-                for v in elements.into_iter() {
-                    f(v, self)?
-                }
+            pub fn with_set<V, F>(
+                &mut self,
+                name: impl Into<String>,
+                ty: impl Into<String>,
+                elements: impl IntoIterator<Item=V>,
+                mut f: F
+            ) -> Result<(), Error> where 
+                F: FnMut(V, &mut Logger) -> Result<(), Error> 
+            {
+                self.with_group(ty.into(), name.into(), Vec::<String>::new(), |l| {
+                    for v in elements.into_iter() {
+                        f(v, l)?
+                    }
+                    Ok(())
+                })?;
                 Ok(())
             }
 
-            pub fn log_pair(&mut self, collection: impl Into<String>, src_ty: impl Into<String>, src_val: impl Into<String>, dst_ty: impl Into<String>, dst_val: impl Into<String>) -> Result<(), Error> {
+            pub fn log_pair(
+                &mut self, 
+                collection: impl Into<String>,
+                src_ty: impl Into<String>,
+                src_names: Vec<impl Into<String>>,
+                src_val: impl Into<String>,
+                dst_ty: impl Into<String>,
+                dst_names: Vec<impl Into<String>>,
+                dst_val: impl Into<String>
+            ) -> Result<(), Error> {
                 let collection = collection.into();
                 let src_ty = src_ty.into();
+                let mut src_names = src_names.into_iter().map(|n| n.into()).collect::<Vec<String>>();
                 let src_val = src_val.into();
                 let dst_ty = dst_ty.into();
+                let mut dst_names = dst_names.into_iter().map(|n| n.into()).collect::<Vec<String>>();
                 let dst_val = dst_val.into();
-                let sx = or_insert(&mut self.val_graph, &mut self.val_node_to_ix, (src_ty, src_val));
-                let dx = or_insert(&mut self.val_graph, &mut self.val_node_to_ix, (dst_ty, dst_val));
-                self.val_graph.add_edge(sx, dx, collection);
+                src_names.append(&mut dst_names);
+                self.logs.push(Record::String{
+                    name: None,
+                    ty: Some(format!("{src_ty}->{dst_ty}")),
+                    names: src_names, 
+                    val: format!("{src_val} -> {dst_val}")
+                });
                 Ok(())
             }
 
-            pub fn log_names(&mut self, name: impl Into<String>, ty: Option<String>, names: Vec<impl Into<String>>, val: impl std::fmt::Debug) -> Result<(), Error> {
-                self.logs.push(Record::String{name: name.into(), ty, names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), val: format!("{val:#?}")});
+            pub fn log_element(
+                &mut self, 
+                collection: impl Into<String>, 
+                ty: impl Into<String>, 
+                names: Vec<impl Into<String>>, 
+                val: impl Into<String>
+            ) -> Result<(), Error> {
+                let collection = collection.into();
+                let ty = ty.into();
+                let names = names.into_iter().map(|n| n.into()).collect::<Vec<String>>();
+                let val = val.into();
+                self.logs.push(Record::String{
+                    name: None,
+                    ty: Some(ty),
+                    names,
+                    val,
+                });
                 Ok(())
             }
 
             pub fn log_string(&mut self, name: impl Into<String>, val: impl std::fmt::Debug) -> Result<(), Error> {
-                self.logs.push(Record::String{name: name.into(), ty: None, names: vec![], val: format!("{val:#?}")});
+                self.logs.push(Record::String{
+                    name: Some(name.into()),
+                    ty: None, 
+                    names: vec![], 
+                    val: format!("{val:#?}")
+                });
                 Ok(())
             }
 
-            pub fn with_group<F>(&mut self, ty: impl Into<String>, name: impl Into<String>, names: Vec<impl Into<String>>, f: F) -> Result<(), Error> where F: FnOnce(&mut Logger) -> Result<(), Error> {
+            pub fn with_group<F>(
+                &mut self, 
+                ty: impl Into<String>, 
+                name: impl Into<String>, 
+                names: Vec<impl Into<String>>, 
+                f: F
+            ) -> Result<(), Error> where 
+                F: FnOnce(&mut Logger) -> Result<(), Error> 
+            {
                 let mut nested_logger = Logger::new();
                 f(&mut nested_logger)?;
-                self.logs.push(Record::Group{name: name.into(), ty: Some(ty.into()), names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), val: nested_logger.logs});
+                self.logs.push(Record::Group{
+                    name: Some(name.into()),
+                    ty: Some(ty.into()), 
+                    names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), 
+                    val: nested_logger.logs
+                });
                 Ok(())
             }
 
             pub fn to_vec(self) -> Vec<Record> {
                 self.logs
-            }
-
-            pub fn ty_dot(&self) -> String {
-                let ty_dot = Dot::new(&self.ty_graph);
-                format!("{ty_dot:?}")
-            }
-
-            pub fn val_dot(&self) -> String {
-                let val_dot = Dot::new(&self.val_graph);
-                format!("{val_dot:?}")
             }
         }
     }
@@ -4968,19 +5054,13 @@ pub mod frontend {
             size_by_loc.log((), &mut logs);
             size_by_hop.log((), &mut logs);
             horizontal_problem.log("horizontal_problem".into(), &mut logs);
-            logs.log_string("vertical_problem", vertical_problem);
+            vertical_problem.log("vertical_problem".into(), &mut logs);
             logs.with_group("Coordinates", "", Vec::<String>::new(), |logs| {
                 logs.log_string("rs", rs)?;
                 logs.log_string("ls", ls)?;
                 logs.log_string("bs", bs)?;
                 logs.log_string("ts", ts)
             });
-
-            let ty_dot = logs.ty_dot();
-            eprintln!("TY DOT:\n{ty_dot}");
-
-            let val_dot = logs.val_dot();
-            eprintln!("VAL DOT:\n{val_dot}");
 
             let mut logs = logs.to_vec();
             logs.reverse();

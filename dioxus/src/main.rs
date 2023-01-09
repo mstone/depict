@@ -42,14 +42,18 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
         Record::String{name, ty, names, val} => {
             let ty = ty.unwrap_or("None".into());
             let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
+            // let key = format!("debug_{ty}_{name}");
+            // eprintln!("KEY: {key}");
             cx.render(rsx!{
                 div {
-                    key: "debug_{ty}_{name}",
+                    // key: "debug_{ty}_{name}",
                     class: "{classes}",
-                    div {
-                        style: "font-weight: 700;",
-                        "{name}"
-                    }
+                    name.map(|name| rsx!{
+                        div {
+                            style: "font-weight: 700;",
+                            "{name}"
+                        }
+                    }),
                     div {
                         style: "white-space: pre; margin-left: 10px;",
                         "{val}"
@@ -67,24 +71,29 @@ fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
         Record::Group{name, ty, names, val} => {
             let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
             let ty2 = ty.clone().unwrap_or("None".into());
-            eprintln!("LOG: record: {name} {ty:?} {names:#?}");
+            // let key = format!("debug_{ty2}_{name}");
+            // eprintln!("KEY: {key}");
             cx.render(rsx!{
                 div {
-                    key: "debug_{ty2}_{name}",
+                    style: "margin-right: 20px;",
+                    // key: "debug_{ty2}_{name}",
                     class: "{classes}",
                     details {
                         style: "padding-left: 4px;",
                         open: "true",
                         summary {
+                            style: "white-space: nowrap;",
                             ty.map(|ty| rsx!{
                                 span {
                                     style: "font-weight: 700;",
                                     "{ty}: ",
                                 }
                             }),
-                            span {
-                                "{name}"
-                            }
+                            name.map(|name| rsx!{
+                                span {
+                                    "{name}"
+                                }
+                            }),
                         }
                         div {
                             style: "white-space: pre; margin-left: 10px; border-left: 1px gray solid;",
@@ -212,7 +221,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let nodes = render(cx, drawing.get().clone());
     let logs = render_logs(cx, drawing.get().clone());
 
-    let mut show_logs = use_state(&cx, || false);
+    let mut show_logs = use_state(&cx, || true);
 
     model_sender.send(model.get().clone());
 
