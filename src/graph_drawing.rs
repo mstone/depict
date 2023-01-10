@@ -2374,41 +2374,16 @@ pub mod layout {
         logs: &mut log::Logger,
     ) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
         let mut paths_fw = Ok(HashMap::new());
-
-        struct CostFunction<'s, 'l, 'd, V: Graphic + Display + log::Name, E, D: Fn(&V, &V, &mut log::Logger) -> isize> {
-            dag: &'s Graph<V, E>,
-            logs: &'l mut log::Logger,
-            distance: &'d D,
-        }
-
-        impl<'s, 'l, 'd, V: Graphic + Display + log::Name, E, D: Fn(&V, &V, &mut log::Logger) -> isize> FnOnce<(EdgeReference<'s, E>,)> for CostFunction<'s, 'l, 'd, V, E, D> {
-            type Output = isize;
-
-            extern "rust-call" fn call_once(mut self, args: (EdgeReference<'s, E>,)) -> Self::Output {
-                (&mut self)(args.0)
-            }
-        }
-
-        impl<'s, 'l, 'd, V: Graphic + Display + log::Name, E, D: Fn(&V, &V, &mut log::Logger) -> isize> FnMut<(EdgeReference<'s, E>,)> for CostFunction<'s, 'l, 'd, V, E, D> {
-            extern "rust-call" fn call_mut(&mut self, args: (EdgeReference<'s, E>,)) -> Self::Output {
-                let er = args.0;
-                let src = self.dag.node_weight(er.source()).unwrap();
-                let dst = self.dag.node_weight(er.target()).unwrap();
-                let dist = (self.distance)(src, dst, self.logs);
-                eprintln!("DISTANCE MUT: {src:?} {dst:?} {dist:?}");
-                dist
-            }
-        }
-
         logs.with_group("(V,V)->(isize, reason)", "floyd_warshall", Vec::<String>::new(), {
-            let paths_fw = &mut paths_fw;
-            move |mut l| {
-                let cost_function = CostFunction{
-                    dag: dag,
-                    logs: l,
-                    distance: &distance,
-                };
-                *paths_fw = floyd_warshall(&dag, cost_function);
+            |mut l| {
+                fn constrain<'s, E: 's, F: FnMut(EdgeReference<'s, E>) -> isize>(f: F) -> F { f };
+                paths_fw = floyd_warshall(&dag, constrain(|er: EdgeReference<'s, E>| {
+                    let src = dag.node_weight(er.source()).unwrap();
+                    let dst = dag.node_weight(er.target()).unwrap();
+                    let dist = distance(src, dst, l);
+                    eprintln!("DISTANCE MUT: {src:?} {dst:?} {dist:?}");
+                    dist
+                }));
                 Ok(())
             }
         });
