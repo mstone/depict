@@ -8,6 +8,8 @@
 //! "depict-expressions" ("depictions") to "pictures". It is implemented as a 
 //! library for easy use by downstream packages like depict's desktop and web
 //! front-ends.
+#![feature(unboxed_closures)]
+#![feature(fn_traits)]
 pub mod printer {
     //! A pretty-printer for "depiction" parse trees
     //! 

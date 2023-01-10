@@ -942,7 +942,7 @@ pub mod eval {
             let index_entry = self.names.entry(rhs_name.clone());
             match index_entry {
                 Occupied(oe) => {
-                    let mut existing_process = self.processes.get_mut(*oe.get()).unwrap();
+                    let existing_process = self.processes.get_mut(*oe.get()).unwrap();
                     merge(existing_process, &mut rhs);
                 },
                 Vacant(ve) => {
@@ -2032,7 +2032,7 @@ pub mod layout {
         vcg.containers.insert(parent.clone());
     }
 
-    pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>, hcg: &'t Hcg<Cow<'s, str>>) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
+    pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>, hcg: &'t Hcg<Cow<'s, str>>, logs: &mut log::Logger) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
         let vert = Graph::<Cow<str>, Cow<str>>::new();
         let vert_vxmap = HashMap::<Cow<str>, NodeIndex>::new();
         let vert_node_labels = HashMap::new();
@@ -2273,19 +2273,43 @@ pub mod layout {
                 let containers = &vcg.containers;
                 let nodes_by_container = &vcg.nodes_by_container;
                 let container_depths = &container_depths;
-                |src, dst| {
+                |src: &Cow<str>, dst: &Cow<str>, l: &mut log::Logger| {
                     if !containers.contains(src) {
+                        l.log_pair(
+                            "(V, V)",
+                            names![src, dst],
+                            format!("{}, {}", src, dst),
+                            "isize, &str",
+                            vec![],
+                            format!("-1, not-container")
+                        );
                         -1
                     } else {
                         if nodes_by_container[src].contains(dst) {
+                            l.log_pair(
+                                "(V, V)",
+                                names![src, dst],
+                                format!("{}, {}", src, dst),
+                                "isize, &str",
+                                vec![],
+                                format!("0, contains")
+                            );
                             0
                         } else {
+                            l.log_pair(
+                                "(V, V)",
+                                names![src, dst],
+                                format!("{}, {}", src, dst),
+                                "isize, &str",
+                                vec![],
+                                format!("{}, container_depths", -(container_depths[src] as isize))
+                            );
                             -(container_depths[src] as isize)
                         }
                     }
                 }
             };
-            let subpaths_by_rank = rank(&subdag, &subroots, distance)?;
+            let subpaths_by_rank = rank(&subdag, &subroots, distance, logs)?;
             let depth = std::cmp::max(1, subpaths_by_rank.len());
             container_depths.insert(vl.clone(), depth);
             eprintln!("CONTAINER {vl}");
@@ -2343,21 +2367,54 @@ pub mod layout {
     /// Rank a `dag`, starting from `roots`, by finding longest paths
     /// from the roots to each node, e.g., using Floyd-Warshall with
     /// negative weights.
-    pub fn rank<'s, V: Graphic, E>(
+    pub fn rank<'s, V: Graphic + Display + log::Name, E>(
         dag: &'s Graph<V, E>, 
         roots: &'s SortedVec<V>,
-        distance: impl Fn(&'s V, &'s V) -> isize,
+        distance: impl Fn(&V, &V, &mut log::Logger) -> isize,
+        logs: &mut log::Logger,
     ) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
-        let paths_fw = floyd_warshall(&dag, |er| {
-            let src = dag.node_weight(er.source()).unwrap();
-            let dst = dag.node_weight(er.target()).unwrap();
-            let dist = distance(src, dst);
-            eprintln!("DISTANCE: {src:?} {dst:?} {dist:?}");
-            dist
-        })
-            .map_err(|cycle| 
-                Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
-            )?;
+        let mut paths_fw = Ok(HashMap::new());
+
+        struct CostFunction<'s, 'l, 'd, V: Graphic + Display + log::Name, E, D: Fn(&V, &V, &mut log::Logger) -> isize> {
+            dag: &'s Graph<V, E>,
+            logs: &'l mut log::Logger,
+            distance: &'d D,
+        }
+
+        impl<'s, 'l, 'd, V: Graphic + Display + log::Name, E, D: Fn(&V, &V, &mut log::Logger) -> isize> FnOnce<(EdgeReference<'s, E>,)> for CostFunction<'s, 'l, 'd, V, E, D> {
+            type Output = isize;
+
+            extern "rust-call" fn call_once(mut self, args: (EdgeReference<'s, E>,)) -> Self::Output {
+                (&mut self)(args.0)
+            }
+        }
+
+        impl<'s, 'l, 'd, V: Graphic + Display + log::Name, E, D: Fn(&V, &V, &mut log::Logger) -> isize> FnMut<(EdgeReference<'s, E>,)> for CostFunction<'s, 'l, 'd, V, E, D> {
+            extern "rust-call" fn call_mut(&mut self, args: (EdgeReference<'s, E>,)) -> Self::Output {
+                let er = args.0;
+                let src = self.dag.node_weight(er.source()).unwrap();
+                let dst = self.dag.node_weight(er.target()).unwrap();
+                let dist = (self.distance)(src, dst, self.logs);
+                eprintln!("DISTANCE MUT: {src:?} {dst:?} {dist:?}");
+                dist
+            }
+        }
+
+        logs.with_group("(V,V)->(isize, reason)", "floyd_warshall", Vec::<String>::new(), {
+            let paths_fw = &mut paths_fw;
+            move |mut l| {
+                let cost_function = CostFunction{
+                    dag: dag,
+                    logs: l,
+                    distance: &distance,
+                };
+                *paths_fw = floyd_warshall(&dag, cost_function);
+                Ok(())
+            }
+        });
+        let paths_fw = paths_fw.map_err(|cycle|
+            Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
+        )?;
 
         let paths_fw2 = SortedVec::from_unsorted(
             paths_fw
@@ -3426,7 +3483,7 @@ pub mod geometry {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, vl, wl), size, l| {
+            l.with_map("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, _vl, _wl), size, l| {
                 l.log_pair(
                     "Loc",
                     names![ovr, ohr],
@@ -3600,7 +3657,7 @@ pub mod geometry {
                 if *upper != f64::INFINITY {
                     writeln!(s, "<= {upper}");
                 }
-                l.log_element(format!("{cx}.c"), "Constraint", Vec::<String>::new(), s)?;
+                l.log_element("Constraint", Vec::<String>::new(), s)?;
                 Ok(())
             })
         }
@@ -4458,8 +4515,8 @@ pub mod geometry {
         horizontal_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>, 
         vertical_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>
     ) -> Result<GeometrySolution, Error> { 
-        let OptimizationProblem{v: vh, c: ch, pd: pdh, q: qh} = horizontal_problem;
-        let OptimizationProblem{v: vv, c: cv, pd: pdv, q: qv} = vertical_problem;
+        let OptimizationProblem{v: vh, ..} = horizontal_problem;
+        let OptimizationProblem{v: vv, ..} = vertical_problem;
 
         eprintln!("SOLVE HORIZONTAL");
         let solutions_h = solve_problem(&horizontal_problem)?;
@@ -4699,7 +4756,7 @@ pub mod frontend {
             eprintln!("RESOLVE: {val:#?}");
     
             let hcg = calculate_hcg(&val)?;
-            let vcg = calculate_vcg(&val, &hcg)?;
+            let vcg = calculate_vcg(&val, &hcg, logs)?;
 
             event!(Level::TRACE, ?val, "HCG");
             eprintln!("HCG {hcg:#?}");
@@ -4715,7 +4772,7 @@ pub mod frontend {
                 let containers = &containers;
                 let nodes_by_container = &nodes_by_container;
                 let container_depths = &container_depths;
-                |src: &Cow<str>, dst: &Cow<str>| {
+                |src: &Cow<str>, dst: &Cow<str>, l: &mut log::Logger| {
                     if !containers.contains(src) {
                         // if hcg.constraints.contains(&HorizontalConstraint{a: src.clone(), b: dst.clone()})
                         // || hcg.constraints.contains(&HorizontalConstraint{a: dst.clone(), b: src.clone()}) {
@@ -4723,21 +4780,58 @@ pub mod frontend {
                         // } else {
                         //     -1
                         // }
+                        l.log_pair(
+                            "(V, V)",
+                            names![src, dst],
+                            format!("{}, {}", src, dst),
+                            "isize, &str",
+                            vec![],
+                            format!("-1, src-not-container")
+                        );
                         -1
                     } else {
                         if nodes_by_container[src].contains(dst) {
+                            l.log_pair(
+                                "(V, V)",
+                                names![src, dst],
+                                format!("{}, {}", src, dst),
+                                "isize, &str",
+                                vec![],
+                                format!("0, src-contains-dst")
+                            );
                             0
                         } else {
+                            l.log_pair(
+                                "(V, V)",
+                                names![src, dst],
+                                format!("{}, {}", src, dst),
+                                "isize, &str",
+                                vec![],
+                                format!("{}, container_depths", -(container_depths[src] as isize))
+                            );
                             -(container_depths[src] as isize)
                         }
                     }
                 }
             };
-            let mut paths_by_rank = rank(condensed, &roots, distance)?;
+            let mut paths_by_rank = rank(condensed, &roots, distance, logs)?;
+
+            logs.with_map("paths_by_rank", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
+                l.with_map(format!("paths_by_rank[{rank}]"), "SortedVec<(V, V)>", paths.iter().map(|p| (&p.0, &p.1)), |from, to, l| {
+                    l.log_pair(
+                        "V",
+                        names![from],
+                        format!("{from}"),
+                        "V",
+                        names![to],
+                        format!("{to}"),
+                    )
+                })
+            });
 
             fixup_hcg_rank(&hcg, &mut paths_by_rank);
 
-            logs.with_map("paths_by_rank", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
+            logs.with_map("paths_by_rank + hcg fixups", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
                 l.with_map(format!("paths_by_rank[{rank}]"), "SortedVec<(V, V)>", paths.iter().map(|p| (&p.0, &p.1)), |from, to, l| {
                     l.log_pair(
                         "V",
@@ -4921,13 +5015,11 @@ pub mod frontend {
             }
 
             pub fn log_element(
-                &mut self, 
-                collection: impl Into<String>, 
-                ty: impl Into<String>, 
-                names: Vec<impl Into<String>>, 
+                &mut self,
+                ty: impl Into<String>,
+                names: Vec<impl Into<String>>,
                 val: impl Into<String>
             ) -> Result<(), Error> {
-                let collection = collection.into();
                 let ty = ty.into();
                 let names = names.into_iter().map(|n| n.into()).collect::<Vec<String>>();
                 let val = val.into();
