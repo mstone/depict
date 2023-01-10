@@ -4508,6 +4508,8 @@ pub mod frontend {
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val};
 
+    use log::{names, Names};
+
     pub fn estimate_widths<I>(
         vcg: &Vcg<I, I>, 
         cvcg: &Cvcg<I, I>,
@@ -4734,6 +4736,19 @@ pub mod frontend {
             let mut paths_by_rank = rank(condensed, &roots, distance)?;
 
             fixup_hcg_rank(&hcg, &mut paths_by_rank);
+
+            logs.with_map("paths_by_rank", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
+                l.with_map(format!("paths_by_rank[{rank}]"), "SortedVec<(V, V)>", paths.iter().map(|p| (&p.0, &p.1)), |from, to, l| {
+                    l.log_pair(
+                        "V",
+                        names![from],
+                        format!("{from}"),
+                        "V",
+                        names![to],
+                        format!("{to}"),
+                    )
+                })
+            });
     
             let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, hcg, logs)?;
 
