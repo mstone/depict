@@ -83,15 +83,15 @@ fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
                         open: "true",
                         summary {
                             style: "white-space: nowrap;",
+                            name.map(|name| rsx!{
+                                span {
+                                    "{name}: "
+                                }
+                            }),
                             ty.map(|ty| rsx!{
                                 span {
                                     style: "font-weight: 700;",
-                                    "{ty}: ",
-                                }
-                            }),
-                            name.map(|name| rsx!{
-                                span {
-                                    "{name}"
+                                    "{ty}",
                                 }
                             }),
                         }

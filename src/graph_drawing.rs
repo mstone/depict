@@ -303,160 +303,58 @@ pub mod index {
 
     use derive_more::{From, Into};
 
-    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct VerticalRank(pub usize);
+    use super::frontend::log;
 
-    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct OriginalHorizontalRank(pub usize);
+    macro_rules! impl_index {
+        ($index_name:ident, $tag:literal) => {
+            #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
+            pub struct $index_name(pub usize);
 
-    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct SolvedHorizontalRank(pub usize);
+            impl Debug for $index_name {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}{}", self.0, $tag)
+                }
+            }
 
-    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct LocSol(pub usize);
+            impl Display for $index_name {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}", self.0)
+                }
+            }
 
-    #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
-    pub struct HopSol(pub usize);
+            impl log::Name for $index_name {
+                fn name(&self) -> String {
+                    format!("{:?}", self)
+                }
+            }
 
-    impl Debug for VerticalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}_vr", self.0)
-        }
+            impl Add<usize> for $index_name {
+                type Output = Self;
+
+                fn add(self, rhs: usize) -> Self::Output {
+                    Self(self.0 + rhs)
+                }
+            }
+
+            impl Sub<usize> for $index_name {
+                type Output = Self;
+
+                fn sub(self, rhs: usize) -> Self::Output {
+                    Self(self.0 - rhs)
+                }
+            }
+        };
     }
 
-    impl Debug for OriginalHorizontalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}_ohr", self.0)
-        }
-    }
+    impl_index!(VerticalRank, "v");
+    
+    impl_index!(OriginalHorizontalRank, "h");
 
-    impl Debug for SolvedHorizontalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}_shr", self.0)
-        }
-    }
+    impl_index!(SolvedHorizontalRank, "s");
 
-    impl Debug for LocSol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}_ls", self.0)
-        }
-    }
+    impl_index!(LocSol, "ls");
 
-    impl Debug for HopSol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}_hs", self.0)
-        }
-    }
-
-    impl Add<usize> for VerticalRank {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Add<usize> for OriginalHorizontalRank {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Add<usize> for SolvedHorizontalRank {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Add<usize> for LocSol {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Add<usize> for HopSol {
-        type Output = Self;
-
-        fn add(self, rhs: usize) -> Self::Output {
-            Self(self.0 + rhs)
-        }
-    }
-
-    impl Sub<usize> for VerticalRank {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Sub<usize> for OriginalHorizontalRank {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Sub<usize> for SolvedHorizontalRank {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Sub<usize> for LocSol {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Sub<usize> for HopSol {
-        type Output = Self;
-
-        fn sub(self, rhs: usize) -> Self::Output {
-            Self(self.0 - rhs)
-        }
-    }
-
-    impl Display for VerticalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
-
-    impl Display for OriginalHorizontalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
-
-    impl Display for SolvedHorizontalRank {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
-
-    impl Display for LocSol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
-
-    impl Display for HopSol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_fmt(format_args!("{}", self.0))
-        }
-    }
+    impl_index!(HopSol, "hs");
 
 }
 
@@ -1291,6 +1189,8 @@ pub mod osqp {
     #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
     use osqp_rust as osqp;
 
+    use crate::graph_drawing::frontend::log::{self, names, Names};
+
     /// A map from Sols to Vars. `get()`ing an not-yet-seen sol 
     /// allocates a new `Var` for that sol and returns a monomial
     /// containing that sol with a 1.0 coefficient.
@@ -1479,9 +1379,9 @@ pub mod osqp {
     }
 
     /// Used to define indexed families of variables
-    pub trait Sol: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd {}
+    pub trait Sol: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd + log::Names<'static> {}
 
-    impl<S: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd> Sol for S {}
+    impl<S: Clone + Copy + Debug + Display + Eq + Fresh + Hash + Ord + PartialEq + PartialOrd + log::Names<'static>> Sol for S {}
 
     /// Convert `rows` into an `osqp::CscMatrix` in "compressed sparse column" format.
     fn as_csc_matrix<'s, S: Sol, C: Coeff>(nrows: Option<usize>, ncols: Option<usize>, rows: &[&[Monomial<S, C>]]) -> osqp::CscMatrix<'s> {
@@ -1605,6 +1505,12 @@ pub mod osqp {
     pub struct Var<S: Sol> {
         pub index: usize,
         pub sol: S,
+    }
+
+    impl<'n, S: Sol> log::Names<'n> for Var<S> {
+        fn names(&self) -> Vec<Box<dyn log::Name + 'n>> {
+            self.sol.names()
+        }
     }
 
     /// A weighted optimization variable
@@ -1761,6 +1667,7 @@ pub mod layout {
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::eval::{Val, self, Body};
+    use crate::graph_drawing::frontend::log::{names, Name, Names};
     use crate::graph_drawing::graph::roots;
 
     #[derive(Clone, Debug, Default)]
@@ -2503,7 +2410,7 @@ pub mod layout {
 
     /// A graphical object to be positioned relative to other objects
     #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
-    pub enum Loc<V: Graphic + Display, E: Graphic + Display> {
+    pub enum Loc<V: Graphic + Display + log::Name, E: Graphic + Display + log::Name> {
         /// A "box"
         Node(V),
         /// One hop of an "arrow"
@@ -2512,12 +2419,36 @@ pub mod layout {
         Border(Border<V>)
     }
 
-    impl<V: Graphic + Display, E: Graphic + Display> Debug for Loc<V, E> {
+    impl<V: Graphic + Display + log::Name, E: Graphic + Display + log::Name> Debug for Loc<V, E> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
                 Self::Node(arg0) => write!(f, "Node({})", arg0),
                 Self::Hop(arg0, arg1, arg2) => write!(f, "Hop({}, {}, {})", arg0, arg1, arg2),
                 Self::Border(arg0) => write!(f, "Border({})", arg0),
+            }
+        }
+    }
+
+    impl<'n, V, E> log::Names<'n> for Loc<V, E>
+    where 
+        V: Graphic + Display + log::Name + 'n,
+        E: Graphic + Display + log::Name + 'n,
+    {
+        fn names(&self) -> Vec<Box<dyn log::Name + 'n>> {
+            match self {
+                Loc::Node(wl) => {
+                    let mut v = Vec::<Box<dyn log::Name + 'n>>::new();
+                    let wl = wl.clone();
+                    let b = Box::new(wl);
+                    v.push(b);
+                    v
+                },
+                Loc::Hop(rank, vl, wl) => {
+                    names![rank, vl, wl]
+                },
+                Loc::Border(Border{vl, ovr, ohr, pair}) => {
+                    names![vl, ovr, ohr, pair]
+                },
             }
         }
     }
@@ -2568,41 +2499,38 @@ pub mod layout {
         }
     }
 
-    impl<V: Graphic + Display> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
+    impl<V: Graphic + Display + log::Name> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
         type Cx = ();
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map("loc_to_node", "LocToNode", self.iter(), |(ovr, ohr), loc, l| {
+            l.with_map("loc_to_node", "LocToNode", self.iter(), |loc_ix, loc, l| {
                 match loc {
                     Loc::Node(process) => {
                         l.log_pair(
-                            "loc_to_node",
                             "Loc",
-                            Vec::<String>::new(),
-                            format!("{ovr}v, {ohr}h"),
+                            loc_ix.names(),
+                            format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
                             "Loc::Node",
-                            vec![format!("{ovr}v"), format!("{ohr}h"), format!("{process}")],
+                            loc.names(),
                             format!("{process}"),
                         )
                     },
                     Loc::Hop(lvl, vl, wl) => {
                         l.log_pair(
-                            "loc_to_node",
                             "Loc",
-                            Vec::<String>::new(),
-                            format!("{ovr}v, {ohr}h"),
+                            loc_ix.names(),
+                            format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
                             "Loc::Hop",
-                            vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}"), format!("{wl}"), format!("{lvl}v")],
+                            loc.names(),
                             format!("{lvl}, {vl}->{wl}")
                         )
                     }
                     Loc::Border(Border{vl, ovr: bovr, ohr: bohr, pair}) => {
                         l.log_pair(
-                            "loc_to_node",
                             "Loc",
-                            Vec::<String>::new(),
-                            format!("{ovr}v, {ohr}h"),
+                            loc_ix.names(),
+                            format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
                             "Loc::Border",
-                            vec![format!("{ovr}v"), format!("{ohr}h"), format!("{vl}")],
+                            loc.names(),
                             format!("{vl}, {bovr}v, {bohr}h, {pair}p")
                         )
                     },
@@ -2612,7 +2540,7 @@ pub mod layout {
     }
     
     #[derive(Clone, Debug, Default)]
-    pub struct LayoutProblem<V: Graphic + Display> {
+    pub struct LayoutProblem<V: Graphic + Display + log::Name> {
         pub locs_by_level: BTreeMap<VerticalRank, usize>, 
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
@@ -2635,12 +2563,11 @@ pub mod layout {
             l.with_map("solved_locs", "SolvedLocs", self.iter(), |lvl, row, l| {
                 l.with_map(format!("solved_locs[{lvl}]"), "SolvedLocs[i]", row.iter(), |ohr, shr, l| {
                     l.log_pair(
-                        "solved_locs",
                         "Loc",
-                        Vec::<String>::new(),
+                        names![lvl, ohr],
                         format!("{lvl}v, {ohr}h"),
                         "SolvedHorizontalRank",
-                        Vec::<String>::new(),
+                        names![shr],
                         format!("{lvl}v, {shr}s")
                     )
                 })
@@ -2660,7 +2587,7 @@ pub mod layout {
         logs: &mut log::Logger,
     ) -> Result<LayoutProblem<V>, Error>
             where 
-        V: Display + Graphic, 
+        V: Display + Graphic + log::Name,
         E: Graphic
     {
         let Vcg{containers, nodes_by_container, container_depths, ..} = vcg;
@@ -2675,6 +2602,17 @@ pub mod layout {
 
         eprintln!("PATHS_BY_RANK 0: {paths_by_rank:#?}");
         eprintln!("VX_RANK {vx_rank:#?}");
+
+        logs.with_map("vx_rank", "BTreeMap<V, VerticalRank>", vx_rank.iter(), |wl, rank, l| {
+            l.log_pair(
+                "V", 
+                names![wl],
+                format!("{wl}"),
+                "usize",
+                names![rank],
+                format!("{rank}v")
+            )
+        });
 
         let mut loc_to_node = HashMap::new();
         let mut node_to_loc = HashMap::new();
@@ -2691,6 +2629,18 @@ pub mod layout {
             };
             node_to_loc.insert(Loc::Node(wl.clone()), (*rank, mhr));
         }
+
+        logs.with_map("node_to_loc", "HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>", node_to_loc.iter(), |loc, loc_ix, l| {
+            
+            l.log_pair(
+                "Loc<V, V>",
+                loc.names(),
+                format!("{loc:?}"),
+                "(VerticalRank, OriginalHorizontalRank)",
+                loc_ix.names(),
+                format!("{loc_ix:?}")
+            )
+        });
 
         event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V1");
         let is_contains = |er: &EdgeReference<_>| {
@@ -2851,10 +2801,12 @@ pub mod layout {
         use crate::graph_drawing::{layout::{LayoutProblem, Loc, or_insert, LayoutSolution}};
 
         use super::Graphic;
+
+        use crate::graph_drawing::frontend::log;
         
         /// Print a graphviz "dot" representation of the solution `solved_locs` 
         /// to `layout_problem`
-        pub fn debug<V: Display + Graphic>(layout_problem: &LayoutProblem<V>, layout_solution: &LayoutSolution) {
+        pub fn debug<V: Display + Graphic + log::Name>(layout_problem: &LayoutProblem<V>, layout_solution: &LayoutSolution) {
             let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
             let LayoutSolution{solved_locs, ..} = &layout_solution;
             let mut layout_debug = Graph::<String, String>::new();
@@ -3008,7 +2960,9 @@ pub mod layout {
             c as usize
         }
 
-        fn conforms<V: Graphic + Display, E: Graphic>(
+        use crate::graph_drawing::frontend::log;
+
+        fn conforms<V: Graphic + Display + log::Name, E: Graphic>(
             vcg: &Vcg<V, E>, 
             layout_problem: &LayoutProblem<V>, 
             locs_by_level2: &Vec<Vec<&Loc<V, V>>>, 
@@ -3086,7 +3040,7 @@ pub mod layout {
             vcg: &Vcg<V, V>,
             layout_problem: &LayoutProblem<V>
         ) -> Result<LayoutSolution, Error> where
-            V: Display + Graphic
+            V: Display + Graphic + log::Name
         {
             let Vcg{nodes_by_container, ..} = vcg;
             let LayoutProblem{loc_to_node, node_to_loc, locs_by_level, hops_by_level, ..} = layout_problem;
@@ -3306,6 +3260,7 @@ pub mod geometry {
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples, as_scipy, as_numpy};
 
     use super::error::{LayoutError};
+    use super::frontend::log::Name;
     use super::osqp::{Constraints, Monomial, Vars, Fresh, Var, Sol, Coeff};
 
     use super::error::Error;
@@ -3355,8 +3310,14 @@ pub mod geometry {
         }
     }
 
+    impl Name for AnySol {
+        fn name(&self) -> String {
+            format!("{}", self)
+        }
+    }
+
     #[derive(Clone, Debug)]
-    pub struct LocRow<V: Clone + Debug + Display + Ord + Hash> {
+    pub struct LocRow<V: Clone + Debug + Display + Ord + Hash + log::Name> {
         pub ovr: VerticalRank,
         pub ohr: OriginalHorizontalRank,
         pub shr: SolvedHorizontalRank,
@@ -3365,7 +3326,7 @@ pub mod geometry {
     }
     
     #[derive(Clone, Debug)]
-    pub struct HopRow<V: Clone + Debug + Display + Ord + Hash> {
+    pub struct HopRow<V: Clone + Debug + Display + Ord + Hash + log::Name> {
         pub lvl: VerticalRank,
         pub mhr: OriginalHorizontalRank,
         pub nhr: OriginalHorizontalRank,
@@ -3393,7 +3354,7 @@ pub mod geometry {
     }
     
     #[derive(Clone, Debug, Default)]
-    pub struct GeometryProblem<V: Clone + Debug + Display + Ord + Hash> {
+    pub struct GeometryProblem<V: Clone + Debug + Display + Ord + Hash + log::Name> {
         pub all_locs: Vec<LocRow<V>>,
         pub all_hops0: Vec<HopRow<V>>,
         pub all_hops: Vec<HopRow<V>>,
@@ -3408,39 +3369,37 @@ pub mod geometry {
         pub nesting_bottom_padding: Option<f64>,
     }
 
-    use crate::graph_drawing::frontend::log;
+    use crate::graph_drawing::frontend::log::{self, names, Names};
 
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
         type Cx = ();
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map("sol_by_loc", "SolByLoc", self.iter(), |(ovr, ohr), sol, l| {
+            l.with_map("sol_by_loc", "SolByLoc", self.iter(), |loc_ix, sol, l| {
                 // todo: use loc_to_node
                 // vec![format!("{ovr}v"), format!("{ohr}h")],
                 l.log_pair(
-                    "sol_by_loc",
                     "Loc",
-                    Vec::<String>::new(),
-                    format!("{ovr}v, {ohr}h"),
+                    loc_ix.names(),
+                    format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
                     "LocSol",
-                    Vec::<String>::new(),
+                    names![sol],
                     format!("{sol}")
                 )
             })
         }
     }
 
-    impl<V: Graphic + Display> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol> {
+    impl<V: Graphic + Display + log::Name> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol> {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("sol_by_hop", "SolByHop", self.iter(), |(ovr, ohr, vl, wl), sol, l| {
                 l.log_pair(
-                    "sol_by_hop",
                     "Loc",
-                    Vec::<String>::new(),
+                    names![ovr, ohr],
                     format!("{ovr}v, {ohr}h"),
                     "HopSol",
-                    Vec::<String>::new(),
+                    names![vl, wl, sol],
                     format!("{sol}")
                 )
             })
@@ -3451,14 +3410,13 @@ pub mod geometry {
         type Cx = ();
 
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map("size_by_loc", "SizeByLoc", self.iter(), |(ovr, ohr), size, l| {
+            l.with_map("size_by_loc", "SizeByLoc", self.iter(), |loc_ix, size, l| {
                 l.log_pair(
-                    "size_by_loc",
                     "Loc",
-                    Vec::<String>::new(),
-                    format!("{ovr}v, {ohr}h"),
+                    loc_ix.names(),
+                    format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
                     "NodeSize",
-                    Vec::<String>::new(),
+                    vec![],
                     format!("{size:?}"))
             })
         }
@@ -3470,12 +3428,11 @@ pub mod geometry {
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, vl, wl), size, l| {
                 l.log_pair(
-                    "size_by_hop",
                     "Loc",
-                    Vec::<String>::new(),
+                    names![ovr, ohr],
                     format!("{ovr}v, {ohr}h"),
                     "HopSize",
-                    Vec::<String>::new(),
+                    vec![],
                     format!("{size:?}")
                 )
             })
@@ -3485,7 +3442,7 @@ pub mod geometry {
     /// ovr, ohr
     pub type LocIx = (VerticalRank, OriginalHorizontalRank);
 
-    pub type HopIx<V: Graphic + Display> = (VerticalRank, OriginalHorizontalRank, V, V);
+    pub type HopIx<V> = (VerticalRank, OriginalHorizontalRank, V, V);
     
     /// ovr, ohr -> loc
     pub type LocNodeMap<V> = HashMap<LocIx, Loc<V, V>>;
@@ -3497,7 +3454,7 @@ pub mod geometry {
         layout_problem: &'s LayoutProblem<V>,
         layout_solution: &'s LayoutSolution,
     ) -> GeometryProblem<V> where
-        V: Display + Graphic
+        V: Display + Graphic + log::Name
     {
         let LayoutProblem{loc_to_node, hops_by_level, hops_by_edge, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = layout_solution;
@@ -3626,12 +3583,11 @@ pub mod geometry {
         fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map(cx.clone(), "OptimizationProblem.Vars", self.v.iter(), |sol, var, l| {
                 l.log_pair(
-                    format!("{cx}.v"),
                     "AnySol",
-                    Vec::<String>::new(),
+                    sol.names(),
                     format!("{sol}"),
                     "Var",
-                    Vec::<String>::new(),
+                    var.names(),
                     format!("v{}", var.index)
                 )
             })?;
@@ -3659,7 +3615,7 @@ pub mod geometry {
         pub bs: BTreeMap<LocSol, f64>,
     }
 
-    fn update_min_width<V: Graphic + Display + Len, E: Graphic>(
+    fn update_min_width<V: Graphic + Display + Len + log::Name, E: Graphic>(
         vcg: &Vcg<V, E>, 
         layout_problem: &LayoutProblem<V>,
         layout_solution: &LayoutSolution,
@@ -3883,7 +3839,7 @@ pub mod geometry {
         layout_solution: &'s LayoutSolution,
         geometry_problem: &'s GeometryProblem<V>,
     ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error> where 
-        V: Display + Graphic + Len,
+        V: Display + Graphic + Len + log::Name,
         E: Graphic
     {
         let Vcg{
@@ -4558,7 +4514,7 @@ pub mod frontend {
         layout_problem: &LayoutProblem<I>,
         geometry_problem: &mut GeometryProblem<I>
     ) -> Result<(), Error> where
-        I: Graphic + Display + Len + PartialEq<&'static str>,
+        I: Graphic + Display + Len + PartialEq<&'static str> + log::Name,
     {
         // let char_width = 8.67;
         let char_width = 9.0;
@@ -4831,6 +4787,51 @@ pub mod frontend {
             fn log(&self, cx: Self::Cx, l: &mut Logger) -> Result<(), Error>;
         }
 
+        pub trait Name {
+            fn name(&self) -> String;
+        }
+
+        impl Name for String {
+            fn name(&self) -> String {
+                self.clone()
+            }
+        }
+
+        impl<'s> Name for std::borrow::Cow<'s, str> {
+            fn name(&self) -> String {
+                self.to_string()
+            }
+        }
+
+        pub trait Names<'n> {
+            fn names(&self) -> Vec<Box<dyn Name + 'n>>;
+        }
+
+        #[macro_export]
+        macro_rules! names {
+            ($($x:expr),*) => {{
+                let mut v = Vec::new();
+                $(
+                    v.push(Box::new(($x).clone()) as Box<dyn crate::graph_drawing::frontend::log::Name>);
+                )*
+                v
+            }}
+        }
+
+        pub use names;
+
+        impl<'n, A: Clone + Name + 'n> Names<'n> for A {
+            fn names(&self) -> Vec<Box<dyn Name + 'n>> {
+                names![self]
+            }
+        }
+
+        impl<'n, A1: Clone + Name + 'n, A2: Clone + Name + 'n> Names<'n> for (A1, A2) {
+            fn names(&self) -> Vec<Box<dyn Name + 'n>> {
+                names![self.0, self.1]
+            }
+        }
+
         #[derive(Clone, Debug, Default)]
         pub struct Logger {
             logs: Vec<Record>,
@@ -4879,22 +4880,20 @@ pub mod frontend {
                 Ok(())
             }
 
-            pub fn log_pair(
+            pub fn log_pair<'n>(
                 &mut self, 
-                collection: impl Into<String>,
                 src_ty: impl Into<String>,
-                src_names: Vec<impl Into<String>>,
+                src_names: Vec<Box<dyn Name + 'n>>,
                 src_val: impl Into<String>,
                 dst_ty: impl Into<String>,
-                dst_names: Vec<impl Into<String>>,
+                dst_names: Vec<Box<dyn Name + 'n>>,
                 dst_val: impl Into<String>
             ) -> Result<(), Error> {
-                let collection = collection.into();
                 let src_ty = src_ty.into();
-                let mut src_names = src_names.into_iter().map(|n| n.into()).collect::<Vec<String>>();
+                let mut src_names = src_names.into_iter().map(|n| n.name()).collect::<Vec<String>>();
                 let src_val = src_val.into();
                 let dst_ty = dst_ty.into();
-                let mut dst_names = dst_names.into_iter().map(|n| n.into()).collect::<Vec<String>>();
+                let mut dst_names = dst_names.into_iter().map(|n| n.name()).collect::<Vec<String>>();
                 let dst_val = dst_val.into();
                 src_names.append(&mut dst_names);
                 self.logs.push(Record::String{
