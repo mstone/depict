@@ -3321,8 +3321,8 @@ pub mod geometry {
     impl Display for LayoutSol {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                LayoutSol::LocSol(ls) => write!(f, "{ls}"),
-                LayoutSol::HopSol(hs) => write!(f, "{hs}"),
+                LayoutSol::LocSol(ls) => write!(f, "{ls:?}"),
+                LayoutSol::HopSol(hs) => write!(f, "{hs:?}"),
             }
         }
     }
@@ -3464,6 +3464,23 @@ pub mod geometry {
                     "HopSol",
                     names![vl, wl, sol],
                     format!("{sol}")
+                )
+            })
+        }
+    }
+
+    impl<CX: L2n> log::Log<CX> for HashMap<LayoutSol, LocIx> {
+        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_map("locix_by_layout_sol", "LocIxByLayoutSol", self.iter(), |ls, loc_ix, l| {
+                let mut dst_names = loc_ix.names();
+                dst_names.append(&mut cx(loc_ix.0, loc_ix.1));
+                l.log_pair(
+                    "LayoutSol",
+                    names![ls],
+                    format!("{ls}"),
+                    "HopSol",
+                    dst_names,
+                    format!("{:?}, {:?}", loc_ix.0, loc_ix.1)
                 )
             })
         }
@@ -5275,6 +5292,7 @@ pub mod frontend {
 
             sol_by_loc.log(l2n, &mut logs);
             sol_by_hop.log(l2n, &mut logs);
+            locix_by_layout_sol.log(l2n, &mut logs);
             solved_locs.log(l2n, &mut logs);
             size_by_loc.log(l2n, &mut logs);
             size_by_hop.log(l2n, &mut logs);
