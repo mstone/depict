@@ -3404,14 +3404,14 @@ pub mod geometry {
 
     use crate::graph_drawing::frontend::log::{self, names, Names};
 
-    impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
-        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
+    impl<CX: L2n> log::Log<CX> for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
+        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("sol_by_loc", "SolByLoc", self.iter(), |loc_ix, sol, l| {
-                // todo: use loc_to_node
-                // vec![format!("{ovr}v"), format!("{ohr}h")],
+                let mut src_names = loc_ix.names();
+                src_names.append(&mut cx(loc_ix.0, loc_ix.1));
                 l.log_pair(
                     "Loc",
-                    loc_ix.names(),
+                    src_names,
                     format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
                     "LocSol",
                     names![sol],
@@ -5137,7 +5137,7 @@ pub mod frontend {
             };
             // let l2n = |ovr, ohr| &loc_to_node[&(ovr, ohr)].names()
 
-            sol_by_loc.log((), &mut logs);
+            sol_by_loc.log(l2n, &mut logs);
             sol_by_hop.log(l2n, &mut logs);
             solved_locs.log(l2n, &mut logs);
             size_by_loc.log(l2n, &mut logs);
