@@ -5535,10 +5535,28 @@ pub mod frontend {
                 if let Some(forward) = &lvl.forward {
                     let key = format!("{vl}_{wl}_forward_{m}");
                     let classes = format!("arrow horizontal forward {vl}_{wl} {vl}_{wl}_forward");
-                    let locl = &node_to_loc[&Loc::Node(vl.clone())];
-                    let locr = &node_to_loc[&Loc::Node(wl.clone())];
-                    let nl = sol_by_loc[locl];
-                    let nr = sol_by_loc[locr];
+                    let locl = if !containers.contains(vl) {
+                        node_to_loc[&Loc::Node(vl.clone())]
+                    } else {
+                        let (ovr, (ohr, pair)) = container_borders[vl].first().unwrap();
+                        let shr1 = solved_locs[ovr][ohr];
+                        let shr2 = solved_locs[ovr][pair];
+                        let lohr = if shr1 < shr2 { ohr } else { pair };
+                        let rohr = if shr1 < shr2 { pair } else { ohr };
+                        (*ovr, *rohr)
+                    };
+                    let locr = if !containers.contains(wl) {
+                        node_to_loc[&Loc::Node(wl.clone())]
+                    } else {
+                        let (ovr, (ohr, pair)) = container_borders[wl].first().unwrap();
+                        let shr1 = solved_locs[ovr][ohr];
+                        let shr2 = solved_locs[ovr][pair];
+                        let lohr = if shr1 < shr2 { ohr } else { pair };
+                        let rohr = if shr1 < shr2 { pair } else { ohr };
+                        (*ovr, *lohr)
+                    };
+                    let nl = sol_by_loc[&locl];
+                    let nr = sol_by_loc[&locr];
                     let lr = rs[&nl];
                     let rl = ls[&nr] - 7.;
                     let wl = size_by_loc[&locl].right;
@@ -5559,14 +5577,32 @@ pub mod frontend {
                 if let Some(reverse) = &lvl.reverse {
                     let key = format!("{vl}_{wl}_reverse_{m}");
                     let classes = format!("arrow horizontal reverse {vl}_{wl} {vl}_{wl}_reverse");
-                    let locl = &node_to_loc[&Loc::Node(vl.clone())];
-                    let locr = &node_to_loc[&Loc::Node(wl.clone())];
-                    let nl = sol_by_loc[locl];
-                    let nr = sol_by_loc[locr];
+                    let locl = if !containers.contains(vl) {
+                        node_to_loc[&Loc::Node(vl.clone())]
+                    } else {
+                        let (ovr, (ohr, pair)) = container_borders[vl].first().unwrap();
+                        let shr1 = solved_locs[ovr][ohr];
+                        let shr2 = solved_locs[ovr][pair];
+                        let lohr = if shr1 < shr2 { ohr } else { pair };
+                        let rohr = if shr1 < shr2 { pair } else { ohr };
+                        (*ovr, *rohr)
+                    };
+                    let locr = if !containers.contains(wl) {
+                        node_to_loc[&Loc::Node(wl.clone())]
+                    } else {
+                        let (ovr, (ohr, pair)) = container_borders[wl].first().unwrap();
+                        let shr1 = solved_locs[ovr][ohr];
+                        let shr2 = solved_locs[ovr][pair];
+                        let lohr = if shr1 < shr2 { ohr } else { pair };
+                        let rohr = if shr1 < shr2 { pair } else { ohr };
+                        (*ovr, *lohr)
+                    };
+                    let nl = sol_by_loc[&locl];
+                    let nr = sol_by_loc[&locr];
                     let lr = rs[&nl] + 7.;
                     let rl = ls[&nr];
-                    let wl = size_by_loc[locl].right;
-                    let wr = size_by_loc[locr].left;
+                    let wl = size_by_loc[&locl].right;
+                    let wr = size_by_loc[&locr].left;
                     let vposl = ts[&nl] + reverse_voffset;
                     let vposr = ts[&nr] + reverse_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
