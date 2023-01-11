@@ -3708,6 +3708,74 @@ pub mod geometry {
         pub bs: BTreeMap<LocSol, f64>,
     }
 
+    impl<CX: Ls2n> log::Log<CX> for GeometrySolution {
+        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_group("Coordinates", "", Vec::<String>::new(), |l| {
+                l.with_map("ls", "BTreeMap<LocSol, f64>", self.ls.iter(), |ls, coord, l| {
+                    let mut src_names = ls.names();
+                    src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
+                    l.log_pair(
+                        "LocSol",
+                        src_names,
+                        format!("{ls}"),
+                        "f64",
+                        vec![],
+                        format!("{:.0}", coord.round())
+                    )
+                });
+                l.with_map("rs", "BTreeMap<LocSol, f64>", self.rs.iter(), |ls, coord, l| {
+                    let mut src_names = ls.names();
+                    src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
+                    l.log_pair(
+                        "LocSol",
+                        src_names,
+                        format!("{ls}"),
+                        "f64",
+                        vec![],
+                        format!("{:.0}", coord.round())
+                    )
+                });
+                l.with_map("ts", "BTreeMap<LocSol, f64>", self.ts.iter(), |ls, coord, l| {
+                    let mut src_names = ls.names();
+                    src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
+                    l.log_pair(
+                        "LocSol",
+                        src_names,
+                        format!("{ls}"),
+                        "f64",
+                        vec![],
+                        format!("{:.0}", coord.round())
+                    )
+                });
+                l.with_map("bs", "BTreeMap<LocSol, f64>", self.bs.iter(), |ls, coord, l| {
+                    let mut src_names = ls.names();
+                    src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
+                    l.log_pair(
+                        "LocSol",
+                        src_names,
+                        format!("{ls}"),
+                        "f64",
+                        vec![],
+                        format!("{:.0}", coord.round())
+                    )
+                });
+                l.with_map("ss", "BTreeMap<LocSol, f64>", self.ss.iter(), |hs, coord, l| {
+                    let mut src_names = hs.names();
+                    src_names.append(&mut cx(LayoutSol::HopSol(*hs)));
+                    l.log_pair(
+                        "HopSol",
+                        src_names,
+                        format!("{hs}"),
+                        "f64",
+                        vec![],
+                        format!("{:.0}", coord.round())
+                    )
+                });
+                Ok(())
+            })
+        }
+    }
+
     fn update_min_width<V: Graphic + Display + Len + log::Name, E: Graphic>(
         vcg: &Vcg<V, E>, 
         layout_problem: &LayoutProblem<V>,
@@ -5158,6 +5226,7 @@ pub mod frontend {
             let depiction = render_cell.borrow_dependent();
             
             let val = &depiction.val;
+            let geometry_solution = &depiction.geometry_solution;
             let rs = &depiction.geometry_solution.rs;
             let ls = &depiction.geometry_solution.ls;
             let ss = &depiction.geometry_solution.ss;
@@ -5211,12 +5280,7 @@ pub mod frontend {
             size_by_hop.log(l2n, &mut logs);
             horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs);
             vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs);
-            logs.with_group("Coordinates", "", Vec::<String>::new(), |logs| {
-                logs.log_string("rs", rs)?;
-                logs.log_string("ls", ls)?;
-                logs.log_string("bs", bs)?;
-                logs.log_string("ts", ts)
-            });
+            geometry_solution.log(ls2n, &mut logs);
 
             let mut logs = logs.to_vec();
             logs.reverse();
