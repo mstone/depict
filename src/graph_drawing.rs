@@ -575,9 +575,8 @@ pub mod eval {
     }
 
     use crate::graph_drawing::frontend::log;
-    impl<'s, 't> log::Log for &'t Val<Cow<'s, str>> {
-        type Cx = Cow<'s, str>;
-        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+    impl<'s, 't> log::Log<Cow<'s, str>> for &'t Val<Cow<'s, str>> {
+        fn log(&self, cx: Cow<'s, str>, l: &mut log::Logger) -> Result<(), log::Error> {
             match self {
                 Val::Process { name, label, body } => {
                     let pname = &as_string2(name, label, "");
@@ -2532,8 +2531,7 @@ pub mod layout {
     }
 
     impl<V: Graphic + Display + log::Name> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
-        type Cx = ();
-        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("loc_to_node", "LocToNode", self.iter(), |loc_ix, loc, l| {
                 match loc {
                     Loc::Node(process) => {
@@ -2588,15 +2586,18 @@ pub mod layout {
         pub solved_locs: BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
     }
 
-    impl log::Log for BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> {
-        type Cx = ();
-
-        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+    impl<'cx, CX> log::Log<CX> for BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> 
+    where
+        CX: Fn(VerticalRank, OriginalHorizontalRank) -> Vec<Box<dyn Name>>
+    {
+        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("solved_locs", "SolvedLocs", self.iter(), |lvl, row, l| {
                 l.with_map(format!("solved_locs[{lvl}]"), "SolvedLocs[i]", row.iter(), |ohr, shr, l| {
+                    let mut src_names = names![lvl, ohr];
+                    src_names.append(&mut cx(*lvl, *ohr));
                     l.log_pair(
                         "Loc",
-                        names![lvl, ohr],
+                        src_names,
                         format!("{lvl}v, {ohr}h"),
                         "SolvedHorizontalRank",
                         names![shr],
@@ -3404,8 +3405,7 @@ pub mod geometry {
     use crate::graph_drawing::frontend::log::{self, names, Names};
 
     impl log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
-        type Cx = ();
-        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("sol_by_loc", "SolByLoc", self.iter(), |loc_ix, sol, l| {
                 // todo: use loc_to_node
                 // vec![format!("{ovr}v"), format!("{ohr}h")],
@@ -3422,9 +3422,7 @@ pub mod geometry {
     }
 
     impl<V: Graphic + Display + log::Name> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol> {
-        type Cx = ();
-
-        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("sol_by_hop", "SolByHop", self.iter(), |(ovr, ohr, vl, wl), sol, l| {
                 l.log_pair(
                     "Loc",
@@ -3439,9 +3437,7 @@ pub mod geometry {
     }
 
     impl log::Log for HashMap<LocIx, NodeSize> {
-        type Cx = ();
-
-        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("size_by_loc", "SizeByLoc", self.iter(), |loc_ix, size, l| {
                 l.log_pair(
                     "Loc",
@@ -3455,9 +3451,7 @@ pub mod geometry {
     }
 
     impl<V: Graphic + Display> log::Log for HashMap<HopIx<V>, HopSize> {
-        type Cx = ();
-
-        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, _vl, _wl), size, l| {
                 l.log_pair(
                     "Loc",
@@ -3609,10 +3603,8 @@ pub mod geometry {
 
     use std::fmt::Write;
 
-    impl<S: Sol, C: Coeff> log::Log for OptimizationProblem<S, C> {
-        type Cx = String;
-
-        fn log(&self, cx: Self::Cx, l: &mut log::Logger) -> Result<(), log::Error> {
+    impl<S: Sol, C: Coeff> log::Log<String> for OptimizationProblem<S, C> {
+        fn log(&self, cx: String, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map(cx.clone(), "OptimizationProblem.Vars", self.v.iter(), |sol, var, l| {
                 l.log_pair(
                     "AnySol",
@@ -4866,9 +4858,8 @@ pub mod frontend {
 
         }
 
-        pub trait Log {
-            type Cx;
-            fn log(&self, cx: Self::Cx, l: &mut Logger) -> Result<(), Error>;
+        pub trait Log<Cx = ()> {
+            fn log(&self, cx: Cx, l: &mut Logger) -> Result<(), Error>;
         }
 
         pub trait Name {
@@ -5048,7 +5039,7 @@ pub mod frontend {
 
         use tracing::{instrument, event};
 
-        use crate::graph_drawing::{error::{OrErrExt, Kind, Error}, layout::Loc, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}};
+        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Loc, Border}, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}, frontend::log::{Names, Name}}, names};
 
         use super::log::{self, Log};
 
@@ -5132,9 +5123,17 @@ pub mod frontend {
             val.log("VAL".into(), &mut logs);
             
             loc_to_node.log((), &mut logs);
+
+            let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
+                Loc::Node(node) => node.to_string().names(), //node.clone().names(),
+                Loc::Hop(ovr, vl, wl) => names![ovr, vl.to_string(), wl.to_string()],
+                Loc::Border(Border{vl, ovr, ohr, pair}) => names![vl.to_string(), ovr, ohr, pair],
+            };
+            // let l2n = |ovr, ohr| &loc_to_node[&(ovr, ohr)].names()
+
             sol_by_loc.log((), &mut logs);
             sol_by_hop.log((), &mut logs);
-            solved_locs.log((), &mut logs);
+            solved_locs.log(l2n, &mut logs);
             size_by_loc.log((), &mut logs);
             size_by_hop.log((), &mut logs);
             horizontal_problem.log("horizontal_problem".into(), &mut logs);
