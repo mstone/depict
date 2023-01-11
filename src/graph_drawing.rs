@@ -3421,12 +3421,14 @@ pub mod geometry {
         }
     }
 
-    impl<V: Graphic + Display + log::Name> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol> {
-        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
+    impl<V: Graphic + Display + log::Name, CX: L2n> log::Log<CX> for HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol> {
+        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("sol_by_hop", "SolByHop", self.iter(), |(ovr, ohr, vl, wl), sol, l| {
+                let mut src_names = names![ovr, ohr, vl, wl];
+                src_names.append(&mut cx(*ovr, *ohr));
                 l.log_pair(
                     "Loc",
-                    names![ovr, ohr],
+                    src_names,
                     format!("{ovr}v, {ohr}h"),
                     "HopSol",
                     names![vl, wl, sol],
@@ -3452,12 +3454,14 @@ pub mod geometry {
         }
     }
 
-    impl<V: Graphic + Display> log::Log for HashMap<HopIx<V>, HopSize> {
-        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, _vl, _wl), size, l| {
+    impl<V: Graphic + Display + log::Name, CX: L2n> log::Log<CX> for HashMap<HopIx<V>, HopSize> {
+        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_map("size_by_hop", "SizeByHop", self.iter(), |(ovr, ohr, vl, wl), size, l| {
+                let mut src_names = names![ovr, ohr, vl, wl];
+                src_names.append(&mut cx(*ovr, *ohr));
                 l.log_pair(
                     "Loc",
-                    names![ovr, ohr],
+                    src_names,
                     format!("{ovr}v, {ohr}h"),
                     "HopSize",
                     vec![],
@@ -5127,17 +5131,17 @@ pub mod frontend {
             loc_to_node.log((), &mut logs);
 
             let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
-                Loc::Node(node) => node.to_string().names(), //node.clone().names(),
+                Loc::Node(node) => node.to_string().names(),
                 Loc::Hop(ovr, vl, wl) => names![ovr, vl.to_string(), wl.to_string()],
                 Loc::Border(Border{vl, ovr, ohr, pair}) => names![vl.to_string(), ovr, ohr, pair],
             };
             // let l2n = |ovr, ohr| &loc_to_node[&(ovr, ohr)].names()
 
             sol_by_loc.log((), &mut logs);
-            sol_by_hop.log((), &mut logs);
+            sol_by_hop.log(l2n, &mut logs);
             solved_locs.log(l2n, &mut logs);
             size_by_loc.log(l2n, &mut logs);
-            size_by_hop.log((), &mut logs);
+            size_by_hop.log(l2n, &mut logs);
             horizontal_problem.log("horizontal_problem".into(), &mut logs);
             vertical_problem.log("vertical_problem".into(), &mut logs);
             logs.with_group("Coordinates", "", Vec::<String>::new(), |logs| {
