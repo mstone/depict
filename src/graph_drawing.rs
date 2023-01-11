@@ -2586,10 +2586,10 @@ pub mod layout {
         pub solved_locs: BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
     }
 
-    impl<'cx, CX> log::Log<CX> for BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> 
-    where
-        CX: Fn(VerticalRank, OriginalHorizontalRank) -> Vec<Box<dyn Name>>
-    {
+    pub(crate) trait L2n : Fn(VerticalRank, OriginalHorizontalRank) -> Vec<Box<dyn Name>> {}
+    impl<CX: Fn(VerticalRank, OriginalHorizontalRank) -> Vec<Box<dyn Name>>> L2n for CX {}
+
+    impl<CX: L2n> log::Log<CX> for BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> {
         fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("solved_locs", "SolvedLocs", self.iter(), |lvl, row, l| {
                 l.with_map(format!("solved_locs[{lvl}]"), "SolvedLocs[i]", row.iter(), |ohr, shr, l| {
@@ -3298,7 +3298,7 @@ pub mod geometry {
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len};
+    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n};
 
     use std::borrow::Cow;
     use std::cmp::{max, max_by};
@@ -3436,12 +3436,14 @@ pub mod geometry {
         }
     }
 
-    impl log::Log for HashMap<LocIx, NodeSize> {
-        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
+    impl<CX: L2n> log::Log<CX> for HashMap<LocIx, NodeSize> {
+        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("size_by_loc", "SizeByLoc", self.iter(), |loc_ix, size, l| {
+                let mut src_names = loc_ix.names();
+                src_names.append(&mut cx(loc_ix.0, loc_ix.1));
                 l.log_pair(
                     "Loc",
-                    loc_ix.names(),
+                    src_names,
                     format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
                     "NodeSize",
                     vec![],
@@ -5134,7 +5136,7 @@ pub mod frontend {
             sol_by_loc.log((), &mut logs);
             sol_by_hop.log((), &mut logs);
             solved_locs.log(l2n, &mut logs);
-            size_by_loc.log((), &mut logs);
+            size_by_loc.log(l2n, &mut logs);
             size_by_hop.log((), &mut logs);
             horizontal_problem.log("horizontal_problem".into(), &mut logs);
             vertical_problem.log("vertical_problem".into(), &mut logs);
