@@ -1188,7 +1188,7 @@ pub mod osqp {
     #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
     use osqp_rust as osqp;
 
-    use crate::graph_drawing::frontend::log::{self, names, Names};
+    use crate::graph_drawing::frontend::log;
 
     /// A map from Sols to Vars. `get()`ing an not-yet-seen sol 
     /// allocates a new `Var` for that sol and returns a monomial
@@ -2375,7 +2375,7 @@ pub mod layout {
         let mut paths_fw = Ok(HashMap::new());
         logs.with_group("(V,V)->(isize, reason)", "floyd_warshall", Vec::<String>::new(), {
             |mut l| {
-                fn constrain<'s, E: 's, F: FnMut(EdgeReference<'s, E>) -> isize>(f: F) -> F { f };
+                fn constrain<'s, E: 's, F: FnMut(EdgeReference<'s, E>) -> isize>(f: F) -> F { f }
                 paths_fw = floyd_warshall(&dag, constrain(|er: EdgeReference<'s, E>| {
                     let src = dag.node_weight(er.source()).unwrap();
                     let dst = dag.node_weight(er.target()).unwrap();
@@ -2586,8 +2586,13 @@ pub mod layout {
         pub solved_locs: BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>,
     }
 
+    /// Marker trait for closures mapping LocIx to names
     pub(crate) trait L2n : Fn(VerticalRank, OriginalHorizontalRank) -> Vec<Box<dyn Name>> {}
     impl<CX: Fn(VerticalRank, OriginalHorizontalRank) -> Vec<Box<dyn Name>>> L2n for CX {}
+
+    /// Marker trait for closures mapping LayoutSol to names
+    pub(crate) trait Ls2n : Fn(LayoutSol) -> Vec<Box<dyn Name>> {}
+    impl<CX: Fn(LayoutSol) -> Vec<Box<dyn Name>>> Ls2n for CX {}
 
     impl<CX: L2n> log::Log<CX> for BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> {
         fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
@@ -3241,6 +3246,7 @@ pub mod layout {
 
     use super::eval::Rel;
     use super::frontend::log;
+    use super::geometry::LayoutSol;
     use super::index::SolvedHorizontalRank;
 }
 
@@ -3298,13 +3304,37 @@ pub mod geometry {
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n};
+    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n, Ls2n};
 
     use std::borrow::Cow;
     use std::cmp::{max, max_by};
     use std::collections::{HashMap, BTreeMap, HashSet};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub enum LayoutSol {
+        LocSol(LocSol),
+        HopSol(HopSol),
+    }
+
+    impl Display for LayoutSol {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                LayoutSol::LocSol(ls) => write!(f, "{ls}"),
+                LayoutSol::HopSol(hs) => write!(f, "{hs}"),
+            }
+        }
+    }
+
+    impl Name for LayoutSol {
+        fn name(&self) -> String {
+            match self {
+                LayoutSol::LocSol(ls) => ls.name(),
+                LayoutSol::HopSol(hs) => hs.name(),
+            }
+        }
+    }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, EnumKind)]
     #[enum_kind(AnySolKind)]
@@ -3393,6 +3423,7 @@ pub mod geometry {
         pub all_hops: Vec<HopRow<V>>,
         pub sol_by_loc: HashMap<(VerticalRank, OriginalHorizontalRank), LocSol>,
         pub sol_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol>,
+        pub locix_by_layout_sol: HashMap<LayoutSol, LocIx>, 
         pub size_by_loc: HashMap<LocIx, NodeSize>,
         pub size_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSize>,
         pub height_scale: Option<f64>,
@@ -3582,6 +3613,15 @@ pub mod geometry {
         let char_width = None;
         let nesting_top_padding = None;
         let nesting_bottom_padding = None;
+
+        let mut locix_by_layout_sol = HashMap::new();
+
+        for loc in all_locs.iter() {
+            locix_by_layout_sol.insert(LayoutSol::LocSol(loc.n), (loc.ovr, loc.ohr));
+        }
+        for hop in all_hops.iter() {
+            locix_by_layout_sol.insert(LayoutSol::HopSol(hop.n), (hop.lvl, hop.mhr));
+        }
     
         GeometryProblem{
             all_locs, 
@@ -3589,6 +3629,7 @@ pub mod geometry {
             all_hops, 
             sol_by_loc, 
             sol_by_hop, 
+            locix_by_layout_sol,
             size_by_loc, 
             size_by_hop, 
             height_scale,
@@ -3609,28 +3650,50 @@ pub mod geometry {
 
     use std::fmt::Write;
 
-    impl<S: Sol, C: Coeff> log::Log<String> for OptimizationProblem<S, C> {
-        fn log(&self, cx: String, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map(cx.clone(), "OptimizationProblem.Vars", self.v.iter(), |sol, var, l| {
+    impl<C: Coeff, CX: Ls2n> log::Log<(String, CX)> for OptimizationProblem<AnySol, C> {
+        fn log(&self, cx: (String, CX), l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_map(cx.0.clone(), "OptimizationProblem.Vars", self.v.iter(), |sol, var, l| {
+                let mut src_names = sol.names();
+                match sol {
+                    AnySol::L(ls) | AnySol::R(ls) | AnySol::T(ls) | AnySol::B(ls) => {
+                        src_names.append(&mut (cx.1)(LayoutSol::LocSol(*ls)));
+                    },
+                    AnySol::S(hs) => {
+                        src_names.append(&mut (cx.1)(LayoutSol::HopSol(*hs)));
+                    },
+                    _ => {},
+                }
                 l.log_pair(
                     "AnySol",
-                    sol.names(),
+                    src_names,
                     format!("{sol}"),
                     "Var",
                     var.names(),
                     format!("v{}", var.index)
                 )
             })?;
-            l.with_set(cx.clone(), "OptimizationProblem.Constraints", self.c.iter(), |(lower, monomials, upper), l| {
+            l.with_set(cx.0.clone(), "OptimizationProblem.Constraints", self.c.iter(), |(lower, monomials, upper), l| {
                 let mut s = String::new();
+                let mut monomial_names = vec![];
                 write!(s, "{lower} <= ");
                 for term in monomials.iter() {
+                    monomial_names.append(&mut term.var.names());
+                    match term.var.sol {
+                        AnySol::L(ls) | AnySol::R(ls) | AnySol::T(ls) | AnySol::B(ls) => {
+                            monomial_names.append(&mut (cx.1)(LayoutSol::LocSol(ls)));
+                        },
+                        AnySol::S(hs) => {
+                            monomial_names.append(&mut (cx.1)(LayoutSol::HopSol(hs)));
+                        },
+                        _ => {},
+                    }
                     write!(s, "{term} ");
                 }
                 if *upper != f64::INFINITY {
                     writeln!(s, "<= {upper}");
                 }
-                l.log_element("Constraint", Vec::<String>::new(), s)?;
+                let monomial_names = monomial_names.into_iter().map(|n| n.name()).collect::<Vec<_>>();
+                l.log_element("Constraint", monomial_names, s)?;
                 Ok(())
             })
         }
@@ -4538,7 +4601,7 @@ pub mod frontend {
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val};
 
-    use log::{names, Names};
+    use log::{names};
 
     pub fn estimate_widths<I>(
         vcg: &Vcg<I, I>, 
@@ -5045,7 +5108,7 @@ pub mod frontend {
 
         use tracing::{instrument, event};
 
-        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Loc, Border}, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}, frontend::log::{Names, Name}}, names};
+        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Loc, Border}, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}, frontend::log::{Names}}, names};
 
         use super::log::{self, Log};
 
@@ -5108,6 +5171,7 @@ pub mod frontend {
             let hops_by_edge = &depiction.layout_problem.hops_by_edge;
             let hcg = &depiction.layout_problem.hcg;
             let sol_by_hop = &depiction.geometry_problem.sol_by_hop;
+            let locix_by_layout_sol = &depiction.geometry_problem.locix_by_layout_sol;
             let size_by_loc = &depiction.geometry_problem.size_by_loc;
             let size_by_hop = &depiction.geometry_problem.size_by_hop;
             let crossing_number = depiction.layout_solution.crossing_number;
@@ -5135,15 +5199,18 @@ pub mod frontend {
                 Loc::Hop(ovr, vl, wl) => names![ovr, vl.to_string(), wl.to_string()],
                 Loc::Border(Border{vl, ovr, ohr, pair}) => names![vl.to_string(), ovr, ohr, pair],
             };
-            // let l2n = |ovr, ohr| &loc_to_node[&(ovr, ohr)].names()
+            let ls2n = |layout_sol| { 
+                let loc_ix = locix_by_layout_sol[&layout_sol]; 
+                l2n(loc_ix.0, loc_ix.1) 
+            };
 
             sol_by_loc.log(l2n, &mut logs);
             sol_by_hop.log(l2n, &mut logs);
             solved_locs.log(l2n, &mut logs);
             size_by_loc.log(l2n, &mut logs);
             size_by_hop.log(l2n, &mut logs);
-            horizontal_problem.log("horizontal_problem".into(), &mut logs);
-            vertical_problem.log("vertical_problem".into(), &mut logs);
+            horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs);
+            vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs);
             logs.with_group("Coordinates", "", Vec::<String>::new(), |logs| {
                 logs.log_string("rs", rs)?;
                 logs.log_string("ls", ls)?;
