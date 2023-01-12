@@ -2799,7 +2799,32 @@ pub mod layout {
 
     #[cfg(test)]
     mod tests {
+        use crate::graph_drawing::frontend::log::Logger;
+
         use super::*;
+
+
+        #[test]
+        fn test_rank() {
+            let mut vert: Graph<Cow<str>, Cow<str>> = Graph::new();
+            let mut vx_map = HashMap::new();
+
+            let a: Cow<str> = "a".into();
+            let b: Cow<str> = "b".into();
+            let actuates: Cow<str> = "actuates".into();
+
+            let ax = or_insert(&mut vert, &mut vx_map, a.clone());
+            let bx = or_insert(&mut vert, &mut vx_map, b.clone());
+            vert.add_edge(ax, bx, actuates.clone());
+
+            let mut roots = SortedVec::new();
+            roots.insert(a.clone());
+
+            let mut logs = Logger::new();
+
+            let paths_by_rank = rank(&vert, &roots, |a, b, l| -1, &mut logs).unwrap();
+            assert_eq!(paths_by_rank[&VerticalRank(0)], SortedVec::from_unsorted(vec![(a.clone(), a.clone())]));
+        }
 
         #[test]
         fn test_fixup_hcg_rank_is_deterministic() {
@@ -6088,13 +6113,14 @@ mod tests {
     use std::borrow::Cow;
 
     use super::{error::Error};
-    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, graph::roots, index::{VerticalRank, OriginalHorizontalRank}, geometry::calculate_sols, error::Kind, eval}};
+    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, graph::roots, index::{VerticalRank, OriginalHorizontalRank}, geometry::calculate_sols, error::Kind, eval, frontend::log::Logger}};
     use tracing_error::InstrumentResult;
     use logos::Logos;
 
     #[test]
     #[allow(clippy::unwrap_used)]    
     pub fn no_swaps() -> Result<(), Error> {
+        let mut logs = Logger::new();
         let data = "Aa Ab Ac: y / z\nXx Xy Xz: w / x";
         let mut p = Parser::new();
         let mut lex = Token::lexer(data);
@@ -6115,7 +6141,7 @@ mod tests {
         let val = eval::eval(&v[..]);
 
         let hcg = calculate_hcg(&val)?;
-        let vcg = calculate_vcg(&val, &hcg)?;
+        let vcg = calculate_vcg(&val, &hcg, &mut logs)?;
 
         let Vcg{vert, vert_vxmap, containers, nodes_by_container, container_depths, ..} = &vcg;
         let vx = vert_vxmap["Ab"];
@@ -6131,26 +6157,21 @@ mod tests {
 
         let roots = roots(&condensed)?;
 
-        let distance = {
-            let containers = &containers;
-            let nodes_by_container = &nodes_by_container;
-            let container_depths = &container_depths;
-            |src, dst| {
-                if !containers.contains(src) {
-                    -1
+        let distance = |src: &Cow<str>, dst: &Cow<str>, logs: &mut Logger| {
+            if !containers.contains(src) {
+                -1
+            } else {
+                if nodes_by_container[src].contains(dst) {
+                    0
                 } else {
-                    if nodes_by_container[src].contains(dst) {
-                        0
-                    } else {
-                        -(container_depths[src] as isize)
-                    }
+                    -(container_depths[src] as isize)
                 }
             }
         };
-        let paths_by_rank = rank(&condensed, &roots, distance)?;
+        let paths_by_rank = rank(&condensed, &roots, distance, &mut logs)?;
         assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("Ac")));
 
-        let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg)?;
+        let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg, &mut logs)?;
         let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
         let nAa = Loc::Node(Cow::from("Aa"));
         let nAb = Loc::Node(Cow::from("Ab"));
