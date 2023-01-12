@@ -2468,11 +2468,7 @@ pub mod layout {
         fn names(&self) -> Vec<Box<dyn log::Name + 'n>> {
             match self {
                 Loc::Node(wl) => {
-                    let mut v = Vec::<Box<dyn log::Name + 'n>>::new();
-                    let wl = wl.clone();
-                    let b = Box::new(wl);
-                    v.push(b);
-                    v
+                    names![wl]
                 },
                 Loc::Hop(rank, vl, wl) => {
                     names![rank, vl, wl]
