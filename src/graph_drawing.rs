@@ -2824,6 +2824,7 @@ pub mod layout {
 
             let paths_by_rank = rank(&vert, &roots, |a, b, l| -1, &mut logs).unwrap();
             assert_eq!(paths_by_rank[&VerticalRank(0)], SortedVec::from_unsorted(vec![(a.clone(), a.clone())]));
+            assert_eq!(paths_by_rank[&VerticalRank(1)], SortedVec::from_unsorted(vec![(a.clone(), b.clone())]));
         }
 
         #[test]
