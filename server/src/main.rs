@@ -9,7 +9,7 @@ use depict::graph_drawing::error::Kind;
 use depict::graph_drawing::error::OrErrExt;
 use depict::graph_drawing::index::OriginalHorizontalRank;
 use depict::graph_drawing::index::VerticalRank;
-use depict::graph_drawing::layout::Loc;
+use depict::graph_drawing::layout::Obj;
 
 use inflector::Inflector;
 

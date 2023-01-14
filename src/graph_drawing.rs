@@ -135,6 +135,8 @@ pub mod error {
 
     use miette::Diagnostic;
 
+    use super::frontend::log::Error as LogError;
+
     #[cfg(all(feature="osqp", not(feature="osqp-rust")))]
     use osqp;
     #[cfg(all(not(feature="osqp"), feature="osqp-rust"))]
@@ -206,6 +208,10 @@ pub mod error {
         #[error(transparent)]
         LayoutError{
             #[from] source: TracedError<LayoutError>,
+        },
+        #[error(transparent)]
+        LogError{
+            #[from] source: TracedError<LogError>,
         }
     }
     
@@ -225,6 +231,7 @@ pub mod error {
                 Error::GraphDrawingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
                 Error::RankingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
                 Error::LayoutError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
+                Error::LogError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
             }
         }
     }
@@ -576,7 +583,7 @@ pub mod eval {
 
     use crate::graph_drawing::frontend::log;
     impl<'s, 't> log::Log<Cow<'s, str>> for &'t Val<Cow<'s, str>> {
-        fn log(&self, cx: Cow<'s, str>, l: &mut log::Logger) -> Result<(), log::Error> {
+        fn log(&self, _cx: Cow<'s, str>, l: &mut log::Logger) -> Result<(), log::Error> {
             match self {
                 Val::Process { name, label, body } => {
                     let pname = &as_string2(name, label, "");
@@ -898,7 +905,7 @@ pub mod eval {
 
     fn merge<'s>(existing_process: &mut Val<Cow<'s, str>>, rhs: &mut Val<Cow<'s, str>>) {
         eprintln!("EVAL_MERGE: {existing_process:#?} {rhs:#?}");
-        if let (Val::Process { name, label, body }, Val::Process { name: rname, label: rlabel, body: rbody }) = (existing_process, rhs) {
+        if let (Val::Process { body, .. }, Val::Process { body: rbody, .. }) = (existing_process, rhs) {
             let rbody = <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(rbody.get_or_insert_with(Default::default).as_mut());
             <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(body.get_or_insert_with(Default::default).as_mut()).append(rbody);
         }
@@ -921,7 +928,7 @@ pub mod eval {
             use std::collections::hash_map::Entry::*;
             eprintln!("PUSH {rhs:#?}");
             let rhs_name = match &rhs {
-                Val::Process { name, label, body } => {
+                Val::Process { name, label, .. } => {
                     // the only unnamed process is the administrative / top-level wrapper process
                     if name.is_none() && label.is_none() {
                         self.processes.push(rhs);
@@ -929,7 +936,7 @@ pub mod eval {
                     }
                     name.clone().or_else(|| label.as_ref().cloned()).unwrap().clone()
                 },
-                Val::Chain { name, rel, path, labels } => {
+                Val::Chain { name, .. } => {
                     if let Some(name) = name {
                         name.clone()
                     } else {
@@ -948,7 +955,7 @@ pub mod eval {
                     // if we have no names entry for rhs_name, that could be because
                     // rhs is really new, or it could be because rhs is renaming an existing
                     // process.
-                    if let Val::Process { name: Some(rhs_name2), label: Some(rhs_label), .. } = &rhs {
+                    if let Val::Process { name: Some(_), label: Some(rhs_label), .. } = &rhs {
                         let index_entry2 = self.names.entry(rhs_label.clone());
                         match index_entry2 {
                             Occupied(oe2) => {
@@ -958,7 +965,7 @@ pub mod eval {
                                 merge(&mut existing_process, &mut rhs);
                                 self.names.insert(rhs_name, existing_process_index);
                             },
-                            Vacant(ve2) => {
+                            Vacant(_) => {
                                 self.names.insert(rhs_name, self.processes.len());
                                 self.processes.push(rhs);
                             },
@@ -1667,6 +1674,7 @@ pub mod layout {
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::eval::{Val, self, Body};
     use crate::graph_drawing::frontend::log::{names, Name, Names};
+    use crate::graph_drawing::geometry::LocIx;
     use crate::graph_drawing::graph::roots;
 
     #[derive(Clone, Debug, Default)]
@@ -1761,11 +1769,9 @@ pub mod layout {
                                 calculate_hcg_helper(hcg, part)?;
                             }
                         },
-                        _ => {}
                     }
                 }
             }
-            _ => {}
         }
         Ok(())
     }
@@ -2281,7 +2287,7 @@ pub mod layout {
                             "isize, &str",
                             vec![],
                             format!("-1, not-container")
-                        );
+                        ).unwrap();
                         -1
                     } else {
                         if nodes_by_container[src].contains(dst) {
@@ -2292,7 +2298,7 @@ pub mod layout {
                                 "isize, &str",
                                 vec![],
                                 format!("0, contains")
-                            );
+                            ).unwrap();
                             0
                         } else {
                             l.log_pair(
@@ -2302,7 +2308,7 @@ pub mod layout {
                                 "isize, &str",
                                 vec![],
                                 format!("{}, container_depths", -(container_depths[src] as isize))
-                            );
+                            ).unwrap();
                             -(container_depths[src] as isize)
                         }
                     }
@@ -2374,7 +2380,7 @@ pub mod layout {
     ) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
         let mut paths_fw = Ok(HashMap::new());
         logs.with_group("(V,V)->(isize, reason)", "floyd_warshall", Vec::<String>::new(), {
-            |mut l| {
+            |l| {
                 fn constrain<'s, E: 's, F: FnMut(EdgeReference<'s, E>) -> isize>(f: F) -> F { f }
                 paths_fw = floyd_warshall(&dag, constrain(|er: EdgeReference<'s, E>| {
                     let src = dag.node_weight(er.source()).unwrap();
@@ -2385,7 +2391,7 @@ pub mod layout {
                 }));
                 Ok(())
             }
-        });
+        }).map_err(|err| err.in_current_span())?;
         let paths_fw = paths_fw.map_err(|cycle|
             Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
         )?;
@@ -2434,46 +2440,121 @@ pub mod layout {
 
     use crate::graph_drawing::index::{OriginalHorizontalRank, VerticalRank};
 
-    /// Methods for graph vertices and edges.f
-    pub trait Graphic: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd {}
+    /// Methods for graph vertices and edges.
+    pub trait Graphic: Clone + Debug + Display + Eq + Hash + Ord + PartialEq + PartialOrd + log::Name {}
 
-    impl <T: Clone + Debug + Eq + Hash + Ord + PartialEq + PartialOrd> Graphic for T {}
+    impl <T: Clone + Debug + Display + Eq + Hash + Ord + PartialEq + PartialOrd + log::Name> Graphic for T {}
 
-    /// A graphical object to be positioned relative to other objects
-    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
-    pub enum Loc<V: Graphic + Display + log::Name, E: Graphic + Display + log::Name> {
-        /// A "box"
-        Node(V),
-        /// One hop of an "arrow"
-        Hop(VerticalRank, E, E),
-        /// A vertical border of a nested system of boxes
-        Border(Border<V>)
+
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+    pub struct ObjNode<V: Graphic>{
+        pub vl: V,
     }
 
-    impl<V: Graphic + Display + log::Name, E: Graphic + Display + log::Name> Debug for Loc<V, E> {
+    impl<'n, V: Graphic> Display for ObjNode<V> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                Self::Node(arg0) => write!(f, "Node({})", arg0),
-                Self::Hop(arg0, arg1, arg2) => write!(f, "Hop({}, {}, {})", arg0, arg1, arg2),
-                Self::Border(arg0) => write!(f, "Border({})", arg0),
+            write!(f, "{}", self.vl)
+        }
+    }
+
+    impl<'n, V: Graphic> log::Names<'n> for ObjNode<V> {
+        fn names(&self) -> Vec<Box<dyn Name + 'n>> {
+            self.vl.to_string().names()
+        }
+    }
+
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+    pub struct ObjHop<V: Graphic>{
+        pub lvl: VerticalRank,
+        pub vl: V,
+        pub wl: V,
+    }
+
+    impl<'n, V: Graphic> Display for ObjHop<V> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{} {}->{}", self.lvl, self.vl, self.wl)
+        }
+    }
+
+    impl<'n, V: Graphic + 'n> log::Names<'n> for ObjHop<V> {
+        fn names(&self) -> Vec<Box<dyn Name + 'n>> {
+            names![self.lvl, self.vl, self.wl]
+        }
+    }
+
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+    pub struct ObjContainer<V: Graphic> {
+        pub vl: V,
+    }
+
+    impl<'n, V: Graphic> Display for ObjContainer<V> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.vl)
+        }
+    }
+
+    impl<'n, V: Graphic + 'n> log::Names<'n> for ObjContainer<V> {
+        fn names(&self) -> Vec<Box<dyn Name + 'n>> {
+            self.vl.names()
+        }
+    }
+
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+    pub struct ObjBorder<V: Graphic> {
+        pub border: Border<V>,
+    }
+
+    impl<'n, V: Graphic> Display for ObjBorder<V> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.border)
+        }
+    }
+
+    impl<'n, V: Graphic + 'n> log::Names<'n> for ObjBorder<V> {
+        fn names(&self) -> Vec<Box<dyn Name + 'n>> {
+            self.border.names()
+        }
+    }
+
+    /// A graphical object to be positioned relative to other objects
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+    pub enum Obj<V: Graphic> {
+        /// A leaf "box"
+        Node(ObjNode<V>),
+        /// One hop of an "arrow"
+        Hop(ObjHop<V>),
+        /// A container of other objects
+        Container(ObjContainer<V>),
+        /// A vertical border of a nested system of boxes
+        Border(ObjBorder<V>),
+    }
+
+    impl<V: Graphic> Obj<V> {
+        pub fn from_vl(vl: &V, containers: &HashSet<V>) -> Self {
+            if containers.contains(vl) {
+                Self::Container(ObjContainer{vl: vl.clone()})
+            } else {
+                Self::Node(ObjNode{vl: vl.clone()})
             }
         }
     }
 
-    impl<'n, V, E> log::Names<'n> for Loc<V, E>
+    impl<'n, V> log::Names<'n> for Obj<V>
     where 
-        V: Graphic + Display + log::Name + 'n,
-        E: Graphic + Display + log::Name + 'n,
+        V: Graphic + 'n,
     {
         fn names(&self) -> Vec<Box<dyn log::Name + 'n>> {
             match self {
-                Loc::Node(wl) => {
-                    names![wl]
+                Obj::Node(ObjNode{vl}) => {
+                    names![vl]
                 },
-                Loc::Hop(rank, vl, wl) => {
-                    names![rank, vl, wl]
+                Obj::Hop(ObjHop{lvl, vl, wl}) => {
+                    names![lvl, vl, wl]
                 },
-                Loc::Border(Border{vl, ovr, ohr, pair}) => {
+                Obj::Container(ObjContainer{ vl }) => {
+                    names![vl]
+                },
+                Obj::Border(ObjBorder{border: Border{ vl, ovr, ohr, pair }}) => {
                     names![vl, ovr, ohr, pair]
                 },
             }
@@ -2526,40 +2607,57 @@ pub mod layout {
         }
     }
 
-    impl<V: Graphic + Display + log::Name> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>> {
-        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
+    impl<'n, V: Graphic + 'n> log::Names<'n> for Border<V> {
+        fn names(&self) -> Vec<Box<dyn Name + 'n>> {
+            let Border{ vl, ovr, ohr, pair } = self;
+            names![vl, ovr, ohr, pair]
+        }
+    }
+
+    impl<V: Graphic + Display + log::Name> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Obj<V>> {
+        fn log(&self, _cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("loc_to_node", "LocToNode", self.iter(), |loc_ix, loc, l| {
                 match loc {
-                    Loc::Node(process) => {
+                    Obj::Node(loc) => {
                         l.log_pair(
                             "Loc",
                             loc_ix.names(),
                             format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
-                            "Loc::Node",
+                            "Obj::Node",
                             loc.names(),
-                            format!("{process}"),
+                            format!("{loc}"),
                         )
                     },
-                    Loc::Hop(lvl, vl, wl) => {
+                    Obj::Hop(loc@ObjHop{lvl, vl, wl}) => {
                         l.log_pair(
                             "Loc",
                             loc_ix.names(),
                             format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
-                            "Loc::Hop",
+                            "Obj::Hop",
                             loc.names(),
                             format!("{lvl}, {vl}->{wl}")
                         )
                     }
-                    Loc::Border(Border{vl, ovr: bovr, ohr: bohr, pair}) => {
+                    Obj::Container(loc) => {
                         l.log_pair(
                             "Loc",
                             loc_ix.names(),
                             format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
-                            "Loc::Border",
+                            "Obj::Container",
                             loc.names(),
-                            format!("{vl}, {bovr}v, {bohr}h, {pair}p")
+                            format!("{loc}")
                         )
                     },
+                    Obj::Border(loc) => {
+                        l.log_pair(
+                            "Loc",
+                            loc_ix.names(),
+                            format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
+                            "Obj::Border",
+                            loc.names(),
+                            format!("{loc}")
+                        )
+                    }
                 }
             })
         }
@@ -2570,8 +2668,8 @@ pub mod layout {
         pub locs_by_level: BTreeMap<VerticalRank, usize>, 
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
-        pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Loc<V, V>>,
-        pub node_to_loc: HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>,
+        pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Obj<V>>,
+        pub node_to_loc: HashMap<Obj<V>, (VerticalRank, OriginalHorizontalRank)>,
         pub container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>>,
         pub hcg: Hcg<V>,  
     }
@@ -2646,7 +2744,7 @@ pub mod layout {
                 names![rank],
                 format!("{rank}v")
             )
-        });
+        }).map_err(|err| err.in_current_span())?;
 
         let mut loc_to_node = HashMap::new();
         let mut node_to_loc = HashMap::new();
@@ -2658,10 +2756,10 @@ pub mod layout {
                 .or_insert(0);
             let mhr = OriginalHorizontalRank(*level);
             *level += 1;
-            if let Some(old) = loc_to_node.insert((*rank, mhr), Loc::Node(wl.clone())) {
+            if let Some(old) = loc_to_node.insert((*rank, mhr), Obj::Node(ObjNode{vl: wl.clone()})) {
                 panic!("loc_to_node.insert({rank}, {mhr}) -> {:?}", old);
             };
-            node_to_loc.insert(Loc::Node(wl.clone()), (*rank, mhr));
+            node_to_loc.insert(Obj::Node(ObjNode{vl: wl.clone()}), (*rank, mhr));
         }
 
         logs.with_map("node_to_loc", "HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>", node_to_loc.iter(), |loc, loc_ix, l| {
@@ -2674,7 +2772,7 @@ pub mod layout {
                 loc_ix.names(),
                 format!("{loc_ix:?}")
             )
-        });
+        }).map_err(|err| err.in_current_span())?;
 
         event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V1");
         let is_contains = |er: &EdgeReference<_>| {
@@ -2707,8 +2805,8 @@ pub mod layout {
         let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
         for (vl, wl, _) in sorted_condensed_edges.iter() {
-            let (vvr, vhr) = node_to_loc[&Loc::Node(vl.clone())].clone();
-            let (wvr, whr) = node_to_loc[&Loc::Node(wl.clone())].clone();
+            let (vvr, vhr) = node_to_loc[&Obj::Node(ObjNode{vl: vl.clone()})].clone();
+            let (wvr, whr) = node_to_loc[&Obj::Node(ObjNode{vl: wl.clone()})].clone();
             
             let mut mhrs = vec![vhr];
             for mid_level in (vvr+1).0..(wvr.0) {
@@ -2716,10 +2814,10 @@ pub mod layout {
                 let num_mhrs = locs_by_level.entry(mid_level).or_insert(0);
                 let mhr = OriginalHorizontalRank(*num_mhrs);
                 *num_mhrs += 1;
-                if let Some(old) = loc_to_node.insert((mid_level, mhr), Loc::Hop(mid_level, vl.clone(), wl.clone())) {
+                if let Some(old) = loc_to_node.insert((mid_level, mhr), Obj::Hop(ObjHop{lvl: mid_level, vl: vl.clone(), wl: wl.clone()})) {
                     panic!("loc_to_node.insert({mid_level}, {mhr}) -> {:?}", old);
                 };
-                node_to_loc.insert(Loc::Hop(mid_level, vl.clone(), wl.clone()), (mid_level, mhr)); // BUG: what about the endpoints?
+                node_to_loc.insert(Obj::Hop(ObjHop{lvl: mid_level, vl: vl.clone(), wl: wl.clone()}), (mid_level, mhr)); // BUG: what about the endpoints?
                 mhrs.push(mhr);
             }
             mhrs.push(whr);
@@ -2751,7 +2849,7 @@ pub mod layout {
         let mut container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>> = HashMap::new();
         
         for vl in containers.iter() {
-            let (ovr, mut ohr) = node_to_loc[&Loc::Node(vl.clone())];
+            let (ovr, mut ohr) = node_to_loc[&Obj::Node(ObjNode{vl: vl.clone()})];
             let depth = container_depths[vl];
             for vr in 0..depth {
                 let vr = VerticalRank(ovr.0 + vr);
@@ -2761,11 +2859,11 @@ pub mod layout {
                 if vr > ovr {
                     ohr = OriginalHorizontalRank(*num_mhrs);
                     *num_mhrs += 1;
-                    if let Some(old) = loc_to_node.insert((vr, ohr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr: mhr, pair: ohr })) {
+                    if let Some(old) = loc_to_node.insert((vr, ohr), Obj::Border(ObjBorder{border: Border{ vl: vl.clone(), ovr: vr, ohr: mhr, pair: ohr }})) {
                         panic!("loc_to_node.insert({vr}, {ohr}) -> {:?}", old);
                     };
                 }
-                if let Some(old) = loc_to_node.insert((vr, mhr), Loc::Border(Border{ vl: vl.clone(), ovr: vr, ohr, pair: mhr })) {
+                if let Some(old) = loc_to_node.insert((vr, mhr), Obj::Border(ObjBorder{ border: Border{vl: vl.clone(), ovr: vr, ohr, pair: mhr }})) {
                     panic!("loc_to_node.insert({vr}, {mhr}) -> {:?}", old);
                 };
                 container_borders.entry(vl.clone()).or_default().push((vr, (ohr, mhr)));
@@ -2778,7 +2876,7 @@ pub mod layout {
 
         eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
 
-        let mut g_hops = Graph::<(VerticalRank, OriginalHorizontalRank), (VerticalRank, V, V)>::new();
+        let mut g_hops = Graph::<LocIx, (VerticalRank, V, V)>::new();
         let mut g_hops_vx = HashMap::new();
         for (_rank, hops) in hops_by_level.iter() {
             for Hop{mhr, nhr, vl, wl, lvl} in hops.iter() {
@@ -2851,57 +2949,6 @@ pub mod layout {
         }
     }
 
-    pub mod debug {
-        //! Debug-print helpers for layout problems.
-        use std::{collections::{HashMap}, fmt::Display};
-
-        use petgraph::{Graph, dot::Dot};
-        use tracing::{event, Level};
-
-        use crate::graph_drawing::{layout::{LayoutProblem, Loc, or_insert, LayoutSolution}};
-
-        use super::Graphic;
-
-        use crate::graph_drawing::frontend::log;
-        
-        /// Print a graphviz "dot" representation of the solution `solved_locs` 
-        /// to `layout_problem`
-        pub fn debug<V: Display + Graphic + log::Name>(layout_problem: &LayoutProblem<V>, layout_solution: &LayoutSolution) {
-            let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
-            let LayoutSolution{solved_locs, ..} = &layout_solution;
-            let mut layout_debug = Graph::<String, String>::new();
-            let mut layout_debug_vxmap = HashMap::new();
-            for ((vl, wl), hops) in hops_by_edge.iter() {
-                // if *vl == "root" { continue; }
-                let vn = node_to_loc[&Loc::Node(vl.clone())];
-                let wn = node_to_loc[&Loc::Node(wl.clone())];
-                let vshr = solved_locs[&vn.0][&vn.1];
-                let wshr = solved_locs[&wn.0][&wn.1];
-
-                let vx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {vshr}"));
-                let wx = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{wl} {wshr}"));
-
-                for (n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                    let shr = solved_locs[lvl][mhr];
-                    let shrd = solved_locs[&(*lvl+1)][nhr];
-                    let lvl1 = *lvl+1;
-                    let vxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl},{shr}"));
-                    let wxh = or_insert(&mut layout_debug, &mut layout_debug_vxmap, format!("{vl} {wl} {lvl1},{shrd}"));
-                    layout_debug.add_edge(vxh, wxh, format!("{lvl},{shr}->{lvl1},{shrd}"));
-                    if n == 0 {
-                        layout_debug.add_edge(vx, vxh, format!("{lvl1},{shrd}"));
-                    }
-                    if n == hops.len()-1 {
-                        layout_debug.add_edge(wxh, wx, format!("{lvl1},{shrd}"));
-                    }
-                }
-            }
-            let layout_debug_dot = Dot::new(&layout_debug);
-            event!(Level::TRACE, %layout_debug_dot, "LAYOUT GRAPH");
-            eprintln!("LAYOUT GRAPH\n{layout_debug_dot:?}");
-        }
-    }
-
     pub mod heaps {
         use std::collections::{BTreeMap, HashMap};
         use std::fmt::{Display};
@@ -2910,7 +2957,7 @@ pub mod layout {
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
         use crate::graph_drawing::layout::{Hop};
         
-        use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Loc, Vcg};
+        use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Obj, Vcg, ObjNode, ObjHop, ObjBorder, ObjContainer};
 
         #[inline]
         pub fn is_odd(x: usize) -> bool {
@@ -3025,7 +3072,7 @@ pub mod layout {
         fn conforms<V: Graphic + Display + log::Name, E: Graphic>(
             vcg: &Vcg<V, E>, 
             layout_problem: &LayoutProblem<V>, 
-            locs_by_level2: &Vec<Vec<&Loc<V, V>>>, 
+            locs_by_level2: &Vec<Vec<&Obj<V>>>, 
             nodes_by_container2: &HashMap<V, Vec<(VerticalRank, OriginalHorizontalRank)>>, 
             p: &mut [&mut [usize]]
         ) -> bool {
@@ -3034,8 +3081,8 @@ pub mod layout {
 
             let hcg_satisfied = hcg.iter().all(|constraint| {
                 let HorizontalConstraint{a, b} = constraint;
-                let an = if let Some(an) = node_to_loc.get(&Loc::Node(a.clone())) { an } else { return true; };
-                let bn = if let Some(bn) = node_to_loc.get(&Loc::Node(b.clone())) { bn } else { return true; };
+                let an = if let Some(an) = node_to_loc.get(&Obj::Node(ObjNode{vl: a.clone()})) { an } else { return true; };
+                let bn = if let Some(bn) = node_to_loc.get(&Obj::Node(ObjNode{vl: b.clone()})) { bn } else { return true; };
                 let aovr = an.0.0;
                 let aohr = an.1.0;
                 let bovr = bn.0.0;
@@ -3062,13 +3109,16 @@ pub mod layout {
                         let mid_ohr = p[covr].iter().position(|shr| *shr == mid_shr).unwrap();
                         let mid_loc = &level[mid_ohr];
                         match mid_loc {
-                            Loc::Node(ml) => {
+                            Obj::Node(ObjNode{vl: ml}) => {
                                 contents.contains(&ml)
                             },
-                            Loc::Hop(_mvr, mvl, mwl) => {
+                            Obj::Hop(ObjHop{vl: mvl, wl: mwl, ..}) => {
                                 contents.contains(&mvl) || contents.contains(&mwl)
                             },
-                            Loc::Border(mb) => {
+                            Obj::Container(ObjContainer{vl: ml}) => {
+                                contents.contains(&ml)
+                            },
+                            Obj::Border(ObjBorder{border: mb}) => {
                                 contents.contains(&mb.vl)
                             },
                         }
@@ -3095,14 +3145,13 @@ pub mod layout {
         }
 
         /// minimize_edge_crossing returns the obtained crossing number and a map of (ovr -> (ohr -> shr))
-        #[allow(clippy::type_complexity)]
         pub fn minimize_edge_crossing<V>(
             vcg: &Vcg<V, V>,
             layout_problem: &LayoutProblem<V>
         ) -> Result<LayoutSolution, Error> where
             V: Display + Graphic + log::Name
         {
-            let Vcg{nodes_by_container, ..} = vcg;
+            let Vcg{containers, nodes_by_container, ..} = vcg;
             let LayoutProblem{loc_to_node, node_to_loc, locs_by_level, hops_by_level, ..} = layout_problem;
 
             eprintln!("MINIMIZE");
@@ -3149,7 +3198,9 @@ pub mod layout {
 
             let mut nodes_by_container2 = HashMap::new();
             for (container, nodes) in nodes_by_container.iter() {
-                let nodes = nodes.iter().map(|vl| node_to_loc[&Loc::Node(vl.clone())]).collect::<Vec<_>>();
+                let nodes = nodes.iter()
+                    .map(|vl| node_to_loc[&Obj::from_vl(vl, containers)])
+                    .collect::<Vec<_>>();
                 nodes_by_container2.insert(container.clone(), nodes);
             }
 
@@ -3313,11 +3364,11 @@ pub mod geometry {
     use osqp as osqp;
 
     use petgraph::EdgeDirection::{Outgoing, Incoming};
-    use petgraph::visit::EdgeRef;
-    use tracing::{event, Level, instrument};
+    use petgraph::Graph;
+    use petgraph::visit::{EdgeRef, IntoNodeReferences};
+    use tracing::{event, Level};
     use tracing_error::InstrumentError;
 
-    use crate::graph_drawing::layout::{HorizontalConstraint};
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples, as_scipy, as_numpy};
 
     use super::error::{LayoutError};
@@ -3326,11 +3377,11 @@ pub mod geometry {
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Loc, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n, Ls2n};
+    use super::layout::{Obj, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n, Ls2n, or_insert, ObjHop};
 
     use std::borrow::Cow;
-    use std::cmp::{max, max_by};
-    use std::collections::{HashMap, BTreeMap, HashSet};
+    use std::cmp::{max};
+    use std::collections::{HashMap, BTreeMap};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
 
@@ -3406,7 +3457,7 @@ pub mod geometry {
         pub ovr: VerticalRank,
         pub ohr: OriginalHorizontalRank,
         pub shr: SolvedHorizontalRank,
-        pub loc: Loc<V, V>,
+        pub loc: Obj<V>,
         pub n: LocSol,
     }
     
@@ -3547,7 +3598,7 @@ pub mod geometry {
     pub type HopIx<V> = (VerticalRank, OriginalHorizontalRank, V, V);
     
     /// ovr, ohr -> loc
-    pub type LocNodeMap<V> = HashMap<LocIx, Loc<V, V>>;
+    pub type LocNodeMap<V> = HashMap<LocIx, Obj<V>>;
     
     /// lvl -> (mhr, nhr)
     pub type HopMap = BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>;
@@ -3562,12 +3613,6 @@ pub mod geometry {
         let LayoutSolution{solved_locs, ..} = layout_solution;
 
         eprintln!("SOLVED_LOCS {solved_locs:#?}");
-        let sorted_loc_to_node = loc_to_node.iter()
-            .map(|(loc, node)| 
-                ((loc.0, loc.1), node)
-            )
-            .collect::<BTreeMap<(VerticalRank, OriginalHorizontalRank), _>>();
-        eprintln!("LOC_TO_NODE CALC: {sorted_loc_to_node:#?}");
 
         let all_locs = solved_locs
             .iter()
@@ -3581,15 +3626,8 @@ pub mod geometry {
         eprintln!("ALL_LOCS {all_locs:#?}");
     
         let mut sol_by_loc = HashMap::new();
-        let mut sol_by_loc2 = HashMap::<LocIx, Vec<_>>::new();
-        for LocRow{ovr, ohr, shr, loc, n} in all_locs.iter() {
+        for LocRow{ovr, ohr, n, ..} in all_locs.iter() {
             sol_by_loc.insert((*ovr, *ohr), *n);
-            sol_by_loc2.entry((*ovr, *ohr)).or_default().push((shr, loc, *n))
-        }
-        for (loc, duplications) in sol_by_loc2.iter() {
-            if duplications.len() > 1 {
-                event!(Level::ERROR, ?loc, ?duplications, "all_locs DUPLICATION");
-            }
         }
     
         let all_hops0 = hops_by_level
@@ -3624,24 +3662,8 @@ pub mod geometry {
             .collect::<Vec<_>>();
         
         let mut sol_by_hop = HashMap::new();
-        let mut sol_by_hop2 = HashMap::<(VerticalRank, OriginalHorizontalRank, OriginalHorizontalRank), Vec<_>>::new();
-        let mut sol_by_hop3 = HashMap::<(VerticalRank, OriginalHorizontalRank, OriginalHorizontalRank), Vec<_>>::new();
-        for HopRow{lvl, mhr, nhr, vl, wl, n} in all_hops.iter() {
+        for HopRow{lvl, mhr, vl, wl, n, ..} in all_hops.iter() {
             sol_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), *n);
-            sol_by_hop2.entry((*lvl, *mhr, *nhr)).or_default().push((vl.clone(), wl.clone(), *nhr, *n));
-        }
-        for HopRow{lvl, mhr, nhr, vl, wl, n} in all_hops0.iter() {
-            sol_by_hop3.entry((*lvl, *mhr, *nhr)).or_default().push((vl.clone(), wl.clone(), *nhr, *n));
-        }
-        for (loc, duplications) in sol_by_hop2.iter() {
-            if duplications.len() > 1 {
-                event!(Level::ERROR, ?loc, ?duplications, "all_hops DUPLICATION");
-            }
-        }
-        for (loc, duplications) in sol_by_hop3.iter() {
-            if duplications.len() > 1 {
-                event!(Level::ERROR, ?loc, ?duplications, "all_hops0 DUPLICATION");
-            }
         }
     
         let size_by_loc = HashMap::new();
@@ -3714,7 +3736,7 @@ pub mod geometry {
             l.with_set(cx.0.clone(), "OptimizationProblem.Constraints", self.c.iter(), |(lower, monomials, upper), l| {
                 let mut s = String::new();
                 let mut monomial_names = vec![];
-                write!(s, "{lower} <= ");
+                write!(s, "{lower} <= ")?;
                 for term in monomials.iter() {
                     monomial_names.append(&mut term.var.names());
                     match term.var.sol {
@@ -3726,10 +3748,10 @@ pub mod geometry {
                         },
                         _ => {},
                     }
-                    write!(s, "{term} ");
+                    write!(s, "{term} ")?;
                 }
                 if *upper != f64::INFINITY {
-                    writeln!(s, "<= {upper}");
+                    writeln!(s, "<= {upper}")?;
                 }
                 let monomial_names = monomial_names.into_iter().map(|n| n.name()).collect::<Vec<_>>();
                 l.log_element("Constraint", monomial_names, s)?;
@@ -3761,7 +3783,7 @@ pub mod geometry {
                         vec![],
                         format!("{:.0}", coord.round())
                     )
-                });
+                })?;
                 l.with_map("rs", "BTreeMap<LocSol, f64>", self.rs.iter(), |ls, coord, l| {
                     let mut src_names = ls.names();
                     src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
@@ -3773,7 +3795,7 @@ pub mod geometry {
                         vec![],
                         format!("{:.0}", coord.round())
                     )
-                });
+                })?;
                 l.with_map("ts", "BTreeMap<LocSol, f64>", self.ts.iter(), |ls, coord, l| {
                     let mut src_names = ls.names();
                     src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
@@ -3785,7 +3807,7 @@ pub mod geometry {
                         vec![],
                         format!("{:.0}", coord.round())
                     )
-                });
+                })?;
                 l.with_map("bs", "BTreeMap<LocSol, f64>", self.bs.iter(), |ls, coord, l| {
                     let mut src_names = ls.names();
                     src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
@@ -3797,7 +3819,7 @@ pub mod geometry {
                         vec![],
                         format!("{:.0}", coord.round())
                     )
-                });
+                })?;
                 l.with_map("ss", "BTreeMap<LocSol, f64>", self.ss.iter(), |hs, coord, l| {
                     let mut src_names = hs.names();
                     src_names.append(&mut cx(LayoutSol::HopSol(*hs)));
@@ -3809,12 +3831,13 @@ pub mod geometry {
                         vec![],
                         format!("{:.0}", coord.round())
                     )
-                });
+                })?;
                 Ok(())
             })
         }
     }
 
+    #[allow(dead_code)]
     fn update_min_width<V: Graphic + Display + Len + log::Name, E: Graphic>(
         vcg: &Vcg<V, E>, 
         layout_problem: &LayoutProblem<V>,
@@ -3823,7 +3846,7 @@ pub mod geometry {
         min_width: &mut usize, 
         vl: &V
     ) -> Result<(), Error> {
-        let Vcg{vert: dag, vert_vxmap: dag_map, ..} = vcg;
+        let Vcg{vert: dag, vert_vxmap: dag_map, containers, ..} = vcg;
         let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = layout_solution;
         let GeometryProblem{size_by_hop, ..} = geometry_problem;
@@ -3852,7 +3875,7 @@ pub mod geometry {
 
         v_dsts.sort(); v_dsts.dedup();
         v_dsts.sort_by_key(|dst| {
-            let (ovr, ohr) = node_to_loc[&Loc::Node(dst.clone())];
+            let (ovr, ohr) = node_to_loc[&Obj::from_vl(dst, containers)];
             let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
             (shr, -(svr.0 as i32))
         });
@@ -3863,7 +3886,7 @@ pub mod geometry {
 
         w_srcs.sort(); w_srcs.dedup();
         w_srcs.sort_by_key(|src| {
-            let (ovr, ohr) = node_to_loc[&Loc::Node(src.clone())];
+            let (ovr, ohr) = node_to_loc[&Obj::from_vl(src, containers)];
             let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
             (shr, -(svr.0 as i32))
         });
@@ -3917,6 +3940,61 @@ pub mod geometry {
         Ok(())
     }
 
+    pub fn position_sols<V, E, S, C>(
+        _vcg: &Vcg<V, E>,
+        layout_problem: &LayoutProblem<V>,
+        _layout_solution: &LayoutSolution,
+        geometry_problem: &GeometryProblem<V>
+    ) -> Result<(OptimizationProblem<S, C>, OptimizationProblem<S, C>), Error> 
+    where
+        V: Graphic + Display + log::Name,
+        S: Sol,
+        C: Coeff,
+    {
+        let all_locs = &geometry_problem.all_locs;
+        let all_hops0 = &geometry_problem.all_hops0;
+        // let all_hops = &geometry_problem.all_hops;
+        let loc_to_node = &layout_problem.loc_to_node;
+        let sol_by_loc = &geometry_problem.sol_by_loc;
+        let sol_by_hop = &geometry_problem.sol_by_hop;
+
+        // let obj_count = all_locs.len() + all_hops.len();
+
+        let mut obj_graph = Graph::<LocIx, OrderedFloat<f64>>::new();
+        let mut obj_vxmap = HashMap::new();
+        for loc in all_locs.iter() {
+            or_insert(&mut obj_graph, &mut obj_vxmap, (loc.ovr, loc.ohr));
+        }
+        for hop in all_hops0.iter() {
+            or_insert(&mut obj_graph, &mut obj_vxmap, (hop.lvl, hop.mhr));
+            or_insert(&mut obj_graph, &mut obj_vxmap, (hop.lvl+1, hop.nhr));
+        }
+
+        let mut con_graph = Graph::<AnySol, OrderedFloat<f64>>::new();
+        let mut con_vxmap = HashMap::new();
+        for (_, loc_ix) in obj_graph.node_references() {
+            match &loc_to_node[loc_ix] {
+                Obj::Node(_) | Obj::Container(_) => {
+                    let ls = sol_by_loc[loc_ix];
+                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(ls));
+                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(ls));
+                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(ls));
+                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(ls));
+                },
+                Obj::Hop(ObjHop{vl, wl, ..}) => {
+                    let hs = sol_by_hop[&(loc_ix.0, loc_ix.1, vl.clone(), wl.clone())];
+                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::S(hs));
+                },
+                Obj::Border(_) => {
+                    todo!();
+                }
+            }
+        }
+
+        let vertical_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
+        let horizontal_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
+        Ok((horizontal_problem, vertical_problem))
+    }
 
     fn solve_problem<S: Sol, C: Coeff>(
         optimization_problem: &OptimizationProblem<S, C>
@@ -4032,628 +4110,6 @@ pub mod geometry {
         vs
     }
 
-    #[instrument]
-    pub fn position_sols<'s, V, E>(
-        vcg: &'s Vcg<V, E>,
-        layout_problem: &'s LayoutProblem<V>,
-        layout_solution: &'s LayoutSolution,
-        geometry_problem: &'s GeometryProblem<V>,
-    ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error> where 
-        V: Display + Graphic + Len + log::Name,
-        E: Graphic
-    {
-        let Vcg{
-            vert_edge_labels: dag_edge_labels, 
-            containers,
-            nodes_by_container,
-            nesting_depth_by_container,
-            container_depths,
-            ..
-        } = vcg;
-        let LayoutProblem{
-            hops_by_edge,
-            node_to_loc,
-            loc_to_node,
-            hcg,
-            container_borders,
-            ..
-        } = layout_problem;
-        let LayoutSolution{solved_locs, ..} = &layout_solution;
-        let GeometryProblem{
-            all_locs, 
-            all_hops, 
-            sol_by_loc, 
-            sol_by_hop, 
-            size_by_loc, 
-            size_by_hop,
-            char_width,
-            height_scale,
-            line_height,
-            nesting_top_padding,
-            nesting_bottom_padding,
-            ..
-        } = geometry_problem;
-
-        let char_width = char_width.unwrap_or(9.);
-        let height_scale = height_scale.unwrap_or(100.);
-        let line_height = line_height.unwrap_or(20.);
-        let nesting_top_padding = nesting_top_padding.unwrap_or(40.);
-        let nesting_bottom_padding = nesting_bottom_padding.unwrap_or(10.);
-    
-        let mut max_edge_label_height_by_rank = BTreeMap::<VerticalRank, usize>::new();
-        for (node, loc) in node_to_loc.iter() {
-            let (ovr, _ohr) = loc;
-            if let Loc::Node(vl) = node {
-                let height_max = max_edge_label_height_by_rank.entry(*ovr).or_default();
-                for (vl2, dsts) in dag_edge_labels.iter() {
-                    if vl == vl2 {
-                        let edge_labels = dsts
-                            .iter()
-                            .flat_map(|(_, rels)| rels
-                                .iter()
-                                .map(|(_, labels)| labels.len()))
-                            .max()
-                            .unwrap_or(1);
-                        *height_max = max(*height_max, max(0, (edge_labels as i32) - 1) as usize);
-                    } 
-                }
-            } else {
-                max_edge_label_height_by_rank.entry(*ovr).or_default();
-            }
-        }
-        // in each row, if there are containers, then there is a biggest container
-        let mut max_nesting_span_by_rank = BTreeMap::<VerticalRank, usize>::new();
-        let mut max_nesting_depth_by_rank = BTreeMap::<VerticalRank, usize>::new();
-        for container in containers.iter() {
-            let (ovr, _ohr) = node_to_loc[&Loc::Node(container.clone())];
-            let nesting_span = container_depths[container];
-            let nesting_depth = nesting_depth_by_container[container] + 1;
-
-            let max_span = max_nesting_span_by_rank.entry(ovr).or_default();
-            *max_span = max(*max_span, nesting_span);
-
-            let max_depth = max_nesting_depth_by_rank.entry(ovr).or_default();
-            *max_depth = max(*max_depth, nesting_depth);
-        }
-        
-        eprintln!("EDGE LABEL HEIGHTS {max_edge_label_height_by_rank:#?}");
-        eprintln!("SPAN HEIGHTS {max_nesting_span_by_rank:#?}");
-        eprintln!("PADDING HEIGHTS {max_nesting_depth_by_rank:#?}");
-        event!(Level::TRACE, ?size_by_hop, "SIZE BY HOP");
-        
-    
-        let sep = 20.0;
-
-        let mut vh: Vars<AnySol> = Vars::new();
-        let mut ch: Constraints<AnySol, OrderedFloat<f64>> = Constraints::new();
-        let mut pdh: Vec<Monomial<AnySol, OrderedFloat<f64>>> = vec![];
-        let mut qh: Vec<Monomial<AnySol, OrderedFloat<f64>>> = vec![];
-
-        let mut vv: Vars<AnySol> = Vars::new();
-        let mut cv: Constraints<AnySol, OrderedFloat<f64>> = Constraints::new();
-        let mut pdv: Vec<Monomial<AnySol, OrderedFloat<f64>>> = vec![];
-        let mut qv: Vec<Monomial<AnySol, OrderedFloat<f64>>> = vec![];
-
-        let l = AnySol::L;
-        let r = AnySol::R;
-        let s = AnySol::S;
-        let t = AnySol::T;
-        let b = AnySol::B;
-        let h = AnySol::H;
-
-        eprintln!("SOL_BY_LOC: {sol_by_loc:#?}");
-        
-        let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
-        qh.push(vh.get(r(root_n)));
-        qv.push(vv.get(b(root_n)));
-
-        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        enum Loc2<V> {
-            Node{vl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: LocSol},
-            Hop{vl: V, wl: V, loc: LocIx, shr: SolvedHorizontalRank, sol: HopSol, pshr: Option<SolvedHorizontalRank>},
-        }
-
-        let mut level_to_object = BTreeMap::<VerticalRank, BTreeMap<SolvedHorizontalRank, HashSet<_>>>::new();
-        for ((vl, wl), hops) in hops_by_edge.iter() {
-            let vn = node_to_loc[&Loc::Node(vl.clone())];
-            let wn = node_to_loc[&Loc::Node(wl.clone())];
-            let vshr = solved_locs[&vn.0][&vn.1];
-            let wshr = solved_locs[&wn.0][&wn.1];
-            let vsol = sol_by_loc[&vn];
-            let wsol = sol_by_loc[&wn];
-
-            level_to_object.entry(vn.0).or_default().entry(vshr).or_default().insert(Loc2::Node{vl, loc: vn, shr: vshr, sol: vsol});
-            level_to_object.entry(wn.0).or_default().entry(wshr).or_default().insert(Loc2::Node{vl: wl, loc: wn, shr: wshr, sol: wsol});
-
-            for (_n, (lvl, (mhr, nhr))) in hops.iter().enumerate() {
-                let shr = solved_locs[lvl][mhr];
-                let shrd = solved_locs[&(*lvl+1)][nhr];
-                let lvl1 = *lvl+1;
-                let src_sol = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
-                let dst_sol = sol_by_hop[&(lvl1, *nhr, vl.clone(), wl.clone())];
-                level_to_object.entry(*lvl).or_default().entry(shr).or_default().insert(Loc2::Hop{vl, wl, loc: (*lvl, *mhr), shr, sol: src_sol, pshr: None});
-                level_to_object.entry(lvl1).or_default().entry(shrd).or_default().insert(Loc2::Hop{vl, wl, loc: (lvl1, *nhr), shr: shrd, sol: dst_sol, pshr: Some(shr)});
-            }
-        }
-        event!(Level::TRACE, ?level_to_object, "LEVEL TO OBJECT");
-        // eprintln!("LEVEL TO OBJECT: {level_to_object:#?}");
-
-        for ovr in 0..solved_locs.len() {
-            if ovr == 0 {
-                cv.leq(&mut vv, t(root_n), h(VerticalRank(ovr)));
-            } else {
-                cv.leqc(&mut vv, h(VerticalRank(ovr-1)), h(VerticalRank(ovr)), 20.);
-            }
-            qv.push(vv.get(h(VerticalRank(ovr))));
-        }
-
-        for LocRow{ovr, ohr, loc, ..} in all_locs.iter() {
-            let ovr = *ovr; 
-            let ohr = *ohr;
-            let locs = &solved_locs[&ovr];
-            let shr = locs[&ohr];
-            let n = sol_by_loc[&(ovr, ohr)];
-            let node_width = size_by_loc.get(&(ovr, ohr))
-                .ok_or_else::<Error,_>(|| LayoutError::OsqpError{error: format!("missing node width: {ovr}, {ohr}")}.in_current_span().into())?;
-            let mut min_width = node_width.width.round() as usize;
-
-            if let Loc::Node(vl) = loc {
-                update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut min_width, vl)?;
-            }
-
-            if let Loc::Hop(_lvl, vl, wl) = loc {
-                let ns = sol_by_hop[&(ovr, ohr, vl.clone(), wl.clone())];
-                ch.leq(&mut vh, l(n), s(ns));
-                ch.leq(&mut vh, s(ns), r(n));
-                event!(Level::TRACE, ?loc, %n, %min_width, "X3: l{n} <= s{ns} <= r{n}");
-            }
-        
-            if n != root_n {
-                ch.leq(&mut vh, l(root_n), l(n));
-                ch.leq(&mut vh, r(n), r(root_n));
-            }
-            event!(Level::TRACE, ?loc, %n, %min_width, "X0: r{n} >= l{n} + {min_width:.0?}");
-            ch.leqc(&mut vh, l(n), r(n), min_width as f64);
-            // ch.leqc(&mut vh, l(n), r(n), 40. + min_width as f64);
-            // ch.sym(&mut vh, &mut pdh, l(n), r(n), 10000.);
-
-            if let Loc::Node(vl) = loc {
-                cv.leq(&mut vv, h(ovr), t(n));
-                eprintln!("VERTICAL SPAN: {loc:?}");
-                cv.leqc(&mut vv, t(n), b(n), 26.);
-                if !containers.contains(vl) {
-                    cv.leqc(&mut vv, b(n), h(ovr+1), 50.);
-                }
-            }
-            qv.push(vv.get(b(n)));
-
-            if let Loc::Border(_) = loc {
-                continue;
-            }
-
-            if let Some(ohrp) = locs.iter().position(|(_, shrp)| *shrp+1 == shr).map(OriginalHorizontalRank) {
-                let mut process = true;
-                if let Loc::Node(vl) = loc {
-                    let vll = &loc_to_node[&(ovr, ohrp)];
-                    if let Loc::Node(vll) = vll {
-                        if containers.contains(vl) && nodes_by_container[vl].contains(vll) 
-                        || containers.contains(vll) && nodes_by_container[vll].contains(vl) {
-                            process = false;
-                        }
-                    }
-                }
-                if process {
-                    let np = sol_by_loc[&(ovr, ohrp)];
-                    let shrp = locs[&ohrp];
-                    let wp = &size_by_loc[&(ovr, ohrp)];
-                    let gap = max_by(sep, wp.right + node_width.left, f64::total_cmp);
-                    ch.leqc(&mut vh, r(np), l(n), gap);
-                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrp, %shrp, %np, %gap, "X1: l{n} >= r{np} + ε")
-                }
-            }
-            if let Some(ohrn) = locs.iter().position(|(_, shrn)| *shrn == shr+1).map(OriginalHorizontalRank) {
-                let mut process = true;
-                if let Loc::Node(vl) = loc {
-                    let vlr = &loc_to_node[&(ovr, ohrn)];
-                    if let Loc::Node(vlr) = vlr {
-                        if containers.contains(vl) && nodes_by_container[vl].contains(vlr) 
-                        || containers.contains(vlr) && nodes_by_container[vlr].contains(vl) {
-                            process = false;
-                        }
-                    }
-                }
-                if process {
-                    let nn = sol_by_loc[&(ovr,ohrn)];
-                    let shrn = locs[&(ohrn)];
-                    let wn = &size_by_loc[&(ovr, ohrn)];
-                    let gap = max_by(sep, node_width.right + wn.left, f64::total_cmp);
-                    ch.leqc(&mut vh, r(n), l(nn), gap);
-                    event!(Level::TRACE, ?loc, %ovr, %ohr, %shr, %n, %ovr, %ohrn, %shrn, %nn, %gap, "X2: r{n} <= l{nn} - ε")
-                }
-            }
-        }
-
-        let mut already_seen = HashSet::new();
-        for hop_row in all_hops.iter() {
-            let HopRow{lvl, mhr, nhr, vl, wl, ..} = &hop_row;
-
-            let shr = &solved_locs[lvl][mhr];
-            let n = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
-            let vloc = node_to_loc[&Loc::Node(vl.clone())].clone();
-            let wloc = node_to_loc[&Loc::Node(wl.clone())].clone();
-            let vn = sol_by_loc[&vloc];
-            let wn = sol_by_loc[&wloc];
-
-            // the hop that we're positioning is either freefloating or attached.
-            // we'll have separate hoprows for the top and the bottom of each hop.
-            // terminal hoprows have nhr >> |graph|.
-            // if we're freefloating, then our horizontal adjacencies are null, 
-            // boxes, or (possibly-labeled) hops.
-            // otherwise, if we're attached, we have a node and so we need to 
-            // figure out if we're on that node; hence whether we are terminal 
-            // or we have a downward successor.
-            // finally, if we are attached, we need to position ourselves w.r.t. the
-            // boundaries of the node we're attached to and to any other parallel hops.
-            let all_objects = &level_to_object[lvl][shr];
-            let node = all_objects.iter().find(|loc| matches!(loc, Loc2::Node{..}));
-            let num_objects: usize = level_to_object.iter().flat_map(|row| row.1.iter().map(|cell| cell.1.len())).sum();
-            let terminal = nhr.0 > num_objects;
-            let default_hop_size = HopSize{width: 0., left: 20., right: 20., height: 50., top: 0., bottom: 0.};
-            let hop_size = &size_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).unwrap_or(&default_hop_size);
-            let (action_width, percept_width, min_hop_height) = (hop_size.left, hop_size.right, hop_size.height);
-            // flow_width, flow_rev_width?
-
-            ch.leqc(&mut vh, l(root_n), s(n), action_width);
-            ch.leqc(&mut vh, s(n), r(root_n), percept_width);
-
-            if !already_seen.contains(&(vn, wn)) {
-                cv.leqc(&mut vv, b(vn), t(wn), min_hop_height);
-                already_seen.insert((vn, wn));
-            }
-            
-            // qv.push(vv.get(b(wn)));
-            cv.sym(&mut vv, &mut pdv, b(wn), t(vn), 1.);
-            
-
-            if !terminal {
-                let nd = sol_by_hop[&((*lvl+1), *nhr, (*vl).clone(), (*wl).clone())];
-                ch.sym(&mut vh, &mut pdh, s(n), s(nd), 1.);
-            }
-
-            event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP START");
-            if let Some(Loc2::Node{sol: nd, ..}) = node {
-                ch.geqc(&mut vh, s(n), l(*nd), sep + action_width);
-                ch.leqc(&mut vh, s(n), r(*nd), sep + percept_width);
-
-                if terminal {
-                    let mut terminal_hops = all_objects
-                        .iter()
-                        .filter(|obj| { matches!(obj, Loc2::Hop{wl: owl, pshr, ..} if *owl == wl && pshr.is_some()) })
-                        .collect::<Vec<_>>();
-                        #[allow(clippy::unit_return_expecting_ord)]
-
-                    terminal_hops.sort_by_key(|hop| {
-                        if let Loc2::Hop{pshr: Some(pshr), ..} = hop {
-                            pshr
-                        } else {
-                            unreachable!();
-                        }
-                    });
-                    event!(Level::TRACE, ?hop_row, ?node, ?terminal_hops, "POS HOP TERMINAL");
-
-                    for (ox, hop) in terminal_hops.iter().enumerate() {
-                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
-                            let owidth = size_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_size);
-                            if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| terminal_hops.get(oxl)) {
-                                let owidth_l = size_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_size);
-                                ch.leqc(&mut vh, s(*onl), s(*on), sep + owidth_l.right + owidth.left);
-                            }
-                            if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = terminal_hops.get(ox+1) {
-                                let owidth_r = size_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_size);
-                                ch.leqc(&mut vh, s(*on), s(*onr), sep + owidth_r.left + owidth.right);
-                            }
-                        }
-                    }
-                } else {
-                    let mut initial_hops = all_objects
-                        .iter()
-                        .filter(|obj| { matches!(obj, Loc2::Hop{vl: ovl, loc: (_, onhr), ..} if *ovl == vl && onhr.0 <= num_objects) })
-                        .collect::<Vec<_>>();
-
-                    #[allow(clippy::unit_return_expecting_ord)]
-                    initial_hops.sort_by_key(|hop| {
-                        if let Loc2::Hop{vl: hvl, wl: hwl, ..} = hop {
-                            #[allow(clippy::unwrap_used)]
-                            let (hvr, (_hmhr, hnhr)) = hops_by_edge[&((*hvl).clone(), (*hwl).clone())].iter().next().unwrap();
-                            solved_locs[&(*hvr+1)][hnhr]
-                        } else {
-                            unreachable!()
-                        }
-                    });
-                    
-                    event!(Level::TRACE, ?hop_row, ?node, ?initial_hops, "POS HOP INITIAL");
-
-                    for (ox, hop) in initial_hops.iter().enumerate() {
-                        if let Loc2::Hop{vl: ovl, wl: owl, loc: (oovr, oohr), sol: on, ..} = hop {
-                            let owidth = size_by_hop.get(&(*oovr, *oohr, (*ovl).clone(), (*owl).clone())).unwrap_or(&default_hop_size);
-                            if let Some(Loc2::Hop{vl: ovll, wl: owll, loc: (oovrl, oohrl), sol: onl, ..}) = ox.checked_sub(1).and_then(|oxl| initial_hops.get(oxl)) {
-                                let owidth_l = size_by_hop.get(&(*oovrl, *oohrl, (*ovll).clone(), (*owll).clone())).unwrap_or(&default_hop_size);
-                                ch.leqc(&mut vh, s(*onl), s(*on), sep + owidth_l.right + owidth.left);
-                            }
-                            if let Some(Loc2::Hop{vl: ovlr, wl: owlr, loc: (ovrr, oohrr), sol: onr, ..}) = initial_hops.get(ox+1) {
-                                let owidth_r = size_by_hop.get(&(*ovrr, *oohrr, (*ovlr).clone(), (*owlr).clone())).unwrap_or(&default_hop_size);
-                                ch.leqc(&mut vh, s(*on), s(*onr), sep + owidth_r.left + owidth.right);
-                            }
-                        }
-                    }
-                }
-            }
-        
-            let same_height_objects = &level_to_object[lvl];
-
-            if let Some(left_objects) = shr.0.checked_sub(1).and_then(|shrl| same_height_objects.get(&SolvedHorizontalRank(shrl))) {
-                event!(Level::TRACE, ?left_objects, "POS LEFT OBJECTS");
-                for lo in left_objects.iter() {
-                    event!(Level::TRACE, ?lo, "POS LEFT OBJECT");
-                    match lo {
-                        Loc2::Node{sol: ln, ..} => {
-                            ch.geqc(&mut vh, s(n), r(*ln), sep + action_width);
-                        },
-                        Loc2::Hop{vl: lvl, wl: lwl, loc: (lvr, lhr), sol: ln, ..} => {
-                            let hop_size_l = size_by_hop.get(&(*lvr, *lhr, (*lvl).clone(), (*lwl).clone())).unwrap_or(&default_hop_size);
-                            ch.geqc(&mut vh, s(n), s(*ln), (2.*sep) + hop_size_l.right + hop_size.left);
-                            
-                            // let lvl = (*lvl).clone();
-                            // let lwl = (*lwl).clone();
-                            // let lvloc = &node_to_loc[&Loc::Node(lvl.clone())];
-                            // let lwloc = &node_to_loc[&Loc::Node(lwl.clone())];
-                            // if vl != &lvl && lvloc.0 == *ovr {
-                            //     let lvn = sol_by_loc[lvloc];
-                            //     ch.geqc(&mut vh, s(n), r(lvn), sep + action_width);
-                            // }
-                            // if wl != &lwl && lwloc.0 == *ovr+1 {
-                            //     let lwn = sol_by_loc[lwloc];
-                            //     ch.geqc(&mut vh, s(n), r(lwn), sep + action_width);
-                            // }
-                        },
-                    }
-                }
-            }
-
-            if let Some(right_objects) = same_height_objects.get(&(*shr+1)) {
-                event!(Level::TRACE, ?right_objects, "POS RIGHT OBJECTS");
-                for ro in right_objects.iter() {
-                    event!(Level::TRACE, ?ro, "POS RIGHT OBJECT");
-                    match ro {
-                        Loc2::Node{sol: rn, ..} => {
-                            ch.leqc(&mut vh, s(n), l(*rn), sep + percept_width);
-                        },
-                        Loc2::Hop{vl: rvl, wl: rwl, loc: (rvr, rhr), sol: rn, ..} => {
-                            let hop_size_r = size_by_hop.get(&(*rvr, *rhr, (*rvl).clone(), (*rwl).clone())).unwrap_or(&default_hop_size);
-                            ch.leqc(&mut vh, s(n), s(*rn), (2.*sep) + hop_size_r.left + hop_size.right);
-
-                            // let rvl = (*rvl).clone();
-                            // let rwl = (*rwl).clone();
-                            // let rvloc = &node_to_loc[&Loc::Node(rvl.clone())];
-                            // let rwloc = &node_to_loc[&Loc::Node(rwl.clone())];
-                            // if vl != &rvl && rvloc.0 == *ovr {
-                            //     let rvn = sol_by_loc[rvloc];
-                            //     ch.leqc(&mut vh, s(n), l(rvn), sep + percept_width);
-                            // }
-                            // if wl != &rwl && rwloc.0 == *ovr+1 {
-                            //     let rwn = sol_by_loc[rwloc];
-                            //     ch.leqc(&mut vh, s(n), l(rwn), sep + percept_width);
-                            // }
-                        },
-                    }
-                }
-            }
-            
-            event!(Level::TRACE, ?hop_row, ?node, ?all_objects, "POS HOP END");
-        }
-
-        for HorizontalConstraint{a: vl, b: wl} in hcg.constraints.iter() {
-            let locl = &node_to_loc[&Loc::Node(vl.clone())];
-            let locr = &node_to_loc[&Loc::Node(wl.clone())];
-            let nl = sol_by_loc[locl];
-            let nr = sol_by_loc[locr];
-            // cv.eq(&[vv.get(t(nl)), vv.get(t(nr))]);
-            cv.sym(&mut vv, &mut pdv, t(nl), t(nr), 10000.);
-            // eprintln!("VSYM {vl} {wl} {nl} {nr}");
-        }
-        for ((vl, wl), lvl) in &hcg.labels {
-            let locl = &node_to_loc[&Loc::Node(vl.clone())];
-            let locr = &node_to_loc[&Loc::Node(wl.clone())];
-            let nl = sol_by_loc[locl];
-            let nr = sol_by_loc[locr];
-            let mut left = 0;
-            let mut right = 0;
-            left = std::cmp::max(left, lvl.reverse.as_ref().and_then(|rs| rs.iter().map(|r| r.len()).max()).unwrap_or(0));
-            right = std::cmp::max(right, lvl.forward.as_ref().and_then(|fs| fs.iter().map(|f| f.len()).max()).unwrap_or(0));
-            let left_height = lvl.reverse.as_ref().map(|rs| rs.len()).unwrap_or(0);
-            let right_height = lvl.forward.as_ref().map(|fs| fs.len()).unwrap_or(0);
-            ch.leqc(&mut vh, r(nl), l(nr), sep + char_width * (left + right) as f64);
-
-            let ovrl = locl.0;
-            let ovrr = locr.0;
-            // forward heights
-            // LOWER LEFT CORNER
-            for objects in level_to_object.get(&(ovrr-1)).iter() {
-                for (_shro, objs) in objects.iter() {
-                    for obj in objs {
-                        if let Loc2::Node{vl: ovl, ..} = obj {
-                            if containers.contains(ovl) && (nodes_by_container[ovl].contains(vl) || nodes_by_container[ovl].contains(wl)) {
-                                continue;
-                            }
-                        }
-                        if let Loc2::Hop{vl: _ovl, wl: owl, ..} = obj {
-                            if *owl != vl && *owl != wl {
-                                continue;
-                            }
-                        }
-                        let obj_loc = match obj {
-                            Loc2::Node{loc: obj_loc, ..} => obj_loc,
-                            Loc2::Hop{loc: obj_loc, ..} => obj_loc,
-                        };
-                        let nobj = sol_by_loc[&obj_loc];
-                        let height = height_scale / 2. + line_height * right_height as f64;
-                        eprintln!("FORWARD HEIGHT: {vl} {ovrl} {wl} {ovrr} {obj:?} {height}");
-
-                        cv.geqc(&mut vv, t(nl), b(nobj), height);
-                        cv.geqc(&mut vv, t(nr), b(nobj), height);
-                    }
-                }   
-            }
-            for container in containers.iter() {
-                let nobj = sol_by_loc[&node_to_loc[&Loc::Node(container.clone())]];
-                let top_height = height_scale / 2. + line_height * right_height as f64;
-                let bottom_height = line_height * left_height as f64;
-                if nodes_by_container[container].contains(vl) {
-                    cv.leqc(&mut vv, t(nobj), t(nl), top_height);
-                    cv.leqc(&mut vv, b(nl), b(nobj), bottom_height);
-                }
-                if nodes_by_container[container].contains(wl) {
-                    cv.leqc(&mut vv, t(nobj), t(nr), top_height);
-                    cv.leqc(&mut vv, b(nl), b(nobj), bottom_height);
-                }
-            }
-            let shrl = solved_locs[&locl.0][&locl.1];
-            let shrr = solved_locs[&locr.0][&locr.1];
-            let empty = HashSet::new();
-            for obj in level_to_object.get(&ovrr).and_then(|lvl| lvl.get(&shrr)).unwrap_or(&empty) {
-                match obj {
-                    Loc2::Hop{vl: hvl, wl: hwl, ..} => {
-                        if *hwl == wl {
-                            // todo!()
-                            eprintln!("LOWER RIGHT CORNER {vl}-{wl}, {hvl}->{hwl}");
-                        }
-                    },
-                    _ => {},
-                }; 
-            }
-            for obj in level_to_object.get(&ovrl).and_then(|lvl| lvl.get(&shrl)).unwrap_or(&empty) {
-                match obj {
-                    Loc2::Hop{vl: hvl, wl: hwl, ..} => {
-                        if *hvl == vl {
-                            // todo!()
-                            eprintln!("UPPER LEFT CORNER {vl}-{wl}, {hvl}->{hwl}");
-                        }
-                    },
-                    _ => {},
-                }; 
-            }
-            // reverse heights
-            for objects in level_to_object.get(&(ovrl+1)).iter() {
-                for (_shro, objs) in objects.iter() {
-                    for obj in objs {
-                        let obj_loc = match obj {
-                            Loc2::Node{loc: obj_loc, ..} => obj_loc,
-                            Loc2::Hop{loc: obj_loc, ..} => obj_loc,
-                        };
-                        let nobj = sol_by_loc[&obj_loc];
-                        let height = height_scale / 2. + line_height * (right_height + left_height) as f64;
-                        cv.leqc(&mut vv, t(nl), t(nobj), height);
-                        cv.leqc(&mut vv, t(nr), t(nobj), height);
-                    }
-                }
-            }
-        }
-
-        for container in containers.iter() {
-            let borders = &container_borders[container];
-            let (ovr, (ohr, pair)) = borders.iter().next().unwrap();
-            let shr1 = solved_locs[ovr][ohr];
-            let shr2 = solved_locs[ovr][pair];
-            let lohr = if shr1 < shr2 { ohr } else { pair };
-            let rohr = if shr1 < shr2 { pair } else { ohr };
-            let ln = sol_by_loc[&(*ovr, *lohr)];
-            let rn = sol_by_loc[&(*ovr, *rohr)];
-            let nc = ln;
-            let np = rn;
-            ch.leqc(&mut vh, l(nc), r(np), 20.);
-            ch.leqc(&mut vh, l(nc), r(nc), 20.);
-            ch.leqc(&mut vh, r(nc), l(np), 20.);
-            ch.leqc(&mut vh, l(np), r(np), 20.);
-            cv.leq(&mut vv, h(*ovr), t(ln));
-            cv.leq(&mut vv, h(*ovr), t(rn));
-            for node in nodes_by_container[container].iter() {
-                let locn = &node_to_loc[&Loc::Node(node.clone())];
-                let nn = sol_by_loc[locn];
-                if containers.contains(node) {
-                    let (ovr, (ohr, pair)) = container_borders[container].iter().copied().next().unwrap();
-                    let (iovr, (iohr, ipair)) = container_borders[node].iter().copied().next().unwrap();
-                    let shr1 = solved_locs[&ovr][&ohr];
-                    let shr2 = solved_locs[&ovr][&pair];
-                    let lohr = if shr1 < shr2 { ohr } else { pair };
-                    let rohr = if shr1 < shr2 { pair } else { ohr };
-                    let sol1 = sol_by_loc[&(ovr, lohr)];
-                    let sol2 = sol_by_loc[&(ovr, rohr)];
-
-                    let ishr1 = solved_locs[&iovr][&iohr];
-                    let ishr2 = solved_locs[&iovr][&ipair];
-                    let ilohr = if ishr1 < ishr2 { iohr } else { ipair };
-                    let irohr = if ishr1 < ishr2 { ipair } else { iohr };
-                    let isol1 = sol_by_loc[&(iovr, ilohr)];
-                    let isol2 = sol_by_loc[&(iovr, irohr)];
-                    
-                    ch.leqc(&mut vh, l(sol1), l(isol1), 20.);
-                    ch.leqc(&mut vh, r(isol2), r(sol2), 20.);
-                } else {
-                    ch.leqc(&mut vh, l(nc), l(nn), 40.);
-                    ch.leqc(&mut vh, r(nn), r(np), 40.);
-                    // ch.sym(&mut vh, &mut pdh, l(nc), r(nc), 100.);
-                    // // ch.sym(&mut vh, &mut pdh, l(nc), r(nn), 1.);
-                }
-                cv.leqc(&mut vv, t(nc), t(nn), nesting_top_padding);
-                cv.leqc(&mut vv, b(nn), b(nc), nesting_bottom_padding);
-            }
-            for border in container_borders[container].first().iter() {
-                let (ovr, (ohr, pair)) = **border;
-                let shr1 = solved_locs[&ovr][&ohr];
-                let shr2 = solved_locs[&ovr][&pair];
-                let lohr = if shr1 < shr2 { ohr } else { pair };
-                let rohr = if shr1 < shr2 { pair } else { ohr };
-                let sol1 = sol_by_loc[&(ovr, lohr)];
-                let sol2 = sol_by_loc[&(ovr, rohr)];
-                ch.leq(&mut vh, l(sol1), l(sol2));
-                // ch.geq(&mut vh, l(sol1), l(sol2));
-                ch.leq(&mut vh, r(sol1), r(sol2));
-                // ch.geq(&mut vh, r(sol1), r(sol2));
-                // // ch.sym(&mut vh, &mut pdh, l(sol1), r(sol2), 10.);
-                // // ch.sym(&mut vh, &mut pdh, l(sol2), r(sol1), 10.);
-
-                cv.leq(&mut vv, t(sol1), t(sol2));
-                cv.geq(&mut vv, t(sol1), t(sol2));
-                cv.leq(&mut vv, b(sol1), b(sol2));
-                cv.geq(&mut vv, b(sol1), b(sol2));
-            }
-        }
-
-
-        // add non-negativity constraints for all vars
-        for (sol, var) in vh.iter() {
-            if !matches!(sol, AnySol::F(_)) {
-                ch.push(((0.).into(), vec![var.into()], f64::INFINITY.into()));
-            }
-            // if matches!(sol, AnySol::R(_)) {
-            //     qh.push(10000. as f64 * Monomial::from(var));
-            // }
-        }
-        for (sol, var) in vv.iter() {
-            if !matches!(sol, AnySol::F(_)) {
-                cv.push(((0.).into(), vec![var.into()], f64::INFINITY.into()));
-            }
-            // if matches!(sol, AnySol::T(_)) {
-            //     qv.push(10000. as f64 * Monomial::from(var));
-            // }
-        }
-        
-        eprintln!("SOLVE VERTICAL");
-        let horizontal_problem = OptimizationProblem { v: vh, c: ch, pd: pdh, q: qh, };
-        let vertical_problem = OptimizationProblem { v: vv, c: cv, pd: pdv, q: qv, };
-        Ok((horizontal_problem, vertical_problem))
-    }
-
     pub fn solve_optimization_problems(
         horizontal_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>, 
         vertical_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>
@@ -4702,11 +4158,11 @@ pub mod frontend {
     use self_cell::self_cell;
     use sorted_vec::SortedVec;
     use tracing::{event, Level};
-    use tracing_error::InstrumentResult;
+    use tracing_error::{InstrumentResult, InstrumentError};
 
-    use crate::{graph_drawing::{layout::{debug::debug, minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border, ObjNode, ObjBorder}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
-    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Loc, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val};
+    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val};
 
     use log::{names};
 
@@ -4737,7 +4193,7 @@ pub mod frontend {
         
         for (loc, node) in loc_to_node.iter() {
             let (ovr, ohr) = loc;
-            if let Loc::Node(vl) = node {
+            if let Obj::Node(ObjNode{vl}) = node {
                 let label = vert_node_labels
                     .get(vl)
                     .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
@@ -4763,7 +4219,7 @@ pub mod frontend {
                 };
                 size_by_loc.insert((*ovr, *ohr), size);
             }
-            if let Loc::Border(border) = node {
+            if let Obj::Border(ObjBorder{border}) = node {
                 let Border{ovr, ohr, pair, ..} = border;
                 size_by_loc.insert((*ovr, *ohr), NodeSize{width: 10., left: 0., right: 0., height: 0.});
                 size_by_loc.insert((*ovr, *pair), NodeSize{width: 10., left: 0., right: 0., height: 0.});
@@ -4930,7 +4386,7 @@ pub mod frontend {
                             "isize, &str",
                             vec![],
                             format!("-1, src-not-container")
-                        );
+                        ).unwrap();
                         -1
                     } else {
                         if nodes_by_container[src].contains(dst) {
@@ -4941,7 +4397,7 @@ pub mod frontend {
                                 "isize, &str",
                                 vec![],
                                 format!("0, src-contains-dst")
-                            );
+                            ).unwrap();
                             0
                         } else {
                             l.log_pair(
@@ -4951,7 +4407,7 @@ pub mod frontend {
                                 "isize, &str",
                                 vec![],
                                 format!("{}, container_depths", -(container_depths[src] as isize))
-                            );
+                            ).unwrap();
                             -(container_depths[src] as isize)
                         }
                     }
@@ -4970,7 +4426,7 @@ pub mod frontend {
                         format!("{to}"),
                     )
                 })
-            });
+            }).map_err(|err| err.in_current_span())?;
 
             fixup_hcg_rank(&hcg, &mut paths_by_rank);
 
@@ -4985,7 +4441,7 @@ pub mod frontend {
                         format!("{to}"),
                     )
                 })
-            });
+            }).map_err(|err| err.in_current_span())?;
     
             let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, hcg, logs)?;
 
@@ -5000,8 +4456,6 @@ pub mod frontend {
             let (horizontal_problem, vertical_problem) = position_sols(&vcg, &layout_problem, &layout_solution, &geometry_problem)?;
 
             let geometry_solution = solve_optimization_problems(&horizontal_problem, &vertical_problem)?;
-    
-            debug(&layout_problem, &layout_solution);
             
             Ok(Depiction{
                 items,
@@ -5030,8 +4484,8 @@ pub mod frontend {
 
         #[derive(Clone, Debug, thiserror::Error)]
         #[error("LogError")]
-        pub struct Error {
-
+        pub enum Error {
+            FmtError{ #[from] source: std::fmt::Error }
         }
 
         pub trait Log<Cx = ()> {
@@ -5214,8 +4668,9 @@ pub mod frontend {
         use std::{borrow::Cow};
 
         use tracing::{instrument, event};
+        use tracing_error::InstrumentError;
 
-        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Loc, Border}, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}, frontend::log::{Names}}, names};
+        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}, frontend::log::{Names}}, names};
 
         use super::log::{self, Log};
 
@@ -5298,29 +4753,30 @@ pub mod frontend {
 
             // Log the resolved value
             // logs.log_string("VAL", val);
-            val.log("VAL".into(), &mut logs);
+            val.log("VAL".into(), &mut logs).map_err(|err| err.in_current_span())?;
             
-            loc_to_node.log((), &mut logs);
+            loc_to_node.log((), &mut logs).map_err(|err| err.in_current_span())?;
 
             let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
-                Loc::Node(node) => node.to_string().names(),
-                Loc::Hop(ovr, vl, wl) => names![ovr, vl.to_string(), wl.to_string()],
-                Loc::Border(Border{vl, ovr, ohr, pair}) => names![vl.to_string(), ovr, ohr, pair],
+                Obj::Node(ObjNode{vl: node}) => node.to_string().names(),
+                Obj::Hop(ObjHop{lvl: ovr, vl, wl}) => names![ovr, vl.to_string(), wl.to_string()],
+                Obj::Container(ObjContainer{vl}) => vl.to_string().names(),
+                Obj::Border(ObjBorder{border: Border{vl, ovr, ohr, pair}}) => names![vl.to_string(), ovr, ohr, pair],
             };
             let ls2n = |layout_sol| { 
                 let loc_ix = locix_by_layout_sol[&layout_sol]; 
                 l2n(loc_ix.0, loc_ix.1) 
             };
 
-            sol_by_loc.log(l2n, &mut logs);
-            sol_by_hop.log(l2n, &mut logs);
-            locix_by_layout_sol.log(l2n, &mut logs);
-            solved_locs.log(l2n, &mut logs);
-            size_by_loc.log(l2n, &mut logs);
-            size_by_hop.log(l2n, &mut logs);
-            horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs);
-            vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs);
-            geometry_solution.log(ls2n, &mut logs);
+            sol_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            sol_by_hop.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            locix_by_layout_sol.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            solved_locs.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            size_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            size_by_hop.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs).map_err(|err| err.in_current_span())?;
+            vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs).map_err(|err| err.in_current_span())?;
+            geometry_solution.log(ls2n, &mut logs).map_err(|err| err.in_current_span())?;
 
             let mut logs = logs.to_vec();
             logs.reverse();
@@ -5334,33 +4790,31 @@ pub mod frontend {
                 let (ovr, ohr) = loc;
                 if (*ovr, *ohr) == (VerticalRank(0), OriginalHorizontalRank(0)) { continue; }
 
-                if let Loc::Node(vl) = node {
-                    if !containers.contains(vl) {
-                        let n = sol_by_loc[&(*ovr, *ohr)];
+                if let Obj::Node(ObjNode{vl}) = node {
+                    let n = sol_by_loc[&(*ovr, *ohr)];
 
-                        eprintln!("TEXT {vl} {ovr} {ohr} {n}");
+                    eprintln!("TEXT {vl} {ovr} {ohr} {n}");
 
-                        let lpos = ls[&n];
-                        let rpos = rs[&n];
+                    let lpos = ls[&n];
+                    let rpos = rs[&n];
 
-                        let z_index = nesting_depths[vl];
+                    let z_index = nesting_depths[vl];
 
-                        let vpos = ts[&n];
-                        let width = (rpos - lpos).round();
-                        let hpos = lpos.round();
-                        let height = bs[&n] - ts[&n];
-                        
-                        let key = vl.to_string();
-                        let label = vert_node_labels
-                            .get(vl)
-                            .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
-                            .clone();
-                        // if !label.is_screaming_snake_case() {
-                        //     label = label.to_title_case();
-                        // }
-                        let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
-                        texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: n, estimated_size});
-                    } 
+                    let vpos = ts[&n];
+                    let width = (rpos - lpos).round();
+                    let hpos = lpos.round();
+                    let height = bs[&n] - ts[&n];
+                    
+                    let key = vl.to_string();
+                    let label = vert_node_labels
+                        .get(vl)
+                        .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
+                        .clone();
+                    // if !label.is_screaming_snake_case() {
+                    //     label = label.to_title_case();
+                    // }
+                    let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
+                    texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: n, estimated_size});
                 }
             }
 
@@ -5446,8 +4900,8 @@ pub mod frontend {
                     } else {
                         hops.iter().skip(fs).collect::<Vec<_>>()
                     };
-                    let vmin = bs[&sol_by_loc[&node_to_loc[&Loc::Node(vl.clone())]]];
-                    let vmax = ts[&sol_by_loc[&node_to_loc[&Loc::Node(wl.clone())]]];
+                    let vmin = bs[&sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]]];
+                    let vmax = ts[&sol_by_loc[&node_to_loc[&Obj::from_vl(wl, containers)]]];
                     let nh = hops.len();
                     let vs = (0..=nh).map(|lvl|  {
                         let fraction = lvl as f64 / nh as f64;
@@ -5558,23 +5012,23 @@ pub mod frontend {
                     let key = format!("{vl}_{wl}_forward_{m}");
                     let classes = format!("arrow horizontal forward {vl}_{wl} {vl}_{wl}_forward");
                     let locl = if !containers.contains(vl) {
-                        node_to_loc[&Loc::Node(vl.clone())]
+                        node_to_loc[&Obj::Node(ObjNode{vl: vl.clone()})]
                     } else {
                         let (ovr, (ohr, pair)) = container_borders[vl].first().unwrap();
                         let shr1 = solved_locs[ovr][ohr];
                         let shr2 = solved_locs[ovr][pair];
-                        let lohr = if shr1 < shr2 { ohr } else { pair };
+                        // let lohr = if shr1 < shr2 { ohr } else { pair };
                         let rohr = if shr1 < shr2 { pair } else { ohr };
                         (*ovr, *rohr)
                     };
                     let locr = if !containers.contains(wl) {
-                        node_to_loc[&Loc::Node(wl.clone())]
+                        node_to_loc[&Obj::Node(ObjNode{vl: wl.clone()})]
                     } else {
                         let (ovr, (ohr, pair)) = container_borders[wl].first().unwrap();
                         let shr1 = solved_locs[ovr][ohr];
                         let shr2 = solved_locs[ovr][pair];
                         let lohr = if shr1 < shr2 { ohr } else { pair };
-                        let rohr = if shr1 < shr2 { pair } else { ohr };
+                        // let rohr = if shr1 < shr2 { pair } else { ohr };
                         (*ovr, *lohr)
                     };
                     let nl = sol_by_loc[&locl];
@@ -5600,23 +5054,23 @@ pub mod frontend {
                     let key = format!("{vl}_{wl}_reverse_{m}");
                     let classes = format!("arrow horizontal reverse {vl}_{wl} {vl}_{wl}_reverse");
                     let locl = if !containers.contains(vl) {
-                        node_to_loc[&Loc::Node(vl.clone())]
+                        node_to_loc[&Obj::Node(ObjNode{vl: vl.clone()})]
                     } else {
                         let (ovr, (ohr, pair)) = container_borders[vl].first().unwrap();
                         let shr1 = solved_locs[ovr][ohr];
                         let shr2 = solved_locs[ovr][pair];
-                        let lohr = if shr1 < shr2 { ohr } else { pair };
+                        // let lohr = if shr1 < shr2 { ohr } else { pair };
                         let rohr = if shr1 < shr2 { pair } else { ohr };
                         (*ovr, *rohr)
                     };
                     let locr = if !containers.contains(wl) {
-                        node_to_loc[&Loc::Node(wl.clone())]
+                        node_to_loc[&Obj::Node(ObjNode{vl: wl.clone()})]
                     } else {
                         let (ovr, (ohr, pair)) = container_borders[wl].first().unwrap();
                         let shr1 = solved_locs[ovr][ohr];
                         let shr2 = solved_locs[ovr][pair];
                         let lohr = if shr1 < shr2 { ohr } else { pair };
-                        let rohr = if shr1 < shr2 { pair } else { ohr };
+                        // let rohr = if shr1 < shr2 { pair } else { ohr };
                         (*ovr, *lohr)
                     };
                     let nl = sol_by_loc[&locl];
@@ -6170,12 +5624,12 @@ mod tests {
 
         let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg, &mut logs)?;
         let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
-        let nAa = Loc::Node(Cow::from("Aa"));
-        let nAb = Loc::Node(Cow::from("Ab"));
-        let nAc = Loc::Node(Cow::from("Ac"));
-        let nXx = Loc::Node(Cow::from("Xx"));
-        let nXy = Loc::Node(Cow::from("Xy"));
-        let nXz = Loc::Node(Cow::from("Xz"));
+        let nAa = Obj::Node(Cow::from("Aa"));
+        let nAb = Obj::Node(Cow::from("Ab"));
+        let nAc = Obj::Node(Cow::from("Ac"));
+        let nXx = Obj::Node(Cow::from("Xx"));
+        let nXy = Obj::Node(Cow::from("Xy"));
+        let nXz = Obj::Node(Cow::from("Xz"));
         let lAa = node_to_loc[&nAa];
         let lAb = node_to_loc[&nAb];
         let lAc = node_to_loc[&nAc];
@@ -6209,7 +5663,7 @@ mod tests {
         let h2 = &hops_by_level[&VerticalRank(2)];
         let ohr = OriginalHorizontalRank;
         let vr = VerticalRank;
-        let lRr = &node_to_loc[&Loc::Node("root".into())];
+        let lRr = &node_to_loc[&Obj::Node("root".into())];
         let h0A: Hop<Cow<str>> = Hop { mhr: lRr.1, nhr: lAa.1, vl: "root".into(), wl: "Aa".into(), lvl: lRr.0 };
         let h0X: Hop<Cow<str>> = Hop { mhr: lRr.1, nhr: lXx.1, vl: "root".into(), wl: "Xx".into(), lvl: lRr.0 };
         let h1A: Hop<Cow<str>> = Hop { mhr: lAa.1, nhr: lAb.1, vl: "Aa".into(), wl: "Ab".into(), lvl: lAa.0 };

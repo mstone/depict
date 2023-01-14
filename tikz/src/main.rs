@@ -58,7 +58,7 @@ pub fn render<'s>(data: String) -> Result<(), Error> {
         let width = 10.0 * width_scale * (rpos - lpos);
 
         match node {
-            Loc::Node(vl) => {
+            Obj::Node(vl) => {
                 if vl == "root" {
                     continue
                 }
@@ -66,7 +66,7 @@ pub fn render<'s>(data: String) -> Result<(), Error> {
                     \node[minimum width = {}cm, fill=white, fill opacity=0.9, draw, text opacity=1.0]({}) at ({}, {}) {{{}}};"#), 
                     width, vl, hpos, vpos, vert_node_labels[&*vl]);
             },
-            Loc::Hop(_, vl, wl) => {
+            Obj::Hop(_, vl, wl) => {
                 if vl == "root" {
                     continue
                 }
@@ -78,7 +78,7 @@ pub fn render<'s>(data: String) -> Result<(), Error> {
                     \node[](aux_{}_{}) at ({}, {}) {{}};"#), 
                     hpos, vpos, ovr, ohr, hpos, vpos);
             },
-            Loc::Border(border) => {
+            Obj::Border(border) => {
                 todo!()
             }
         }
@@ -93,8 +93,8 @@ pub fn render<'s>(data: String) -> Result<(), Error> {
                 .map(|v| v.join("\n"))
                 .unwrap_or_else(|| ew.to_string());
 
-            let (ovr, ohr) = node_to_loc[&Loc::Node(vl.clone())];
-            let (ovrd, ohrd) = node_to_loc[&Loc::Node(wl.clone())];
+            let (ovr, ohr) = node_to_loc[&Obj::Node(vl.clone())];
+            let (ovrd, ohrd) = node_to_loc[&Obj::Node(wl.clone())];
 
             let snv = sol_by_hop[&(ovr, ohr, vl.clone(), wl.clone())];
             let snw = sol_by_hop[&(ovrd, ohrd, vl.clone(), wl.clone())];
@@ -209,14 +209,14 @@ pub fn render<'s>(data: String) -> Result<(), Error> {
         let hposr = 10.0 * rpos;
 
         let loc_color = match loc {
-            Loc::Node(_) => "red",
-            Loc::Hop(_, _, _) => "blue",
-            Loc::Border(_) => "pink"
+            Obj::Node(_) => "red",
+            Obj::Hop(_, _, _) => "blue",
+            Obj::Border(_) => "pink"
         };
         let loc_str = match loc {
-            Loc::Node(vl) => vl.to_string(),
-            Loc::Hop(_, vl, wl) => format!("{}{}", vl.chars().next().unwrap(), wl.chars().next().unwrap()),
-            Loc::Border(border) => todo!(),
+            Obj::Node(vl) => vl.to_string(),
+            Obj::Hop(_, vl, wl) => format!("{}{}", vl.chars().next().unwrap(), wl.chars().next().unwrap()),
+            Obj::Border(border) => todo!(),
         };
 
         println!(indoc!(r#"%\draw [{}] ({}, {}) circle (1pt);"#), loc_color, hpos, vpos);

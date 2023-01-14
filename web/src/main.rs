@@ -4,7 +4,7 @@ use std::{default::Default, panic::catch_unwind, io::BufWriter, borrow::Cow};
 
 use depict::{graph_drawing::{
     error::{Kind, Error, OrErrExt},
-    layout::{Loc}, 
+    layout::{Obj}, 
     index::{LocSol, HopSol, VerticalRank, OriginalHorizontalRank},
     frontend::dom::{draw, Drawing, Label, Node},
     frontend::dioxus::{render, as_data_svg}
