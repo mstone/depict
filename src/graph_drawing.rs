@@ -3949,6 +3949,14 @@ pub mod geometry {
     fn left(sloc: (VerticalRank, SolvedHorizontalRank)) -> Option<(VerticalRank, SolvedHorizontalRank)> {
         sloc.1.checked_sub(1).map(|shrl| (sloc.0, shrl))
     }
+    enum Direction {
+        Vertical,
+        Horizontal,
+    }
+    struct Edge {
+        dir: Direction,
+        margin: OrderedFloat<f64>,
+    }
 
     pub fn position_sols<V, E>(
         _vcg: &Vcg<V, E>,
@@ -3961,16 +3969,18 @@ pub mod geometry {
     {
         let all_locs = &geometry_problem.all_locs;
         let all_hops0 = &geometry_problem.all_hops0;
-        // let all_hops = &geometry_problem.all_hops;
+        let all_hops = &geometry_problem.all_hops;
         let loc_to_node = &layout_problem.loc_to_node;
         let node_to_loc = &layout_problem.node_to_loc;
         let solved_locs = &layout_solution.solved_locs;
         let sol_by_loc = &geometry_problem.sol_by_loc;
         let sol_by_hop = &geometry_problem.sol_by_hop;
 
+        let of = OrderedFloat::<f64>::from;
+
         // let obj_count = all_locs.len() + all_hops.len();
 
-        let mut obj_graph = Graph::<Obj<V>, ()>::new();
+        let mut obj_graph = Graph::<Obj<V>, Edge>::new();
         let mut obj_vxmap = HashMap::new();
         let mut solved_vxmap = HashMap::new();
         for (loc_ix, obj) in loc_to_node.iter() {
@@ -3997,12 +4007,20 @@ pub mod geometry {
 
         for (solved, orig) in solved_to_orig.iter() {
             if let Some(left) = left(*solved) {
-                obj_graph.add_edge(solved_vxmap[&left], solved_vxmap[solved], ());
+                obj_graph.add_edge(solved_vxmap[&left], solved_vxmap[solved], Edge{dir: Direction::Horizontal, margin: of(20.)});
             }
             if let Some(right) = right(*solved) {
-                obj_graph.add_edge(solved_vxmap[solved], solved_vxmap[&right], ());
+                obj_graph.add_edge(solved_vxmap[solved], solved_vxmap[&right], Edge{dir: Direction::Horizontal, margin: of(20.)});
             }
             // todo: hop edges, nested edges, ...
+        }
+
+        for window in all_hops.windows(2) {
+            if let [ref cur, ref nxt, ..] = window {
+                let src = (cur.lvl, solved_locs[&cur.lvl][&cur.mhr]);
+                let dst = (nxt.lvl, solved_locs[&nxt.lvl][&nxt.mhr]);
+                obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], Edge{dir: Direction::Vertical, margin: of(20.)});
+            }
         }
 
         let mut con_graph = Graph::<AnySol, OrderedFloat<f64>>::new();
@@ -4012,10 +4030,14 @@ pub mod geometry {
                 Obj::Node(_) | Obj::Container(_) => {
                     let loc_ix = node_to_loc[obj];
                     let ls = sol_by_loc[&loc_ix];
-                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(ls));
-                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(ls));
-                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(ls));
-                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(ls));
+                    let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(ls));
+                    let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(ls));
+                    let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(ls));
+                    let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(ls));
+                    let width = of(20.);
+                    let height = of(20.);
+                    con_graph.add_edge(left, right, width);
+                    con_graph.add_edge(top, bottom, height);
                 },
                 Obj::Hop(ObjHop{vl, wl, ..}) => {
                     let loc_ix = node_to_loc[obj];
@@ -4028,10 +4050,33 @@ pub mod geometry {
             }
         }
 
+        for er in obj_graph.edge_references() {
+            let edge = er.weight();
+            let src = obj_graph.node_weight(er.source()).unwrap();
+            let dst = obj_graph.node_weight(er.target()).unwrap();
+            let src_loc_ix = node_to_loc[src];
+            let dst_loc_ix = node_to_loc[dst];
+
+            let src_guide_sol = match src {
+                Obj::Node(_) | Obj::Container(_) | Obj::Border(_) => match edge.dir {
+                    Direction::Vertical => AnySol::B(sol_by_loc[&src_loc_ix]),
+                    Direction::Horizontal => AnySol::R(sol_by_loc[&src_loc_ix]),
+                },
+                Obj::Hop(ObjHop{vl, wl, ..}) => AnySol::S(sol_by_hop[&(src_loc_ix.0, src_loc_ix.1, vl.clone(), wl.clone())]),
+            };
+            let dst_guide_sol = match dst {
+                Obj::Node(_) | Obj::Container(_) | Obj::Border(_) => match edge.dir {
+                    Direction::Vertical => AnySol::T(sol_by_loc[&dst_loc_ix]),
+                    Direction::Horizontal => AnySol::L(sol_by_loc[&dst_loc_ix]),
+                },
+                Obj::Hop(ObjHop{vl, wl, ..}) => AnySol::S(sol_by_hop[&(dst_loc_ix.0, dst_loc_ix.1, vl.clone(), wl.clone())]),
+            };
+
+            con_graph.add_edge(con_vxmap[&src_guide_sol], con_vxmap[&dst_guide_sol], edge.margin);
+        }
 
         let mut vertical_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
         let mut horizontal_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
-        let of = OrderedFloat::<f64>::from;
 
         for (sol, ix) in con_vxmap.iter() {
             match sol {

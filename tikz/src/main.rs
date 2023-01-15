@@ -1,4 +1,5 @@
 use depict::graph_drawing::error::{Error};
+use depict::graph_drawing::frontend::log::Logger;
 use depict::graph_drawing::geometry::{*};
 use depict::graph_drawing::index::{LocSol, VerticalRank};
 use depict::graph_drawing::layout::{*};
@@ -18,7 +19,8 @@ pub fn tikz_escape(s: &str) -> String {
 }
 
 pub fn render<'s>(data: String) -> Result<(), Error> {
-    let render_cell = depict::graph_drawing::frontend::render(Cow::Owned(data))?;
+    let mut logs = Logger::new();
+    let render_cell = depict::graph_drawing::frontend::render(Cow::Owned(data), &mut logs)?;
     let depiction = render_cell.borrow_dependent();
     
     let rs = &depiction.geometry_solution.rs;
