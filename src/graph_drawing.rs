@@ -317,6 +317,12 @@ pub mod index {
             #[derive(Clone, Copy, Eq, From, Hash, Into, Ord, PartialEq, PartialOrd)]
             pub struct $index_name(pub usize);
 
+            impl $index_name {
+                pub fn checked_sub(self, rhs: usize) -> Option<Self> {
+                    self.0.checked_sub(rhs).map(|s| Self(s))
+                }
+            }
+
             impl Debug for $index_name {
                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     write!(f, "{}{}", self.0, $tag)
@@ -3940,48 +3946,79 @@ pub mod geometry {
         Ok(())
     }
 
-    pub fn position_sols<V, E, S, C>(
+    fn left(sloc: (VerticalRank, SolvedHorizontalRank)) -> Option<(VerticalRank, SolvedHorizontalRank)> {
+        sloc.1.checked_sub(1).map(|shrl| (sloc.0, shrl))
+    }
+
+    pub fn position_sols<V, E>(
         _vcg: &Vcg<V, E>,
         layout_problem: &LayoutProblem<V>,
-        _layout_solution: &LayoutSolution,
+        layout_solution: &LayoutSolution,
         geometry_problem: &GeometryProblem<V>
-    ) -> Result<(OptimizationProblem<S, C>, OptimizationProblem<S, C>), Error> 
+    ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error> 
     where
         V: Graphic + Display + log::Name,
-        S: Sol,
-        C: Coeff,
     {
         let all_locs = &geometry_problem.all_locs;
         let all_hops0 = &geometry_problem.all_hops0;
         // let all_hops = &geometry_problem.all_hops;
         let loc_to_node = &layout_problem.loc_to_node;
+        let node_to_loc = &layout_problem.node_to_loc;
+        let solved_locs = &layout_solution.solved_locs;
         let sol_by_loc = &geometry_problem.sol_by_loc;
         let sol_by_hop = &geometry_problem.sol_by_hop;
 
         // let obj_count = all_locs.len() + all_hops.len();
 
-        let mut obj_graph = Graph::<LocIx, OrderedFloat<f64>>::new();
+        let mut obj_graph = Graph::<Obj<V>, ()>::new();
         let mut obj_vxmap = HashMap::new();
-        for loc in all_locs.iter() {
-            or_insert(&mut obj_graph, &mut obj_vxmap, (loc.ovr, loc.ohr));
+        let mut solved_vxmap = HashMap::new();
+        for (loc_ix, obj) in loc_to_node.iter() {
+            let ix = or_insert(&mut obj_graph, &mut obj_vxmap, obj.clone());
+            let shr = solved_locs[&loc_ix.0][&loc_ix.1];
+            solved_vxmap.insert((loc_ix.0, shr), ix);
         }
-        for hop in all_hops0.iter() {
-            or_insert(&mut obj_graph, &mut obj_vxmap, (hop.lvl, hop.mhr));
-            or_insert(&mut obj_graph, &mut obj_vxmap, (hop.lvl+1, hop.nhr));
+
+        let solved_to_orig = solved_locs.iter()
+            .flat_map(|(ovr, row)| 
+                row.iter().map(|(ohr, shr)| (*ovr, *ohr, *shr))
+            )
+            .map(|(ovr, ohr, shr)| ((ovr, shr), (ovr, ohr)))
+            .collect::<HashMap<_, _>>();
+
+        let right = |sloc: (VerticalRank, SolvedHorizontalRank)| {
+            let row = &solved_locs[&sloc.0];
+            if sloc.1.0 + 1 >= row.len() {
+                None
+            } else {
+                Some((sloc.0, sloc.1 + 1))
+            }
+        };
+
+        for (solved, orig) in solved_to_orig.iter() {
+            if let Some(left) = left(*solved) {
+                obj_graph.add_edge(solved_vxmap[&left], solved_vxmap[solved], ());
+            }
+            if let Some(right) = right(*solved) {
+                obj_graph.add_edge(solved_vxmap[solved], solved_vxmap[&right], ());
+            }
+            // todo: hop edges, nested edges, ...
         }
 
         let mut con_graph = Graph::<AnySol, OrderedFloat<f64>>::new();
         let mut con_vxmap = HashMap::new();
-        for (_, loc_ix) in obj_graph.node_references() {
-            match &loc_to_node[loc_ix] {
+        for (_, obj) in obj_graph.node_references() {
+            match obj {
                 Obj::Node(_) | Obj::Container(_) => {
-                    let ls = sol_by_loc[loc_ix];
+                    let loc_ix = node_to_loc[obj];
+                    let ls = sol_by_loc[&loc_ix];
                     or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(ls));
                     or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(ls));
                     or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(ls));
                     or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(ls));
                 },
                 Obj::Hop(ObjHop{vl, wl, ..}) => {
+                    let loc_ix = node_to_loc[obj];
                     let hs = sol_by_hop[&(loc_ix.0, loc_ix.1, vl.clone(), wl.clone())];
                     or_insert(&mut con_graph, &mut con_vxmap, AnySol::S(hs));
                 },
@@ -3991,8 +4028,38 @@ pub mod geometry {
             }
         }
 
-        let vertical_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
-        let horizontal_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
+
+        let mut vertical_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
+        let mut horizontal_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
+        let of = OrderedFloat::<f64>::from;
+
+        for (sol, ix) in con_vxmap.iter() {
+            match sol {
+                AnySol::L(_) | AnySol::R(_) | AnySol::S(_) | AnySol::V(_) => {
+                    let var = horizontal_problem.v.get(*sol);
+                    horizontal_problem.c.push((of(0.), vec![var], of(f64::INFINITY)));
+                },
+                AnySol::T(_) | AnySol::B(_) | AnySol::H(_) => {
+                    let var = vertical_problem.v.get(*sol);
+                    vertical_problem.c.push((of(0.), vec![var], of(f64::INFINITY)));
+                },
+                _ => {},
+            }
+        }
+        for er in con_graph.edge_references() {
+            let src = con_graph.node_weight(er.source()).unwrap();
+            let tgt = con_graph.node_weight(er.target()).unwrap();
+            match src {
+                AnySol::L(_) | AnySol::R(_) | AnySol::S(_) | AnySol::V(_) => {
+                    horizontal_problem.c.leqc(&mut horizontal_problem.v, *src, *tgt, of(20.));
+                },
+                AnySol::T(_) | AnySol::B(_) | AnySol::H(_) => {
+                    vertical_problem.c.leqc(&mut vertical_problem.v, *src, *tgt, of(20.));
+                },
+                _ => {},
+            }
+        }
+
         Ok((horizontal_problem, vertical_problem))
     }
 

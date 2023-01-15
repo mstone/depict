@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use clap::Parser;
-use depict::graph_drawing::{error::Error};
+use depict::graph_drawing::{error::Error, frontend::log::Logger};
 
 // use tracing::{instrument, event, Level};
 // use tracing_error::{InstrumentResult, ExtractSpanTrace, TracedError};
@@ -26,7 +26,8 @@ fn do_one_path(path: String) -> Result<(), Error> {
 }
 
 fn do_one_expr(_path: String, data: String) -> Result<(), Error> {
-    depict::graph_drawing::frontend::render(Cow::Owned(data))
+    let mut logs = Logger::new();
+    depict::graph_drawing::frontend::render(Cow::Owned(data), &mut logs)
         .map(|_| ())
 }
 
