@@ -1859,8 +1859,11 @@ pub mod layout {
         /// containers identifies which nodes are parents of contained nodes
         pub containers: HashSet<V>,
 
-        /// nodes_by_container maps container-nodes to their contents, transitively.
+        /// nodes_by_container maps container-nodes to their immediate contents.
         pub nodes_by_container: HashMap<V, HashSet<V>>,
+
+        /// nodes_by_container_transitive maps container-nodes to their contents, transitively.
+        pub nodes_by_container_transitive: HashMap<V, HashSet<V>>,
 
         /// nesting_depths records how deeply nested each item is.
         pub nesting_depths: HashMap<V, usize>,
@@ -1984,7 +1987,7 @@ pub mod layout {
                         add_contains_edge(vcg, parent, node);
                     }
                     for p in parents.iter() {
-                        vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
+                        vcg.nodes_by_container_transitive.entry(p.clone()).or_default().insert(node.clone());
                     }
                 },
                 Val::Process{label, body: Some(body), ..} => {
@@ -1994,7 +1997,7 @@ pub mod layout {
                     // BUG: need to debruijn-number unlabeled containers
                     if let Some(node) = label.as_ref() {
                         for p in parents.iter() {
-                            vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
+                            vcg.nodes_by_container_transitive.entry(p.clone()).or_default().insert(node.clone());
                         }
                         if body.len() > 0 {
                             vcg.containers.insert(node.clone());
@@ -2012,7 +2015,7 @@ pub mod layout {
                                 add_contains_edge(vcg, parent, node);
                             }
                             for p in parents.iter() {
-                                vcg.nodes_by_container.entry(p.clone()).or_default().insert(node.clone());
+                                vcg.nodes_by_container_transitive.entry(p.clone()).or_default().insert(node.clone());
                             }
                         }
                     }
@@ -2041,6 +2044,7 @@ pub mod layout {
         rels.entry("contains".into()).or_default();
 
         vcg.containers.insert(parent.clone());
+        vcg.nodes_by_container.entry(parent.clone()).or_default().insert(node.clone());
     }
 
     pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>, hcg: &'t Hcg<Cow<'s, str>>, logs: &mut log::Logger) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
@@ -2050,6 +2054,7 @@ pub mod layout {
         let vert_edge_labels = HashMap::new();
         let containers = HashSet::new();
         let nodes_by_container = HashMap::new();
+        let nodes_by_container_transitive = HashMap::new();
         let nesting_depth_by_container = HashMap::new();
         let nesting_depths: HashMap<Cow<str>, usize> = HashMap::new();
         let container_depths: HashMap<Cow<str>, usize> = HashMap::new();
@@ -2059,7 +2064,8 @@ pub mod layout {
             vert_node_labels, 
             vert_edge_labels, 
             containers, 
-            nodes_by_container, 
+            nodes_by_container,
+            nodes_by_container_transitive, 
             nesting_depths, 
             nesting_depth_by_container,
             container_depths,
@@ -2166,7 +2172,7 @@ pub mod layout {
 
         // to ensure that nodes in horizontal relationships have correct vertical positioning,
         // we add implied edges based on horizontal relationships and containment relationships.
-        let sorted_nodes_by_container = vcg.nodes_by_container.iter().collect::<BTreeMap<_, _>>();
+        let sorted_nodes_by_container = vcg.nodes_by_container_transitive.iter().collect::<BTreeMap<_, _>>();
         let sorted_constraints = hcg.constraints.iter().collect::<BTreeSet<_>>();
         eprintln!("NODES_BY_CONTAINER: {:#?}", sorted_nodes_by_container);
         eprintln!("PRELIMINARY VERT: {:#?}", vcg.vert);
@@ -2198,14 +2204,14 @@ pub mod layout {
                 })
                 .collect::<Vec<_>>();
             let mut a_incoming_plus_containers = vcg.containers.iter().filter_map(|c| {
-                if vcg.nodes_by_container[c].contains(a) {
+                if vcg.nodes_by_container_transitive[c].contains(a) {
                     Some((c.clone(), vcg.vert_vxmap[c]))
                 } else {
                     None
                 }
             }).collect::<Vec<_>>();
             let mut b_incoming_plus_containers = vcg.containers.iter().filter_map(|c| {
-                if vcg.nodes_by_container[c].contains(b) {
+                if vcg.nodes_by_container_transitive[c].contains(b) {
                     Some((c.clone(), vcg.vert_vxmap[c]))
                 } else { 
                     None
@@ -2233,7 +2239,7 @@ pub mod layout {
 
         for container in vcg.containers.iter() {
             let cx = vcg.vert_vxmap[container];
-            for node in vcg.nodes_by_container[container].iter() {
+            for node in vcg.nodes_by_container_transitive[container].iter() {
                 let nx = vcg.vert_vxmap[node];
                 let node_incoming = vcg.vert.edges_directed(nx, Incoming)
                     .filter_map(|er| {
@@ -2248,7 +2254,7 @@ pub mod layout {
                     })
                     .collect::<Vec<_>>();
                 for (src, src_ix) in node_incoming {
-                    if !vcg.nodes_by_container[container].contains(&src) {
+                    if !vcg.nodes_by_container_transitive[container].contains(&src) {
                         vcg.vert.add_edge(src_ix, cx, "implied_contains".into());
                         vcg.vert_edge_labels
                             .entry(src.clone()).or_default()
@@ -2271,7 +2277,7 @@ pub mod layout {
         let container_depths = &mut vcg.container_depths;
         for vl in vcg.containers.iter() {
             let subdag = vcg.vert.filter_map(|_nx, nl| {
-                if vcg.nodes_by_container[vl].contains(nl) {
+                if vcg.nodes_by_container_transitive[vl].contains(nl) {
                     Some(nl.clone())
                 } else { 
                     None
@@ -2282,7 +2288,7 @@ pub mod layout {
             let subroots = roots(&subdag)?;
             let distance = {
                 let containers = &vcg.containers;
-                let nodes_by_container = &vcg.nodes_by_container;
+                let nodes_by_container = &vcg.nodes_by_container_transitive;
                 let container_depths = &container_depths;
                 |src: &Cow<str>, dst: &Cow<str>, l: &mut log::Logger| {
                     if !containers.contains(src) {
@@ -2332,7 +2338,7 @@ pub mod layout {
 
         let nesting_depths = &mut vcg.nesting_depths;
         for vl in vcg.vert_vxmap.keys() {
-            nesting_depths.insert(vl.clone(), vcg.nodes_by_container.values().filter(|nodes| nodes.contains(vl)).count());
+            nesting_depths.insert(vl.clone(), vcg.nodes_by_container_transitive.values().filter(|nodes| nodes.contains(vl)).count());
         }
 
         event!(Level::TRACE, ?vcg, "VCG");
@@ -2567,6 +2573,17 @@ pub mod layout {
         }
     }
 
+    impl<V: Graphic> Display for Obj<V> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Obj::Node(inner) => write!(f, "{inner}"),
+                Obj::Hop(inner) => write!(f, "{inner}"),
+                Obj::Container(inner) => write!(f, "{inner}"),
+                Obj::Border(inner) => write!(f, "{inner}"),
+            }    
+        }
+    }
+
     /// A numeric representation of a hop.
     #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
     pub struct Hop<V: Graphic> {
@@ -2728,7 +2745,7 @@ pub mod layout {
         V: Display + Graphic + log::Name,
         E: Graphic
     {
-        let Vcg{containers, nodes_by_container, container_depths, ..} = vcg;
+        let Vcg{containers, nodes_by_container_transitive, container_depths, ..} = vcg;
 
         // Rank vertices by the length of the longest path reaching them.
         let mut vx_rank = BTreeMap::new();
@@ -2762,10 +2779,10 @@ pub mod layout {
                 .or_insert(0);
             let mhr = OriginalHorizontalRank(*level);
             *level += 1;
-            if let Some(old) = loc_to_node.insert((*rank, mhr), Obj::Node(ObjNode{vl: wl.clone()})) {
+            if let Some(old) = loc_to_node.insert((*rank, mhr), Obj::from_vl(wl, containers)) {
                 panic!("loc_to_node.insert({rank}, {mhr}) -> {:?}", old);
             };
-            node_to_loc.insert(Obj::Node(ObjNode{vl: wl.clone()}), (*rank, mhr));
+            node_to_loc.insert(Obj::from_vl(wl, containers), (*rank, mhr));
         }
 
         logs.with_map("node_to_loc", "HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>", node_to_loc.iter(), |loc, loc_ix, l| {
@@ -2784,7 +2801,7 @@ pub mod layout {
         let is_contains = |er: &EdgeReference<_>| {
             let src = dag.node_weight(er.source()).unwrap();
             let dst = dag.node_weight(er.target()).unwrap();
-            containers.contains(src) && nodes_by_container[src].contains(dst)
+            containers.contains(src) && nodes_by_container_transitive[src].contains(dst)
         };
         let sorted_condensed_edges = SortedVec::from_unsorted(
             dag
@@ -2811,8 +2828,8 @@ pub mod layout {
         let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
         for (vl, wl, _) in sorted_condensed_edges.iter() {
-            let (vvr, vhr) = node_to_loc[&Obj::Node(ObjNode{vl: vl.clone()})].clone();
-            let (wvr, whr) = node_to_loc[&Obj::Node(ObjNode{vl: wl.clone()})].clone();
+            let (vvr, vhr) = node_to_loc[&Obj::from_vl(vl, containers)].clone();
+            let (wvr, whr) = node_to_loc[&Obj::from_vl(vl, containers)].clone();
             
             let mut mhrs = vec![vhr];
             for mid_level in (vvr+1).0..(wvr.0) {
@@ -2855,7 +2872,7 @@ pub mod layout {
         let mut container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>> = HashMap::new();
         
         for vl in containers.iter() {
-            let (ovr, mut ohr) = node_to_loc[&Obj::Node(ObjNode{vl: vl.clone()})];
+            let (ovr, mut ohr) = node_to_loc[&Obj::Container(ObjContainer{vl: vl.clone()})];
             let depth = container_depths[vl];
             for vr in 0..depth {
                 let vr = VerticalRank(ovr.0 + vr);
@@ -2865,11 +2882,15 @@ pub mod layout {
                 if vr > ovr {
                     ohr = OriginalHorizontalRank(*num_mhrs);
                     *num_mhrs += 1;
-                    if let Some(old) = loc_to_node.insert((vr, ohr), Obj::Border(ObjBorder{border: Border{ vl: vl.clone(), ovr: vr, ohr: mhr, pair: ohr }})) {
+                    let border = Obj::Border(ObjBorder{border: Border{ vl: vl.clone(), ovr: vr, ohr: mhr, pair: ohr }});
+                    node_to_loc.insert(border.clone(), (vr, ohr));
+                    if let Some(old) = loc_to_node.insert((vr, ohr), border) {
                         panic!("loc_to_node.insert({vr}, {ohr}) -> {:?}", old);
                     };
                 }
-                if let Some(old) = loc_to_node.insert((vr, mhr), Obj::Border(ObjBorder{ border: Border{vl: vl.clone(), ovr: vr, ohr, pair: mhr }})) {
+                let border = Obj::Border(ObjBorder{ border: Border{vl: vl.clone(), ovr: vr, ohr, pair: mhr }});
+                node_to_loc.insert(border.clone(), (vr, mhr));
+                if let Some(old) = loc_to_node.insert((vr, mhr), border) {
                     panic!("loc_to_node.insert({vr}, {mhr}) -> {:?}", old);
                 };
                 container_borders.entry(vl.clone()).or_default().push((vr, (ohr, mhr)));
@@ -3082,7 +3103,7 @@ pub mod layout {
             nodes_by_container2: &HashMap<V, Vec<(VerticalRank, OriginalHorizontalRank)>>, 
             p: &mut [&mut [usize]]
         ) -> bool {
-            let Vcg{nodes_by_container, ..} = vcg;
+            let Vcg{nodes_by_container_transitive: nodes_by_container, ..} = vcg;
             let LayoutProblem{node_to_loc, hcg, container_borders, ..} = layout_problem;
 
             let hcg_satisfied = hcg.iter().all(|constraint| {
@@ -3157,7 +3178,7 @@ pub mod layout {
         ) -> Result<LayoutSolution, Error> where
             V: Display + Graphic + log::Name
         {
-            let Vcg{containers, nodes_by_container, ..} = vcg;
+            let Vcg{containers, nodes_by_container_transitive: nodes_by_container, ..} = vcg;
             let LayoutProblem{loc_to_node, node_to_loc, locs_by_level, hops_by_level, ..} = layout_problem;
 
             eprintln!("MINIMIZE");
@@ -3371,7 +3392,8 @@ pub mod geometry {
 
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::Graph;
-    use petgraph::visit::{EdgeRef, IntoNodeReferences};
+    use petgraph::dot::Dot;
+    use petgraph::visit::{EdgeRef};
     use tracing::{event, Level};
     use tracing_error::InstrumentError;
 
@@ -3383,7 +3405,7 @@ pub mod geometry {
 
     use super::error::Error;
     use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Obj, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n, Ls2n, or_insert, ObjHop};
+    use super::layout::{Obj, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n, Ls2n, or_insert, ObjHop, Border, ObjContainer, ObjBorder};
 
     use std::borrow::Cow;
     use std::cmp::{max};
@@ -3949,17 +3971,37 @@ pub mod geometry {
     fn left(sloc: (VerticalRank, SolvedHorizontalRank)) -> Option<(VerticalRank, SolvedHorizontalRank)> {
         sloc.1.checked_sub(1).map(|shrl| (sloc.0, shrl))
     }
+    
+    #[derive(Clone, Copy, Debug)]
     enum Direction {
         Vertical,
         Horizontal,
     }
+
+    impl Display for Direction {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Direction::Vertical => write!(f, "Vertical"),
+                Direction::Horizontal => write!(f, "Horizontal"),
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
     struct Edge {
         dir: Direction,
         margin: OrderedFloat<f64>,
     }
 
+    impl Display for Edge {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}, margin: {}", self.dir, self.margin)
+        }
+    }
+
+
     pub fn position_sols<V, E>(
-        _vcg: &Vcg<V, E>,
+        vcg: &Vcg<V, E>,
         layout_problem: &LayoutProblem<V>,
         layout_solution: &LayoutSolution,
         geometry_problem: &GeometryProblem<V>
@@ -3967,19 +4009,19 @@ pub mod geometry {
     where
         V: Graphic + Display + log::Name,
     {
-        let all_locs = &geometry_problem.all_locs;
-        let all_hops0 = &geometry_problem.all_hops0;
-        let all_hops = &geometry_problem.all_hops;
+        let containers = &vcg.containers;
+        let nodes_by_container = &vcg.nodes_by_container;
         let loc_to_node = &layout_problem.loc_to_node;
         let node_to_loc = &layout_problem.node_to_loc;
         let solved_locs = &layout_solution.solved_locs;
         let sol_by_loc = &geometry_problem.sol_by_loc;
         let sol_by_hop = &geometry_problem.sol_by_hop;
+        let all_hops = &geometry_problem.all_hops;
 
         let of = OrderedFloat::<f64>::from;
 
         // let obj_count = all_locs.len() + all_hops.len();
-
+        // 1. Record how all objects are positioned relative to one another.
         let mut obj_graph = Graph::<Obj<V>, Edge>::new();
         let mut obj_vxmap = HashMap::new();
         let mut solved_vxmap = HashMap::new();
@@ -4005,7 +4047,7 @@ pub mod geometry {
             }
         };
 
-        for (solved, orig) in solved_to_orig.iter() {
+        for (solved, _orig) in solved_to_orig.iter() {
             if let Some(left) = left(*solved) {
                 obj_graph.add_edge(solved_vxmap[&left], solved_vxmap[solved], Edge{dir: Direction::Horizontal, margin: of(20.)});
             }
@@ -4022,13 +4064,14 @@ pub mod geometry {
                 obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], Edge{dir: Direction::Vertical, margin: of(20.)});
             }
         }
-
+        
+        // 2. Map objects to their corresponding positioning variables and 
+        // constraints between those variables.
         let mut con_graph = Graph::<AnySol, OrderedFloat<f64>>::new();
         let mut con_vxmap = HashMap::new();
-        for (_, obj) in obj_graph.node_references() {
+        for (loc_ix, obj) in loc_to_node.iter() {
             match obj {
-                Obj::Node(_) | Obj::Container(_) => {
-                    let loc_ix = node_to_loc[obj];
+                Obj::Node(_) => {
                     let ls = sol_by_loc[&loc_ix];
                     let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(ls));
                     let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(ls));
@@ -4040,45 +4083,97 @@ pub mod geometry {
                     con_graph.add_edge(top, bottom, height);
                 },
                 Obj::Hop(ObjHop{vl, wl, ..}) => {
-                    let loc_ix = node_to_loc[obj];
                     let hs = sol_by_hop[&(loc_ix.0, loc_ix.1, vl.clone(), wl.clone())];
                     or_insert(&mut con_graph, &mut con_vxmap, AnySol::S(hs));
                 },
-                Obj::Border(_) => {
-                    todo!();
-                }
+                Obj::Container(ObjContainer{vl}) => {
+                    let container = vl;
+                    let container_ix = node_to_loc[&Obj::Container(ObjContainer{vl: container.clone()})];
+                    let container_sol = sol_by_loc[&container_ix];
+                    let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(container_sol));
+                    let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(container_sol));
+                    let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(container_sol));
+                    let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(container_sol));
+                    let width = of(20.);
+                    let height = of(20.);
+                    con_graph.add_edge(left, right, width);
+                    con_graph.add_edge(top, bottom, height);
+                
+                    for node in &nodes_by_container[container] {
+                        let child_loc_ix = &node_to_loc[&Obj::from_vl(node, containers)];
+                        let child_sol = sol_by_loc[child_loc_ix];
+                        // XXX: child might be a container too..., or on a deeper rank
+                        let child_left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(child_sol));
+                        let child_right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(child_sol));
+                        let child_top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(child_sol));
+                        let child_bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(child_sol));
+                        let padding = of(10.);
+                        con_graph.add_edge(left, child_left, padding);
+                        con_graph.add_edge(child_right, right, padding);
+                        con_graph.add_edge(top, child_top, padding);
+                        con_graph.add_edge(child_bottom, bottom, padding);
+                    }
+                },
+                _ => {}
             }
         }
 
         for er in obj_graph.edge_references() {
             let edge = er.weight();
+            eprintln!("EDGE IX: {:?} -> {:?}, {}", er.source(), er.target(), edge);
             let src = obj_graph.node_weight(er.source()).unwrap();
             let dst = obj_graph.node_weight(er.target()).unwrap();
             let src_loc_ix = node_to_loc[src];
             let dst_loc_ix = node_to_loc[dst];
 
-            let src_guide_sol = match src {
-                Obj::Node(_) | Obj::Container(_) | Obj::Border(_) => match edge.dir {
-                    Direction::Vertical => AnySol::B(sol_by_loc[&src_loc_ix]),
-                    Direction::Horizontal => AnySol::R(sol_by_loc[&src_loc_ix]),
+            let src_guide_sol = match (src, edge.dir) {
+                (Obj::Node(_) | Obj::Container(_), Direction::Horizontal) => {
+                    AnySol::L(sol_by_loc[&src_loc_ix])
                 },
-                Obj::Hop(ObjHop{vl, wl, ..}) => AnySol::S(sol_by_hop[&(src_loc_ix.0, src_loc_ix.1, vl.clone(), wl.clone())]),
+                (Obj::Node(_) | Obj::Container(_), Direction::Vertical) => {
+                    AnySol::B(sol_by_loc[&src_loc_ix])
+                },
+                (Obj::Border(ObjBorder{ border: Border{vl, ..}}), Direction::Horizontal) => {
+                    AnySol::R(sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]])
+                },
+                (Obj::Hop(ObjHop{vl, wl, ..}), _) => {
+                    AnySol::S(sol_by_hop[&(src_loc_ix.0, src_loc_ix.1, vl.clone(), wl.clone())])
+                },
+                _ => {
+                    panic!("unexpected edge src: {src} {dst} {edge}")
+                }
             };
-            let dst_guide_sol = match dst {
-                Obj::Node(_) | Obj::Container(_) | Obj::Border(_) => match edge.dir {
-                    Direction::Vertical => AnySol::T(sol_by_loc[&dst_loc_ix]),
-                    Direction::Horizontal => AnySol::L(sol_by_loc[&dst_loc_ix]),
+            let dst_guide_sol = match (dst, edge.dir) {
+                (Obj::Node(_) | Obj::Container(_), Direction::Horizontal) => {
+                    AnySol::L(sol_by_loc[&dst_loc_ix])
                 },
-                Obj::Hop(ObjHop{vl, wl, ..}) => AnySol::S(sol_by_hop[&(dst_loc_ix.0, dst_loc_ix.1, vl.clone(), wl.clone())]),
+                (Obj::Node(_) | Obj::Container(_), Direction::Vertical) => {
+                    AnySol::T(sol_by_loc[&dst_loc_ix])
+                },
+                (Obj::Border(ObjBorder{border: Border{vl, ..}}), Direction::Horizontal) => {
+                    AnySol::L(sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]])
+                },
+                (Obj::Hop(ObjHop{vl, wl, ..}), _) => {
+                    AnySol::S(sol_by_hop[&(dst_loc_ix.0, dst_loc_ix.1, vl.clone(), wl.clone())])
+                },
+                _ => {
+                    panic!("unexpected edge dst: {src} {dst} {edge}")
+                }
             };
 
-            con_graph.add_edge(con_vxmap[&src_guide_sol], con_vxmap[&dst_guide_sol], edge.margin);
+            eprintln!("con_vxmap: {:#?}", con_vxmap);
+            eprintln!("con: {}", Dot::new(&con_graph));
+            eprintln!("EDGE: {src},{src_guide_sol} -> {dst},{dst_guide_sol}, {edge}");
+            let src_ix = con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}"));
+            let dst_ix = con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}"));
+            con_graph.add_edge(*src_ix, *dst_ix, edge.margin);
         }
 
+        // 3. Translate those variables and constraints into optimization problems to be solved.
         let mut vertical_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
         let mut horizontal_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
 
-        for (sol, ix) in con_vxmap.iter() {
+        for (sol, _ix) in con_vxmap.iter() {
             match sol {
                 AnySol::L(_) | AnySol::R(_) | AnySol::S(_) | AnySol::V(_) => {
                     let var = horizontal_problem.v.get(*sol);
@@ -4472,7 +4567,7 @@ pub mod frontend {
             event!(Level::TRACE, ?val, "HCG");
             eprintln!("HCG {hcg:#?}");
     
-            let Vcg{vert, containers, nodes_by_container, container_depths, ..} = &vcg;
+            let Vcg{vert, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
     
             let cvcg = condense(vert)?;
             let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
@@ -4931,33 +5026,27 @@ pub mod frontend {
             }
 
             for container in containers {
-                for border in container_borders[container].first().iter() {
-                    let (ovr, (ohr, pair)) = border;
-                    let shr1 = solved_locs[ovr][ohr];
-                    let shr2 = solved_locs[ovr][pair];
-                    let lohr = if shr1 < shr2 { ohr } else { pair };
-                    let rohr = if shr1 < shr2 { pair } else { ohr };
-                    let ln = sol_by_loc[&(*ovr, *lohr)];
-                    let rn = sol_by_loc[&(*ovr, *rohr)];
-                    let lpos = ls[&ln];
-                    let rpos = rs[&rn];
-                    let z_index = nesting_depths[container];
-                    let vpos = ts[&ln];
-                    let width = (rpos - lpos).round();
-                    let hpos = lpos.round();
-                    let height = bs[&ln] - ts[&ln];
-                    eprintln!("HEIGHT: {container} {height}");
+                let container_loc_ix = &node_to_loc[&Obj::Container(ObjContainer{ vl: container.clone() })];
+                let (ovr, ohr) = container_loc_ix;
+                let cn = sol_by_loc[container_loc_ix];
+                let lpos = ls[&cn];
+                let rpos = rs[&cn];
+                let z_index = nesting_depths[container];
+                let vpos = ts[&cn];
+                let width = (rpos - lpos).round();
+                let hpos = lpos.round();
+                let height = bs[&cn] - ts[&cn];
+                eprintln!("HEIGHT: {container} {height}");
 
-                    let key = format!("{}_{}_{}_{}", container, ovr, ohr, pair);
-                    let mut label = vert_node_labels
-                        .get(container)
-                        .or_err(Kind::KeyNotFoundError{key: container.to_string()})?
-                        .clone();
-                    if label == "_" { label = String::new(); };
-                    
-                    let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
-                    texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: ln, estimated_size});
-                }
+                let key = format!("{container}");
+                let mut label = vert_node_labels
+                    .get(container)
+                    .or_err(Kind::KeyNotFoundError{key: container.to_string()})?
+                    .clone();
+                if label == "_" { label = String::new(); };
+                
+                let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
+                texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: cn, estimated_size});
             }
 
             let mut arrows = vec![];
@@ -5232,7 +5321,6 @@ pub mod frontend {
     #[cfg(feature="dioxus")]
     pub mod dioxus {
         use dioxus::prelude::*;
-        use anyhow;
 
         use super::dom::{Drawing, Node, Label};
 
@@ -5374,7 +5462,7 @@ pub mod frontend {
                     Node::Svg{key, path, z_index, rel, label, classes, ..} => {
                         let marker_id = if rel == "actuates" || rel == "forward" { "arrowhead" } else { "arrowheadrev" };
                         let marker_orient = if rel == "actuates" || rel == "forward" { "auto" } else { "auto-start-reverse" };
-                        let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
+                        // let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
                         // let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
                         
                         children.push(cx.render(rsx!{
@@ -5706,7 +5794,7 @@ mod tests {
         let hcg = calculate_hcg(&val)?;
         let vcg = calculate_vcg(&val, &hcg, &mut logs)?;
 
-        let Vcg{vert, vert_vxmap, containers, nodes_by_container, container_depths, ..} = &vcg;
+        let Vcg{vert, vert_vxmap, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
         let vx = vert_vxmap["Ab"];
         let wx = vert_vxmap["Ac"];
         assert_eq!(vert.node_weight(vx), Some(&Cow::from("Ab")));

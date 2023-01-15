@@ -1,16 +1,12 @@
 use std::borrow::Cow;
-use std::cell::Cell;
 use std::io::{self};
 use std::panic::catch_unwind;
 
-use depict::graph_drawing::error::{Error, OrErrExt, Kind};
+use depict::graph_drawing::error::{Error, Kind};
 use depict::graph_drawing::eval::{Val, Body};
 use depict::graph_drawing::frontend::log::Record;
-use depict::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol};
-use depict::graph_drawing::frontend::dom::{draw, Drawing, Label, Node};
+use depict::graph_drawing::frontend::dom::{draw, Drawing};
 use depict::graph_drawing::frontend::dioxus::{render, as_data_svg};
-
-use anyhow;
 
 use dioxus::prelude::*;
 use dioxus_desktop::{self, Config, WindowBuilder};
@@ -25,7 +21,7 @@ use color_spantrace::colorize;
 
 use indoc::indoc;
 
-use tracing::{instrument, event, Level};
+use tracing::{event, Level};
 use tracing_error::{ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -39,8 +35,8 @@ pub struct AppProps {
 
 pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
     match record {
-        Record::String{name, ty, names, val} => {
-            let ty = ty.unwrap_or("None".into());
+        Record::String{name, ty: _ty, names, val} => {
+            // let ty = ty.unwrap_or("None".into());
             let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
             // let key = format!("debug_{ty}_{name}");
             // eprintln!("KEY: {key}");
@@ -70,7 +66,7 @@ fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
         Record::String{..} => render_one(cx, record),
         Record::Group{name, ty, names, val} => {
             let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
-            let ty2 = ty.clone().unwrap_or("None".into());
+            // let ty2 = ty.clone().unwrap_or("None".into());
             // let key = format!("debug_{ty2}_{name}");
             // eprintln!("KEY: {key}");
             cx.render(rsx!{
@@ -221,7 +217,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let nodes = render(cx, drawing.get().clone());
     let logs = render_logs(cx, drawing.get().clone());
 
-    let mut show_logs = use_state(&cx, || true);
+    let show_logs = use_state(&cx, || true);
 
     model_sender.send(model.get().clone());
 
@@ -236,7 +232,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     
     // parse and eval the highlight string to get a sub-model to highlight
     let highlight_styles = match parse_highlights(&highlight.get()[..]) {
-        Ok(Val::Process { name, label, body: Some(Body::All(bs)) }) => {
+        Ok(Val::Process { body: Some(Body::All(bs)), .. }) => {
             // cx.render(rsx!{"OOPS"})
             cx.render(rsx!{
                 bs.iter().map(|b| {
@@ -400,7 +396,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                                         "Licenses",
                                     },
                                     div {
-                                        (depict::licenses::LICENSES.dirs().map(|dir| {
+                                        depict::licenses::LICENSES.dirs().map(|dir| {
                                             let path = dir.path().display();
                                             cx.render(rsx!{
                                                 div {
@@ -427,7 +423,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                                                     }
                                                 }
                                             })
-                                        }))
+                                        })
                                     }
                                 }
                             }
