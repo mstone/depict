@@ -3101,16 +3101,23 @@ pub mod layout {
             let Vcg{nodes_by_container_transitive: nodes_by_container, ..} = vcg;
             let LayoutProblem{node_to_loc, hcg, container_borders, ..} = layout_problem;
 
+            // eprintln!("HCG: {:#?}", hcg.iter().collect::<Vec<_>>());
             let hcg_satisfied = hcg.iter().all(|constraint| {
                 let HorizontalConstraint{a, b} = constraint;
-                let an = if let Some(an) = node_to_loc.get(&Obj::Node(ObjNode{vl: a.clone()})) { an } else { return true; };
-                let bn = if let Some(bn) = node_to_loc.get(&Obj::Node(ObjNode{vl: b.clone()})) { bn } else { return true; };
-                let aovr = an.0.0;
-                let aohr = an.1.0;
-                let bovr = bn.0.0;
-                let bohr = bn.1.0;
+                // let an = if let Some(an) = node_to_loc.get(&Obj::Node(ObjNode{vl: a.clone()})) { an } else { return true; };
+                // let bn = if let Some(bn) = node_to_loc.get(&Obj::Node(ObjNode{vl: b.clone()})) { bn } else { return true; };
+                let aobj = &Obj::from_vl(a, &vcg.containers);
+                let bobj = &Obj::from_vl(b, &vcg.containers);
+                let aloc = node_to_loc[aobj];
+                let bloc = node_to_loc[bobj];
+                let aovr = aloc.0.0;
+                let aohr = aloc.1.0;
+                let bovr = bloc.0.0;
+                let bohr = bloc.1.0;
                 let ashr = p[aovr][aohr];
                 let bshr = p[bovr][bohr];
+                // let ret = (aovr == bovr && ashr < bshr) || ashr <= bshr;
+                // eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
                 // imperfect without rank-spanning constraint edges but maybe a place to start?
                 (aovr == bovr && ashr < bshr) || ashr <= bshr
             });
@@ -3182,16 +3189,6 @@ pub mod layout {
             let mut l2n = loc_to_node.iter().collect::<Vec<_>>();
             l2n.sort();
             eprintln!("LOC_TO_NODE: {l2n:#?}");
-            
-            if hops_by_level.is_empty() {
-                let mut solved_locs = BTreeMap::new();
-                for (lvl, locs) in locs_by_level.iter() {
-                    solved_locs.insert(*lvl, (0..*locs)
-                        .map(|loc| (OriginalHorizontalRank(loc), SolvedHorizontalRank(loc)))
-                        .collect::<BTreeMap<_, _>>());
-                }
-                return Ok(LayoutSolution{crossing_number: 0, solved_locs});
-            }
 
             let mut shrs = vec![];
             for (_rank, locs) in locs_by_level.iter() {
@@ -3228,6 +3225,7 @@ pub mod layout {
 
             let mut crossing_number = usize::MAX;
             let mut solution: Option<Vec<Vec<usize>>> = None;
+            // eprintln!("MULTISEARCH {:#?}", shrs_ref);
             multisearch(&mut shrs_ref, |p| {
                 // eprintln!("HEAPS PROCESS: ");
                 // for (n, s) in p.iter().enumerate() {
@@ -3238,9 +3236,9 @@ pub mod layout {
                     for h1i in 0..hops.len() {
                         for h2i in 0..hops.len() {
                             if h2i < h1i {
-                                // eprintln!("hop: {h1} {h2} -> {}", crosses(h1, h2, p[rank.0], p[rank.0+1]));
                                 let h1 = &hops[h1i];
                                 let h2 = &hops[h2i];
+                                // eprintln!("hop: {h1} {h2} -> {}", crosses(h1, h2, p[rank.0], p[rank.0+1]));
                                 cn += crosses(h1, h2, p[rank.0], p[rank.0+1]);
                             }   
                         }
@@ -3256,8 +3254,8 @@ pub mod layout {
                         }
                     }
                 }
-                false
                 // eprintln!("P cn: {cn}: p: {p:?}");
+                false
             });
 
             let solution = solution.or_err(LayoutError::HeapsError{error: "no solution found".into()})?;
