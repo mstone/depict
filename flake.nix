@@ -166,6 +166,7 @@
                 rust
                 tex
                 cmake
+                graphviz
               ] ++ final.lib.optionals isShell [
                 entr
                 trunk

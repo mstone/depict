@@ -56,6 +56,26 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
                 }
             })
         },
+        Record::Svg{ name, ty: _ty, names, val } => {
+            let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
+            cx.render(rsx!{
+                div {
+                    class: "{classes}",
+                    name.map(|name| rsx!{
+                        div {
+                            style: "font-weight: 700;",
+                            "{name}"
+                        }
+                    }),
+                    div {
+                        style: "white-space: pre; margin-left: 10px;",
+                        img {
+                            src: "{val}",
+                        }
+                    }
+                }
+            })
+        },
         _ => cx.render(rsx!{""}),
     }
 }
@@ -63,6 +83,7 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
 fn render_many<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
     match record {
         Record::String{..} => render_one(cx, record),
+        Record::Svg{..} => render_one(cx, record),
         Record::Group{name, ty, names, val} => {
             let classes = names.iter().map(|n| format!("highlight_{n}")).collect::<Vec<_>>().join(" ");
             // let ty2 = ty.clone().unwrap_or("None".into());

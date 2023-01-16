@@ -4020,7 +4020,8 @@ pub mod geometry {
         vcg: &Vcg<V, E>,
         layout_problem: &LayoutProblem<V>,
         layout_solution: &LayoutSolution,
-        geometry_problem: &GeometryProblem<V>
+        geometry_problem: &GeometryProblem<V>,
+        logs: &mut log::Logger,
     ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error> 
     where
         V: Graphic,
@@ -4219,6 +4220,10 @@ pub mod geometry {
             con_graph.add_edge(*src_ix, *dst_ix, edge.margin);
         }
 
+        if let Some(con_svg) = as_svg(&con_graph) {
+            logs.log_svg(Some("con_graph"), None::<String>, Vec::<String>::new(), con_svg).unwrap();
+        }
+        
         // 3. Translate those variables and constraints into optimization problems to be solved.
         let mut vertical_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
         let mut horizontal_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
@@ -4251,6 +4256,31 @@ pub mod geometry {
         }
 
         Ok((horizontal_problem, vertical_problem))
+    }
+
+    #[cfg(feature="desktop")]
+    fn as_svg<V: Display, E: Display>(graph: &Graph<V, E>) -> Option<String> {
+        use std::{process::{Stdio, Command}, io::Write};
+
+        let dot = format!("{}", Dot::new(graph));
+        let mut child = Command::new("dot")
+            .arg("-Tsvg")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("failed to execute dot");
+        let mut stdin = child.stdin.take().expect("Failed to open stdin");
+        std::thread::spawn(move || {
+            stdin.write_all(dot.as_bytes()).expect("Failed to write to stdin");
+        });
+        let output = child.wait_with_output().expect("Failed to read stdout");
+        let svg = String::from_utf8_lossy(&output.stdout);
+        Some(format!("data:image/svg+xml;utf8,{svg}"))
+    }
+
+    #[cfg(not(feature="desktop"))]
+    fn as_svg<V, E>(con_graph: &Graph<V, E>) -> Option<String> {
+        None
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -4719,7 +4749,7 @@ pub mod frontend {
     
             estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
     
-            let (horizontal_problem, vertical_problem) = position_sols(&vcg, &layout_problem, &layout_solution, &geometry_problem)?;
+            let (horizontal_problem, vertical_problem) = position_sols(&vcg, &layout_problem, &layout_solution, &geometry_problem, logs)?;
 
             let geometry_solution = solve_optimization_problems(&horizontal_problem, &vertical_problem)?;
             
@@ -4746,6 +4776,7 @@ pub mod frontend {
         pub enum Record {
             String { name: Option<String>, ty: Option<String>, names: Vec<String>, val: String, },
             Group { name: Option<String>, ty: Option<String>, names: Vec<String>, val: Vec<Record>, },
+            Svg { name: Option<String>, ty: Option<String>, names: Vec<String>, val: String, }
         }
 
         #[derive(Clone, Debug, thiserror::Error)]
@@ -4900,6 +4931,19 @@ pub mod frontend {
                     ty: None, 
                     names: vec![], 
                     val: format!("{val:#?}")
+                });
+                Ok(())
+            }
+
+            pub fn log_svg(&mut self, name: Option<impl Into<String>>, ty: Option<impl Into<String>>, names: Vec<impl Into<String>>, val: String) -> Result<(), Error> {
+                let name = name.map(|name| name.into());
+                let ty = ty.map(|ty| ty.into());
+                let names = names.into_iter().map(|n| n.into()).collect::<Vec<String>>();
+                self.logs.push(Record::Svg{
+                    name,
+                    ty, 
+                    names, 
+                    val,
                 });
                 Ok(())
             }
