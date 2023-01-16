@@ -2863,6 +2863,20 @@ pub mod layout {
                     .insert(lvl, (mhr, nhr));
             }
         }
+
+        logs.with_map("hops_by_edge", "HashMap<(V, V), (VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>", hops_by_edge.iter(), |edge, hops, l| {
+            l.with_set(format!("hops_by_edge[{}->{}]", edge.0, edge.1), "Hops", hops.iter(), |(lvl, (mhr, nhr)), l| {
+                l.log_pair(
+                    "VerticalRank",
+                    names![lvl],
+                    format!("{lvl}"),
+                    "(OriginalHorizontalRank, OriginalHorizontalRank)",
+                    names![mhr, nhr],
+                    format!("{mhr}, {nhr}")
+                )
+            })
+        }).map_err(|err| err.in_current_span())?;
+
         event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V2");
 
         event!(Level::DEBUG, ?hops_by_level, "HOPS_BY_LEVEL");
@@ -3795,6 +3809,8 @@ pub mod geometry {
         pub ss: BTreeMap<HopSol, f64>,
         pub ts: BTreeMap<LocSol, f64>,
         pub bs: BTreeMap<LocSol, f64>,
+        pub status_h: OSQPStatusKind,
+        pub status_v: OSQPStatusKind,
     }
 
     impl<CX: Ls2n> log::Log<CX> for GeometrySolution {
@@ -4007,16 +4023,17 @@ pub mod geometry {
         geometry_problem: &GeometryProblem<V>
     ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error> 
     where
-        V: Graphic + Display + log::Name,
+        V: Graphic,
+        E: Graphic + std::cmp::PartialEq<&'static str>,
     {
         let containers = &vcg.containers;
         let nodes_by_container = &vcg.nodes_by_container;
         let loc_to_node = &layout_problem.loc_to_node;
         let node_to_loc = &layout_problem.node_to_loc;
+        let hops_by_edge = &layout_problem.hops_by_edge;
         let solved_locs = &layout_solution.solved_locs;
         let sol_by_loc = &geometry_problem.sol_by_loc;
         let sol_by_hop = &geometry_problem.sol_by_hop;
-        let all_hops = &geometry_problem.all_hops;
 
         let of = OrderedFloat::<f64>::from;
 
@@ -4057,14 +4074,42 @@ pub mod geometry {
             // todo: hop edges, nested edges, ...
         }
 
-        for window in all_hops.windows(2) {
-            if let [ref cur, ref nxt, ..] = window {
-                let src = (cur.lvl, solved_locs[&cur.lvl][&cur.mhr]);
-                let dst = (nxt.lvl, solved_locs[&nxt.lvl][&nxt.mhr]);
-                obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], Edge{dir: Direction::Vertical, margin: of(20.)});
+        eprintln!("VERT EDGE REFERENCES");
+        for er in vcg.vert.edge_references() {
+            eprintln!("WEIGHT: {}", *er.weight());
+            if *er.weight() != "actuates" && *er.weight() != "senses" && *er.weight() != "fake" {
+                continue;
+            }
+            let src = vcg.vert.node_weight(er.source()).unwrap();
+            let tgt = vcg.vert.node_weight(er.target()).unwrap();
+            eprintln!("VCG EDGE: {src} -> {tgt}, {}", *er.weight());
+            let src_obj = Obj::from_vl(src, containers);
+            let tgt_obj = Obj::from_vl(tgt, containers);
+            let src_loc = node_to_loc[&src_obj];
+            let tgt_loc = node_to_loc[&tgt_obj];
+            let hops = &hops_by_edge.get(&(src.clone(), tgt.clone()));
+            eprintln!("HOPS1: {hops:#?}");
+            let hops = if hops.is_none() {
+                vec![src_loc, tgt_loc]
+            } else {
+                let mut hops = hops.unwrap().iter().map(|(ovr, (ohr, mhr))| (*ovr, *ohr, *mhr)).collect::<Vec<_>>();
+                let last = hops.last().unwrap();
+                hops.push((last.0 + 1, last.2, OriginalHorizontalRank(usize::MAX - last.1.0)));
+                hops.into_iter().map(|(ovr, ohr, _)| (ovr, ohr)).collect::<Vec<_>>()
+            };
+            eprintln!("HOPS2: {hops:#?}");
+            for window in hops.windows(2) {
+                if let [ref cur, ref nxt, ..] = window {
+                    let src = (cur.0, solved_locs[&cur.0][&cur.1]);
+                    let dst = (nxt.0, solved_locs[&nxt.0][&nxt.1]);
+                    obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], Edge{dir: Direction::Vertical, margin: of(20.)});
+                }
             }
         }
+        eprintln!("VERT EDGE DONE");
         
+       
+
         // 2. Map objects to their corresponding positioning variables and 
         // constraints between those variables.
         let mut con_graph = Graph::<AnySol, OrderedFloat<f64>>::new();
@@ -4083,8 +4128,13 @@ pub mod geometry {
                     con_graph.add_edge(top, bottom, height);
                 },
                 Obj::Hop(ObjHop{vl, wl, ..}) => {
+                    let ls = sol_by_loc[loc_ix];
                     let hs = sol_by_hop[&(loc_ix.0, loc_ix.1, vl.clone(), wl.clone())];
                     or_insert(&mut con_graph, &mut con_vxmap, AnySol::S(hs));
+                    let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(ls));
+                    let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(ls));
+                    let height = of(20.);
+                    con_graph.add_edge(top, bottom, height);
                 },
                 Obj::Container(ObjContainer{vl}) => {
                     let container = vl;
@@ -4130,13 +4180,13 @@ pub mod geometry {
                 (Obj::Node(_) | Obj::Container(_), Direction::Horizontal) => {
                     AnySol::L(sol_by_loc[&src_loc_ix])
                 },
-                (Obj::Node(_) | Obj::Container(_), Direction::Vertical) => {
+                (Obj::Node(_) | Obj::Container(_) | Obj::Hop(_), Direction::Vertical) => {
                     AnySol::B(sol_by_loc[&src_loc_ix])
                 },
                 (Obj::Border(ObjBorder{ border: Border{vl, ..}}), Direction::Horizontal) => {
                     AnySol::R(sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]])
                 },
-                (Obj::Hop(ObjHop{vl, wl, ..}), _) => {
+                (Obj::Hop(ObjHop{vl, wl, ..}), Direction::Horizontal) => {
                     AnySol::S(sol_by_hop[&(src_loc_ix.0, src_loc_ix.1, vl.clone(), wl.clone())])
                 },
                 _ => {
@@ -4147,13 +4197,13 @@ pub mod geometry {
                 (Obj::Node(_) | Obj::Container(_), Direction::Horizontal) => {
                     AnySol::L(sol_by_loc[&dst_loc_ix])
                 },
-                (Obj::Node(_) | Obj::Container(_), Direction::Vertical) => {
+                (Obj::Node(_) | Obj::Container(_) | Obj::Hop(_), Direction::Vertical) => {
                     AnySol::T(sol_by_loc[&dst_loc_ix])
                 },
                 (Obj::Border(ObjBorder{border: Border{vl, ..}}), Direction::Horizontal) => {
                     AnySol::L(sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]])
                 },
-                (Obj::Hop(ObjHop{vl, wl, ..}), _) => {
+                (Obj::Hop(ObjHop{vl, wl, ..}), Direction::Horizontal) => {
                     AnySol::S(sol_by_hop[&(dst_loc_ix.0, dst_loc_ix.1, vl.clone(), wl.clone())])
                 },
                 _ => {
@@ -4203,9 +4253,18 @@ pub mod geometry {
         Ok((horizontal_problem, vertical_problem))
     }
 
+    #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+    pub enum OSQPStatusKind {
+        Solved,
+        SolvedInaccurate,
+        MaxIterationsReached,
+        TimeLimitReached,
+        #[default] Default,
+    }
+
     fn solve_problem<S: Sol, C: Coeff>(
         optimization_problem: &OptimizationProblem<S, C>
-    ) -> Result<Vec<(Var<S>, f64)>, Error> {
+    ) -> Result<(Vec<(Var<S>, f64)>, OSQPStatusKind), Error> {
         let OptimizationProblem{v, c, pd, q} = optimization_problem;
 
         let settings = &osqp::Settings::default()
@@ -4274,13 +4333,13 @@ pub mod geometry {
         let result = prob.solve();
         eprintln!("STATUS {:?}", result);
         let solution = match result {
-            osqp::Status::Solved(solution) => Ok(solution),
-            osqp::Status::SolvedInaccurate(solution) => Ok(solution),
-            osqp::Status::MaxIterationsReached(solution) => Ok(solution),
-            osqp::Status::TimeLimitReached(solution) => Ok(solution),
+            osqp::Status::Solved(solution) => Ok((solution, OSQPStatusKind::Solved)),
+            osqp::Status::SolvedInaccurate(solution) => Ok((solution, OSQPStatusKind::SolvedInaccurate)),
+            osqp::Status::MaxIterationsReached(solution) => Ok((solution, OSQPStatusKind::MaxIterationsReached)),
+            osqp::Status::TimeLimitReached(solution) => Ok((solution, OSQPStatusKind::TimeLimitReached)),
             _ => Err(LayoutError::OsqpError{error: "failed to solve problem".into(),}.in_current_span()),
         }?;
-        let x = solution.x();
+        let x = solution.0.x();
 
         // eprintln!("{:?}", x);
         let mut solutions = v.iter().map(|(_sol, var)| (*var, x[var.index])).collect::<Vec<_>>();
@@ -4291,7 +4350,7 @@ pub mod geometry {
         //     }
         // }
 
-        Ok(solutions)
+        Ok((solutions, solution.1))
     }
 
     fn extract_variable<Idx: Copy + Debug + Ord, Val: Copy + Debug>(
@@ -4325,10 +4384,10 @@ pub mod geometry {
         let OptimizationProblem{v: vv, ..} = vertical_problem;
 
         eprintln!("SOLVE HORIZONTAL");
-        let solutions_h = solve_problem(&horizontal_problem)?;
+        let (solutions_h, status_h) = solve_problem(&horizontal_problem)?;
            
         eprintln!("SOLVE VERTICAL");
-        let solutions_v = solve_problem(&vertical_problem)?;
+        let (solutions_v, status_v) = solve_problem(&vertical_problem)?;
 
         let ls = extract_variable(&vh, &solutions_h, AnySolKind::L, "ls".into(), |s| { 
             if let AnySol::L(l) = s { l } else { panic!() }
@@ -4350,7 +4409,7 @@ pub mod geometry {
             if let AnySol::B(b) = s { b } else { panic!() }
         });
 
-        let res = GeometrySolution{ls, rs, ss, ts, bs};
+        let res = GeometrySolution{ls, rs, ss, ts, bs, status_h, status_v};
         event!(Level::DEBUG, ?res, "LAYOUT");
         Ok(res)
     }
@@ -4877,7 +4936,7 @@ pub mod frontend {
         use tracing::{instrument, event};
         use tracing_error::InstrumentError;
 
-        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize}, frontend::log::{Names}}, names};
+        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
 
         use super::log::{self, Log};
 
@@ -4899,6 +4958,8 @@ pub mod frontend {
         #[derive(Clone, Debug)]
         pub struct Drawing {
             pub crossing_number: Option<usize>,
+            pub status_v: OSQPStatusKind,
+            pub status_h: OSQPStatusKind,
             pub viewbox_width: f64,
             pub viewbox_height: f64,
             pub nodes: Vec<Node>,
@@ -4908,7 +4969,9 @@ pub mod frontend {
         impl Default for Drawing {
             fn default() -> Self {
                 Self { 
-                    crossing_number: Default::default(), 
+                    crossing_number: Default::default(),
+                    status_v: Default::default(),
+                    status_h: Default::default(),
                     viewbox_width: 1024.0,
                     viewbox_height: 400.0,
                     nodes: Default::default(),
@@ -4933,6 +4996,8 @@ pub mod frontend {
             let ss = &depiction.geometry_solution.ss;
             let ts = &depiction.geometry_solution.ts;
             let bs = &depiction.geometry_solution.bs;
+            let status_v = depiction.geometry_solution.status_v;
+            let status_h = depiction.geometry_solution.status_h;
             let sol_by_loc = &depiction.geometry_problem.sol_by_loc;
             let loc_to_node = &depiction.layout_problem.loc_to_node;
             let node_to_loc = &depiction.layout_problem.node_to_loc;
@@ -5309,7 +5374,9 @@ pub mod frontend {
             eprintln!("NODES: {nodes:#?}");
 
             Ok(Drawing{
-                crossing_number: Some(crossing_number), 
+                crossing_number: Some(crossing_number),
+                status_v,
+                status_h,
                 viewbox_width: root_width,
                 viewbox_height: viewbox_height,
                 nodes,

@@ -26,8 +26,7 @@ use tracing_error::{ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PLACEHOLDER: &str = indoc!("
-k [ - s b ]
-- c s
+a b
 ");
 
 pub struct AppProps {
@@ -216,6 +215,9 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let nodes = render(cx, drawing.get().clone());
     let logs = render_logs(cx, drawing.get().clone());
+
+    let status_v = drawing.get().status_v;
+    let status_h = drawing.get().status_h;
 
     let show_logs = use_state(&cx, || true);
 
@@ -448,6 +450,19 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                 //         crossing_number
                 //     }
                 // }
+                show_logs.then(|| rsx!{
+                        div {
+                        style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
+                        span {
+                            style: "color: #000;",
+                            "Solution Status: "
+                        }
+                        span {
+                            style: "font-style: italic;",
+                            "v: {status_v:?} h: {status_h:?}"
+                        }
+                    }
+                })
             }
         }
         // DRAWING
