@@ -4109,6 +4109,9 @@ pub mod geometry {
         }
         eprintln!("VERT EDGE DONE");
         
+        if let Some(obj_svg) = as_svg(&obj_graph) {
+            logs.log_svg(Some("obj_graph"), None::<String>, Vec::<String>::new(), obj_svg).unwrap();
+        }
        
 
         // 2. Map objects to their corresponding positioning variables and 
