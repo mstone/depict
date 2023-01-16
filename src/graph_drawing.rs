@@ -1,118 +1,118 @@
 //! The depict compiler backend
-//! 
+//!
 //! # Summary
-//! 
-//! Like most compilers, depict has a front-end [parser](crate::parser), 
-//! a multi-stage backend, and various intermediate representations (IRs) 
+//!
+//! Like most compilers, depict has a front-end [parser](crate::parser),
+//! a multi-stage backend, and various intermediate representations (IRs)
 //! to connect them.
-//! 
-//! The depict backend is responsible for gradually transforming the IR 
-//! into lower-level constructs: ultimately, into geometric representations of 
+//!
+//! The depict backend is responsible for gradually transforming the IR
+//! into lower-level constructs: ultimately, into geometric representations of
 //! visual objects that, when drawn, beautifully and correctly portray
 //! the modelling relationships recorded in the IR being compiled.
-//! 
+//!
 //! # Guide-level Explanation
-//! 
+//!
 //! At a high level, the depict backend consists of [layout] and [geometry] modules.
-//! 
-//! `layout` is responsible for producing a coarse-grained map, called a 
-//! [LayoutProblem](layout::LayoutProblem), that "positions" visual components relative 
+//!
+//! `layout` is responsible for producing a coarse-grained map, called a
+//! [LayoutProblem](layout::LayoutProblem), that "positions" visual components relative
 //! to one another literally by calculating ordering relations between them.
-//! 
+//!
 //! `geometry` is then responsible for calculating positions and dimensions for these
 //! components -- essentially, for "meshing" them -- in order to produce instructions
-//! that can be passed to a *depict* front-end for drawing using a conventional 
+//! that can be passed to a *depict* front-end for drawing using a conventional
 //! drawing backend like [Dioxus](https://dioxuslabs.com) or [TikZ](https://ctan.org/pkg/pgf).
-//! 
+//!
 //! # Reference-level Explanation
-//! 
+//!
 //! ## Approach
-//! 
+//!
 //! Both layout and geometry calculation follow the same general approach which is:
-//! 
+//!
 //! 1. elaborate the input data into a collection of lower-level entities
-//! along with additional collections that map indices for the input data into 
+//! along with additional collections that map indices for the input data into
 //! indices for the corresponding refined objects that enable navigation.
-//! 
-//! 2. map the refinement and the associated collections of indices into the input 
+//!
+//! 2. map the refinement and the associated collections of indices into the input
 //! format for a solver, such as a generate-and-test solver for layout
 //! or [OSQP](https://osqp.org) for geometry.
-//! 
+//!
 //! 3. solve the relevant problem, and then map the resulting solution back to
 //! data about the refinement.
-//! 
+//!
 //! ## Vocabulary
-//! 
+//!
 //! The refinement for `layout` is a collection of "locs". Each "loc" represents a visual
 //! cell that is ordered vertically into ranks and horizontally within ranks, into which
 //! geometry can conceptually be placed.
-//! 
+//!
 //! Due to requirements of the edge crossing minimization algorithm, it is necessary to
 //! refine edges that span more than one rank into collections of "hops" that such that
 //! each hop spans only a single rank.
-//! 
+//!
 //! As a result, there are two kinds of "locs", "node locs" and "hop locs".
-//! 
+//!
 //! Locs are indexed by pairs of (VerticalRank, OriginalHorizontalRank), called LocIx.
-//! 
-//! Node locs have just these coordinates. Hop locs, by contrast, span ranks and so 
-//! have coordinates for both their upper end-point -- (ovr, mhr), for "Original 
-//! Vertical Rank, m-Horizontal Rank", and their lower end-point (ovr+1, nhr). 
+//!
+//! Node locs have just these coordinates. Hop locs, by contrast, span ranks and so
+//! have coordinates for both their upper end-point -- (ovr, mhr), for "Original
+//! Vertical Rank, m-Horizontal Rank", and their lower end-point (ovr+1, nhr).
 //! Lexically, ohr+1 is also often abbreviated ohr**d** for "down".
-//! 
-//! The result of solving the layout problem is a map from 
-//! 
+//!
+//! The result of solving the layout problem is a map from
+//!
 //!   VerticalRank -> OriginalHorizontalRank -> SolvedHorizontalRank
-//! 
+//!
 //! describing a permutation of the indices of the locs being ordered.
-//! 
+//!
 //! As with original horizontal ranks, solved horizontal ranks get abbreviated as
 //! "shr" (for the solved horizontal rank of the upper endpoint of a hop), "shrd"
 //! for the solved horizontal rank of the lower endpoint of a hop, and with further
-//! abbreviations like "shrl", "shrr" for the solved horizontal ranks of left and 
+//! abbreviations like "shrl", "shrr" for the solved horizontal ranks of left and
 //! right neighbors.
-//! 
+//!
 //! The layout problem itself has additional further vocabulary: for every distinct
 //! pair of locs with a given rank, there is an ordering variable x_ij that will be
-//! set to 1 if loc i should be left of loc j and for every distinct pair of hops 
-//! with the same starting rank there are crossing number variables c[r][u1, v1, u2, v2] 
+//! set to 1 if loc i should be left of loc j and for every distinct pair of hops
+//! with the same starting rank there are crossing number variables c[r][u1, v1, u2, v2]
 //! that will be summed to count whether or not hop (u1, v1) crosses hop (u2, v2)
 //! given the relative ordering of locs (r, u1), (r, u2), (r+1, v1), and (r+1, v2).
-//! 
+//!
 //! Finally, hops have an additional subtlety which is that the collections of hops
-//! used by geometry are not the same as those solved for by layout because the 
-//! refinement used in geometry refines collections of hops into collections of control 
+//! used by geometry are not the same as those solved for by layout because the
+//! refinement used in geometry refines collections of hops into collections of control
 //! points to use to represent the edge bundle to be meshed by adding a fake/sentinel
-//! hop with an unreasonably large "nhr" value for each previous final hop so that 
-//! procedures that iterate over sequences of hops can simulate iterating over control 
+//! hop with an unreasonably large "nhr" value for each previous final hop so that
+//! procedures that iterate over sequences of hops can simulate iterating over control
 //! points.
-//! 
+//!
 //! ## Other Details
-//! 
-//! To make the layout refinement from the input data, we vertically rank the nodes 
-//! by using Floyd-Warshall with negative weights to find all-pairs longest paths, 
+//!
+//! To make the layout refinement from the input data, we vertically rank the nodes
+//! by using Floyd-Warshall with negative weights to find all-pairs longest paths,
 //! and then filter down to paths that start at a root.
-//! 
+//!
 //! These paths are then sorted/grouped by length to produce `paths_by_rank`, which
 //! tells us the possible ranks of each destination node, of which we then pick the
 //! largest.
-//! 
-//! The next step is to create a [LayoutProblem](layout::LayoutProblem), 
+//!
+//! The next step is to create a [LayoutProblem](layout::LayoutProblem),
 //! via [`calculate_locs_and_hops()`](layout::calculate_locs_and_hops).
-//! 
-//! The data of this refinement (and its associated maps of indices) is captured 
+//!
+//! The data of this refinement (and its associated maps of indices) is captured
 //! in multiple collections, including
-//! 
+//!
 //! * `hops_by_level` (which tells us all the hops starting on a given level)
 //! * `hops_by_edge` (which tells us all the hops for a given edge, sorted by start level)
 //! * `locs_by_level` (which collects the indices of all node or intermediate hop locs)
 //! * `loc_to_node` (which records what kind of loc is present at a given index)
 //! * `node_to_loc` (which records the indices of each kind of (node | intermediate hop))
 //! * `mhrs` (which, at a given level, records the original horizontal ranks of the objects and is used for mhr assignment)
-//! 
-//! Then [`minimize_edge_crossing()`](layout::minimize_edge_crossing) consumes the given LayoutProblem 
-//! (LayoutProblem) and produces a LayoutSolution (a crossing number + (lvl, mhr) -> (shr) map) 
-//! that permutes (nodes and intermediate hops), within levels, to minimize edge crossing, by further 
+//!
+//! Then [`minimize_edge_crossing()`](layout::minimize_edge_crossing) consumes the given LayoutProblem
+//! (LayoutProblem) and produces a LayoutSolution (a crossing number + (lvl, mhr) -> (shr) map)
+//! that permutes (nodes and intermediate hops), within levels, to minimize edge crossing, by further
 //! embedding the layout IR into variables and constraints that model the possible ordering relations between
 //! layout problem objects and their crossing numbers.
 
@@ -120,14 +120,14 @@
 
 pub mod error {
     //! Error types for graph_drawing
-    //! 
+    //!
     //! # Summary
-    //! 
-    //! depict's backend exposes errors with fine-grained types and 
+    //!
+    //! depict's backend exposes errors with fine-grained types and
     //! makes extensive use of [SpanTrace]s for error reporting.
-    //! 
+    //!
     //! [OrErrExt] and [OrErrMutExt] provide methods to help attach
-    //! current span information to [Option]s. 
+    //! current span information to [Option]s.
     use std::ops::Range;
 
     use petgraph::algo::NegativeCycle;
@@ -157,7 +157,7 @@ pub mod error {
         #[error("pomelo error")]
         PomeloError { span: Range<usize>, text: String },
     }
-    
+
     #[non_exhaustive]
     #[derive(Debug, thiserror::Error)]
     pub enum RankingError {
@@ -179,7 +179,7 @@ pub mod error {
         #[error("osqp setup error")]
         OsqpSetupError{#[from] source: osqp::SetupError},
     }
-    
+
     #[non_exhaustive]
     #[derive(Debug, thiserror::Error)]
     pub enum TypeError {
@@ -188,7 +188,7 @@ pub mod error {
         #[error("unknown mode")]
         UnknownModeError{mode: String},
     }
-    
+
     #[non_exhaustive]
     #[derive(Debug, Diagnostic, thiserror::Error)]
     #[diagnostic(code(depict::graph_drawing::error))]
@@ -214,7 +214,7 @@ pub mod error {
             #[from] source: TracedError<LogError>,
         }
     }
-    
+
     impl From<Kind> for Error {
         fn from(source: Kind) -> Self {
             Self::GraphDrawingError {
@@ -222,7 +222,7 @@ pub mod error {
             }
         }
     }
-    
+
     impl ExtractSpanTrace for Error {
         fn span_trace(&self) -> Option<&SpanTrace> {
             use std::error::Error as _;
@@ -254,7 +254,7 @@ pub mod error {
         type Item;
         fn or_err_mut(&mut self) -> Result<&mut Self::Item, Error>;
     }
-    
+
     impl<V> OrErrMutExt for Option<V> {
         type Item = V;
         fn or_err_mut(&mut self) -> Result<&mut V, Error> {
@@ -272,15 +272,15 @@ pub mod error {
 
 pub mod index {
     //! Index types for graph_drawing
-    //! 
+    //!
     //! # Summary
-    //! 
-    //! A key challenge the depict backend faces is to transform collections 
-    //! of relations into collections of constraints and collections of 
+    //!
+    //! A key challenge the depict backend faces is to transform collections
+    //! of relations into collections of constraints and collections of
     //! constraints into collections of variables representing geometry.
-    //! 
+    //!
     //! Typed collections ease this task.
-    //! 
+    //!
     //! This module collects the types of indices that may be used to index
     //! these typed collections.
     use std::{ops::{Add, Sub}, fmt::{Debug, Display}};
@@ -337,7 +337,7 @@ pub mod index {
     }
 
     impl_index!(VerticalRank, "v");
-    
+
     impl_index!(OriginalHorizontalRank, "h");
 
     impl_index!(SolvedHorizontalRank, "s");
@@ -354,8 +354,8 @@ pub mod eval {
     use std::{collections::{HashMap}, borrow::{Cow}, vec::IntoIter, ops::Deref, slice::Iter};
 
     use crate::{parser::Item};
-    
-    /// What kind of relationship between processes does 
+
+    /// What kind of relationship between processes does
     /// the containing [Val::Chain] describe?
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub enum Rel {
@@ -384,12 +384,12 @@ pub mod eval {
         pub pos: Position,
     }
 
-    /// What are the labels for the forward and reverse 
-    /// directions for a given link of the containing 
+    /// What are the labels for the forward and reverse
+    /// directions for a given link of the containing
     /// [Val::Chain]?
     #[derive(Clone, Debug, PartialEq)]
     pub struct Level<V> {
-        /// What are the labels for the "forward" direction 
+        /// What are the labels for the "forward" direction
         /// of this link of the chain?
         pub forward: Option<Vec<V>>,
         /// What are the labels for the "reverse" direction
@@ -667,7 +667,7 @@ pub mod eval {
             }
             Some(Item::Slash(rl, rr)) => {
                 labels.push(Level{
-                    forward: eval_slash(Some(&rl[..]), None), 
+                    forward: eval_slash(Some(&rl[..]), None),
                     reverse: eval_slash(None, Some(&rr[..])),
                 });
             },
@@ -698,7 +698,7 @@ pub mod eval {
                     _ => {}
                 }
             }
-        } 
+        }
         Rel::Vertical
     }
 
@@ -734,10 +734,10 @@ pub mod eval {
                 match &ls[ls.len()-1] {
                     Item::Sq(nest) | Item::Br(nest) => {
                         if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
-                            let nest_val = if matches!(ls[ls.len()-1], Item::Sq(_)) { 
-                                Body::All(nest_val.into()) 
-                            } else { 
-                                Body::Any(nest_val.into()) 
+                            let nest_val = if matches!(ls[ls.len()-1], Item::Sq(_)) {
+                                Body::All(nest_val.into())
+                            } else {
+                                Body::Any(nest_val.into())
                             };
                             body.get_or_insert_with(Default::default).push(Val::Process{
                                 name: None,
@@ -761,10 +761,10 @@ pub mod eval {
             match expr {
                 Item::Sq(nest) | Item::Br(nest) => {
                     if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
-                        let nest_val = if matches!(expr, Item::Sq(_)) { 
-                            Body::All(nest_val.into()) 
-                        } else { 
-                            Body::Any(nest_val.into()) 
+                        let nest_val = if matches!(expr, Item::Sq(_)) {
+                            Body::All(nest_val.into())
+                        } else {
+                            Body::Any(nest_val.into())
                         };
                         body.get_or_insert_with(Default::default).push(Val::Process{
                             name: None,
@@ -775,8 +775,8 @@ pub mod eval {
                 },
                 Item::Text(s) => {
                     body.get_or_insert_with(Default::default).push(Val::Process{
-                        name: None, 
-                        label: Some(s.clone()), 
+                        name: None,
+                        label: Some(s.clone()),
                         body: None,
                     })
                 },
@@ -882,7 +882,7 @@ pub mod eval {
         }
         eprintln!("RESOLVE resolution: {resolution:?}");
         if let Some(resolution) = resolution {
-            *val = resolution;   
+            *val = resolution;
         }
     }
 
@@ -1004,8 +1004,8 @@ pub mod eval {
                                 model.append(&mut rbody);
                             } else {
                                 model.push(Val::Process{
-                                    name: None, 
-                                    label: Some(name.clone()), 
+                                    name: None,
+                                    label: Some(name.clone()),
                                     body: None,
                                 })
                             }
@@ -1052,10 +1052,10 @@ pub mod eval {
                 }
                 Item::Sq(nest) | Item::Br(nest) => {
                     if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
-                        let nest_val = if matches!(expr, Item::Sq(_)) { 
-                            Body::All(nest_val.into()) 
-                        } else { 
-                            Body::Any(nest_val.into()) 
+                        let nest_val = if matches!(expr, Item::Sq(_)) {
+                            Body::All(nest_val.into())
+                        } else {
+                            Body::Any(nest_val.into())
                         };
                         model.push(Val::Process{
                             name: None,
@@ -1066,8 +1066,8 @@ pub mod eval {
                 }
                 Item::Text(s) => {
                     model.push(Val::Process{
-                        name: None, 
-                        label: Some(s.clone()), 
+                        name: None,
+                        label: Some(s.clone()),
                         body: None,
                     })
                 }
@@ -1080,9 +1080,9 @@ pub mod eval {
         if !model.is_empty() {
             body = Some(Body::All(model.to_vec()));
         }
-        Val::Process{ 
-            name: Some("root".into()), 
-            label: None, 
+        Val::Process{
+            name: Some("root".into()),
+            label: None,
             body,
         }
     }
@@ -1124,7 +1124,7 @@ pub mod eval {
         fn test_eval_vert_chain() {
             // [ a b ]
             assert_eq!(
-                eval(&[sq(&[t(a), t(b)])]), 
+                eval(&[sq(&[t(a), t(b)])]),
                 mp(p().set_body(Some(Body::All(vec![ l(a), l(b) ]))))
             );
         }
@@ -1166,10 +1166,10 @@ pub mod eval {
 
 pub mod osqp {
     //! Types for optimization problems and conversions to osqp types
-    //! 
+    //!
     //! # Summary
-    //! 
-    //! This module helps pose problems to minimize an objective defined 
+    //!
+    //! This module helps pose problems to minimize an objective defined
     //! in terms of constrained variables.
     use std::{borrow::Cow, collections::{HashMap, BTreeMap, HashSet}, fmt::{Debug, Display}, hash::Hash, ops::{Mul, Neg}};
 
@@ -1180,7 +1180,7 @@ pub mod osqp {
 
     use crate::graph_drawing::frontend::log;
 
-    /// A map from Sols to Vars. `get()`ing an not-yet-seen sol 
+    /// A map from Sols to Vars. `get()`ing an not-yet-seen sol
     /// allocates a new `Var` for that sol and returns a monomial
     /// containing that sol with a 1.0 coefficient.
     #[derive(Clone, Debug)]
@@ -1335,9 +1335,9 @@ pub mod osqp {
             self.constrs.insert((c, Vec::from(lc), c));
         }
 
-        /// Constrain `lhs` to be similar to `rhs` by introducing a fresh variable, 
-        /// `t`, constraining `t` to be equal to `lhs - rhs`, and adding `t` to a 
-        /// collection representing the diagonal of the quadratic form P of the 
+        /// Constrain `lhs` to be similar to `rhs` by introducing a fresh variable,
+        /// `t`, constraining `t` to be equal to `lhs - rhs`, and adding `t` to a
+        /// collection representing the diagonal of the quadratic form P of the
         /// objective `1/2 x'Px + Qx`.
         pub fn sym<C2: Into<C>>(&mut self, v: &mut Vars<S>, pd: &mut Vec<Monomial<S, C>>, lhs: S, rhs: S, coeff: C2) {
             // P[i, j] = 100 => obj += 100 * x_i * x_j
@@ -1484,10 +1484,10 @@ pub mod osqp {
     }
 
     /// An optimization variable
-    /// 
+    ///
     /// Vars map indices of business-domain quantities of interest
-    /// represented by `sol` to densely packed optimization-domain 
-    /// indices `index` that can be used as row or column indices 
+    /// represented by `sol` to densely packed optimization-domain
+    /// indices `index` that can be used as row or column indices
     /// in matrix or array formulations of the optimization problem
     /// to be solved.
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
@@ -1503,13 +1503,13 @@ pub mod osqp {
     }
 
     /// A weighted optimization variable
-    /// 
-    /// Most solvers optimize an objective function that is typically 
+    ///
+    /// Most solvers optimize an objective function that is typically
     /// defined as, e.g., a weighted linear or quadratic function of
     /// given optimization variables.
-    /// 
-    /// We use "monomials" to specify the data (weights and variables) 
-    /// of individual terms of these linear or quadratic forms to be 
+    ///
+    /// We use "monomials" to specify the data (weights and variables)
+    /// of individual terms of these linear or quadratic forms to be
     /// optimized via convenient syntax implemented via operator overloading.
     #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     pub struct Monomial<S: Sol, C: Coeff> {
@@ -1582,69 +1582,69 @@ pub mod osqp {
 
 pub mod layout {
     //! Choose geometric relations to use to express model relationships
-    //! 
+    //!
     //! # Summary
-    //! 
-    //! The purpose of the [layout](self) module is to convert descriptions of 
-    //! model relationships to be drawn into order relationships between 
-    //! visual "objects". For example, suppose we would like to express that a 
-    //! "person" controls a "microwave" via actions named "open", "start", or 
-    //! "stop" and via feedback named "beep". One conceptual picture that we 
+    //!
+    //! The purpose of the [layout](self) module is to convert descriptions of
+    //! model relationships to be drawn into order relationships between
+    //! visual "objects". For example, suppose we would like to express that a
+    //! "person" controls a "microwave" via actions named "open", "start", or
+    //! "stop" and via feedback named "beep". One conceptual picture that we
     //! might wish to draw of this scenario looks roughly like:
-    //! 
+    //!
     //! ```text
     //!         person
     //! open     | ^     beep
-    //! start    | |  
+    //! start    | |
     //! stop     v |
     //!       microwave
     //! ```
-    //! 
-    //! In this situation, we need to convert the modeling relations like 
-    //!   "`person` controls `microwave`" 
+    //!
+    //! In this situation, we need to convert the modeling relations like
+    //!   "`person` controls `microwave`"
     //! and details like
     //!   "`person` can `open` `microwave'`"
-    //! into visual choices like "we're going to represent `person` 
-    //! and `microwave` as boxes, person should be vertically positioned 
-    //! above `microwave`, and in the space between the `person` box and 
-    //! the `microwave` box, we are going to place a downward-directed 
-    //! arrow, an upward-directed arrow, one label to the left of the 
-    //! downward arrrow with the text 'open, start, stop', and one label 
+    //! into visual choices like "we're going to represent `person`
+    //! and `microwave` as boxes, person should be vertically positioned
+    //! above `microwave`, and in the space between the `person` box and
+    //! the `microwave` box, we are going to place a downward-directed
+    //! arrow, an upward-directed arrow, one label to the left of the
+    //! downward arrrow with the text 'open, start, stop', and one label
     //! to the right of the upward arrow with the text 'beep'."
-    //! 
+    //!
     //! # Guide-level explanation
-    //! 
-    //! The heart of the [layout](self) algorithm is to 
-    //! 
+    //!
+    //! The heart of the [layout](self) algorithm is to
+    //!
     //! 1. form a [Vcg], witnessing a partial order on items as a "vertical constraint graph"
     //! 2. [`condense()`] the [Vcg] to a [Cvcg], which is a simple graph, by merging parallel edges into single edges labeled with lists of Vcg edge labels.
     //! 3. [`rank()`] the condensed VCG by finding longest-paths
     //! 4. [`calculate_locs_and_hops()`] from the ranked paths of the CVCG to form a [LayoutProblem] by refining edge bundles (i.e., condensed edges) into hops
     //! 5. [`minimize_edge_crossing()`] by direct enumeration, inspired by the integer program described in <cite>[Optimal Sankey Diagrams Via Integer Programming]</cite> ([author's copy])
     //! resulting in a `ovr -> ohr -> shr` map.
-    //! 
+    //!
     //! [Optimal Sankey Diagrams Via Integer Programming]: https://doi.org/10.1109/PacificVis.2018.00025
     //! [author's copy]: https://ialab.it.monash.edu/~dwyer/papers/optimal-sankey-diagrams.pdf
-    //! 
+    //!
     //! # Reference-level explanation
-    //! 
+    //!
     //! Many general solvers are challenging to run in all the situations we care about,
-    //! notably on wasm32-unknown-unknown. Consequently, after experimenting with a 
+    //! notably on wasm32-unknown-unknown. Consequently, after experimenting with a
     //! variety of LP-relaxation-based solvers, we have found that
-    //! 
-    //! * [heaps], a direct "generate-and-test" solver, based on a version of 
-    //!   [Heap's algorithm](https://en.wikipedia.org/wiki/Heap%27s_algorithm) 
-    //!   for enumerating permutations that has been modified to enumerate 
+    //!
+    //! * [heaps], a direct "generate-and-test" solver, based on a version of
+    //!   [Heap's algorithm](https://en.wikipedia.org/wiki/Heap%27s_algorithm)
+    //!   for enumerating permutations that has been modified to enumerate
     //!   all vertical-rank-preserving permutations of our layouts.
-    //! 
+    //!
     //! seems to serve us best.
-    
+
     use std::borrow::{Cow};
     use std::collections::{BTreeMap, HashSet, BTreeSet};
     use std::collections::{HashMap, hash_map::Entry};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
-    
+
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::algo::{floyd_warshall, dijkstra};
     use petgraph::dot::Dot;
@@ -1694,7 +1694,7 @@ pub mod layout {
                             if !has_prior_orientation {
                                 hcg.constraints.insert(
                                     HorizontalConstraint{
-                                        a: al.clone(), 
+                                        a: al.clone(),
                                         b: bl.clone()
                                     }
                                 );
@@ -1736,7 +1736,7 @@ pub mod layout {
         hcg: &'t mut Hcg<Cow<'s, str>>,
         process: &'t Val<Cow<'s, str>>,
     ) -> Result<(), Error> {
-        match process { 
+        match process {
             Val::Chain{..} => {
                 calculate_hcg_chain(hcg, process)?;
             },
@@ -1763,7 +1763,7 @@ pub mod layout {
         calculate_hcg_helper(&mut hcg, process)?;
         Ok(hcg)
     }
-    
+
     /// Ensure that for all nodes N, if there's a horizontal constraint
     /// between A and N or between N and A, then rank'(N) == rank'(A)
     /// and rank'(N) >= rank(N) and rank'(A) >= rank(A).
@@ -1818,17 +1818,17 @@ pub mod layout {
 
     #[derive(Clone, Debug, Default)]
     pub struct Vcg<V, E> {
-        /// vert is a vertical constraint graph. 
-        /// Edges (v, w) in vert indicate that v needs to be placed above w. 
+        /// vert is a vertical constraint graph.
+        /// Edges (v, w) in vert indicate that v needs to be placed above w.
         /// Node weights must be unique.
         pub vert: Graph<V, E>,
-    
+
         /// vert_vxmap maps node weights in vert to node-indices.
         pub vert_vxmap: HashMap<V, NodeIndex>,
-    
+
         /// vert_node_labels maps node weights in vert to display names/labels.
         pub vert_node_labels: HashMap<V, String>,
-    
+
         /// vert_edge_labels maps (v,w,rel) node weight pairs to display edge labels.
         pub vert_edge_labels: HashMap<V, HashMap<V, HashMap<V, Vec<E>>>>,
 
@@ -1939,8 +1939,8 @@ pub mod layout {
 
     fn walk_body<'s, 't, 'u>(
         queue: &'u mut Vec<(
-            &'s Vec<Val<Cow<'t, str>>>, 
-            &'s Rel, 
+            &'s Vec<Val<Cow<'t, str>>>,
+            &'s Rel,
             &'s Vec<eval::Level<Cow<'t, str>>>,
             &'s Option<Cow<'t, str>>,
         )>,
@@ -2013,7 +2013,7 @@ pub mod layout {
 
         let dst_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
         vcg.vert_node_labels.insert(node.clone(), node.clone().into());
-        
+
         vcg.vert.add_edge(src_ix, dst_ix, "contains".into());
 
         let rels = vcg.vert_edge_labels.entry(parent.clone()).or_default().entry(node.clone()).or_default();
@@ -2035,14 +2035,14 @@ pub mod layout {
         let nesting_depths: HashMap<Cow<str>, usize> = HashMap::new();
         let container_depths: HashMap<Cow<str>, usize> = HashMap::new();
         let mut vcg = Vcg{
-            vert, 
-            vert_vxmap, 
-            vert_node_labels, 
-            vert_edge_labels, 
-            containers, 
+            vert,
+            vert_vxmap,
+            vert_node_labels,
+            vert_edge_labels,
+            containers,
             nodes_by_container,
-            nodes_by_container_transitive, 
-            nesting_depths, 
+            nodes_by_container_transitive,
+            nesting_depths,
             nesting_depth_by_container,
             container_depths,
         };
@@ -2160,10 +2160,10 @@ pub mod layout {
                 .filter_map(|er| {
                     let rel = er.weight().as_ref();
                     if rel == "actuates" || rel == "senses" || rel == "fake" {
-                        let src_ix = er.source(); 
+                        let src_ix = er.source();
                         let src = vcg.vert.node_weight(src_ix).unwrap().clone();
                         Some((src, src_ix))
-                    } else { 
+                    } else {
                         None
                     }
                 })
@@ -2172,10 +2172,10 @@ pub mod layout {
                 .filter_map(|er| {
                     let rel = er.weight().as_ref();
                     if rel == "actuates" || rel == "senses" || rel == "fake" {
-                        let src_ix = er.source(); 
+                        let src_ix = er.source();
                         let src = vcg.vert.node_weight(src_ix).unwrap().clone();
                         Some((src, src_ix))
-                    } else { 
+                    } else {
                         None
                     }
                 })
@@ -2190,7 +2190,7 @@ pub mod layout {
             let mut b_incoming_plus_containers = vcg.containers.iter().filter_map(|c| {
                 if vcg.nodes_by_container_transitive[c].contains(b) {
                     Some((c.clone(), vcg.vert_vxmap[c]))
-                } else { 
+                } else {
                     None
                 }
             }).collect::<Vec<_>>();
@@ -2203,7 +2203,7 @@ pub mod layout {
                     .entry(src.clone()).or_default()
                     .entry(b.clone()).or_default()
                     .entry("implied".into()).or_default();
-                
+
             }
             for (src, src_ix) in b_incoming_plus_containers {
                 vcg.vert.add_edge(src_ix, ax, "implied_reverse".into());
@@ -2222,10 +2222,10 @@ pub mod layout {
                     .filter_map(|er| {
                         let rel = er.weight().as_ref();
                         if rel == "actuates" || rel == "senses" || rel == "fake" {
-                            let src_ix = er.source(); 
+                            let src_ix = er.source();
                             let src = vcg.vert.node_weight(src_ix).unwrap().clone();
                             Some((src, src_ix))
-                        } else { 
+                        } else {
                             None
                         }
                     })
@@ -2247,7 +2247,7 @@ pub mod layout {
             let subdag = vcg.vert.filter_map(|_nx, nl| {
                 if vcg.nodes_by_container_transitive[vl].contains(nl) {
                     Some(nl.clone())
-                } else { 
+                } else {
                     None
                 }
             }, |_ex, el|{
@@ -2315,14 +2315,14 @@ pub mod layout {
         Ok(vcg)
     }
 
-    /// A "condensed" VCG, in which all parallel edges in the original Vcg 
+    /// A "condensed" VCG, in which all parallel edges in the original Vcg
     /// have been "condensed" into a single compound edge in the Cvcg.
     #[derive(Default)]
     pub struct Cvcg<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord> {
         pub condensed: Graph<V, SortedVec<(V, V, E)>>,
         pub condensed_vxmap: HashMap::<V, NodeIndex>
     }
-    
+
     /// Construct a cvcg from a vcg `vert`.
     pub fn condense<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord>(vert: &Graph<V, E>) -> Result<Cvcg<V,E>, Error> {
         let mut condensed = Graph::<V, SortedVec<(V, V, E)>>::new();
@@ -2334,7 +2334,7 @@ pub mod layout {
                 let wl = vert.node_weight(wx).or_err(Kind::IndexingError{})?;
                 dsts.entry(wl).or_insert_with(SortedVec::new).insert((vl.clone(), wl.clone(), (*er.weight()).clone()));
             }
-            
+
             let cvx = or_insert(&mut condensed, &mut condensed_vxmap, vl.clone());
             for (wl, exs) in dsts {
                 let cwx = or_insert(&mut condensed, &mut condensed_vxmap, wl.clone());
@@ -2354,8 +2354,8 @@ pub mod layout {
         dag: &Graph<V, E>,
         distance: impl Fn(V, V, &mut log::Logger) -> isize,
         logs: &mut log::Logger,
-    ) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> 
-    where 
+    ) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error>
+    where
         V: Graphic + From<String>,
         E: Clone + Default,
     {
@@ -2536,7 +2536,7 @@ pub mod layout {
     }
 
     impl<'n, V> log::Names<'n> for Obj<V>
-    where 
+    where
         V: Graphic + 'n,
     {
         fn names(&self) -> Vec<Box<dyn log::Name + 'n>> {
@@ -2564,7 +2564,7 @@ pub mod layout {
                 Obj::Hop(inner) => write!(f, "{inner}"),
                 Obj::Container(inner) => write!(f, "{inner}"),
                 Obj::Border(inner) => write!(f, "{inner}"),
-            }    
+            }
         }
     }
 
@@ -2669,16 +2669,16 @@ pub mod layout {
             })
         }
     }
-    
+
     #[derive(Clone, Debug, Default)]
     pub struct LayoutProblem<V: Graphic + Display + log::Name> {
-        pub locs_by_level: BTreeMap<VerticalRank, usize>, 
+        pub locs_by_level: BTreeMap<VerticalRank, usize>,
         pub hops_by_level: BTreeMap<VerticalRank, SortedVec<Hop<V>>>,
         pub hops_by_edge: BTreeMap<(V, V), BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>>,
         pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Obj<V>>,
         pub node_to_loc: HashMap<Obj<V>, (VerticalRank, OriginalHorizontalRank)>,
         pub container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>>,
-        pub hcg: Hcg<V>,  
+        pub hcg: Hcg<V>,
     }
 
     #[derive(Clone, Debug, Default)]
@@ -2719,13 +2719,13 @@ pub mod layout {
     /// Set up a [LayoutProblem] problem
     pub fn calculate_locs_and_hops<'s, V, E: AsRef<str>>(
         _model: &'s Val<V>,
-        dag: &'s Graph<V, SortedVec<(V, V, E)>>, 
+        dag: &'s Graph<V, SortedVec<(V, V, E)>>,
         paths_by_rank: &'s RankedPaths<V>,
         vcg: &Vcg<V, V>,
         hcg: Hcg<V>,
         logs: &mut log::Logger,
     ) -> Result<LayoutProblem<V>, Error>
-            where 
+            where
         V: Display + Graphic + log::Name,
         E: Graphic
     {
@@ -2744,7 +2744,7 @@ pub mod layout {
 
         logs.with_map("vx_rank", "BTreeMap<V, VerticalRank>", vx_rank.iter(), |wl, rank, l| {
             l.log_pair(
-                "V", 
+                "V",
                 names![wl],
                 format!("{wl}"),
                 "usize",
@@ -2770,7 +2770,7 @@ pub mod layout {
         }
 
         logs.with_map("node_to_loc", "HashMap<Loc<V, V>, (VerticalRank, OriginalHorizontalRank)>", node_to_loc.iter(), |loc, loc_ix, l| {
-            
+
             l.log_pair(
                 "Loc<V, V>",
                 loc.names(),
@@ -2814,7 +2814,7 @@ pub mod layout {
         for (vl, wl, _) in sorted_condensed_edges.iter() {
             let (vvr, vhr) = node_to_loc[&Obj::from_vl(vl, containers)].clone();
             let (wvr, whr) = node_to_loc[&Obj::from_vl(vl, containers)].clone();
-            
+
             let mut mhrs = vec![vhr];
             for mid_level in (vvr+1).0..(wvr.0) {
                 let mid_level = VerticalRank(mid_level); // pending https://github.com/rust-lang/rust/issues/42168
@@ -2830,7 +2830,7 @@ pub mod layout {
             mhrs.push(whr);
 
             event!(Level::DEBUG, %vl, %wl, %vvr, %wvr, %vhr, %whr, ?mhrs, "HOP");
-            
+
             for lvl in vvr.0..wvr.0 {
                 let lvl = VerticalRank(lvl); // pending https://github.com/rust-lang/rust/issues/42168
                 let mx = (lvl.0 as i32 - vvr.0 as i32) as usize;
@@ -2868,7 +2868,7 @@ pub mod layout {
         eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
 
         let mut container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>> = HashMap::new();
-        
+
         for vl in containers.iter() {
             let (ovr, mut ohr) = node_to_loc[&Obj::Container(ObjContainer{vl: vl.clone()})];
             let depth = container_depths[vl];
@@ -2893,7 +2893,7 @@ pub mod layout {
                 };
                 container_borders.entry(vl.clone()).or_default().push((vr, (ohr, mhr)));
             }
-            
+
             eprintln!("VERTICAL RANK SPAN: {vl}: {:?}", ovr.0..(ovr.0+depth));
             eprintln!("CONTAINER BORDERS: {vl}: {container_borders:#?}");
             eprintln!("LOCS_BY_LEVEL V3: {vl}: {locs_by_level:#?}");
@@ -2978,7 +2978,7 @@ pub mod layout {
         use crate::graph_drawing::error::{Error, LayoutError, OrErrExt, Kind};
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
         use crate::graph_drawing::layout::{Hop};
-        
+
         use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Obj, Vcg, ObjNode, ObjHop, ObjBorder, ObjContainer};
 
         #[inline]
@@ -2990,7 +2990,7 @@ pub mod layout {
         pub fn search<T>(p: &mut [T], mut process: impl FnMut(&mut [T])) {
             let n = p.len();
             let mut c = vec![0; n];
-            let mut i = 0; 
+            let mut i = 0;
             process(p);
             while i < n {
                 if c[i] < i {
@@ -3069,7 +3069,7 @@ pub mod layout {
             let x221 = v2 < u2;
             let x212 = u2 < v2;
             let c = (x121 && x212) || (x112 && x221);
-            
+
             // let lvl = h1.lvl;
             // let vl1 = &h1.vl;
             // let wl1 = &h1.wl;
@@ -3092,10 +3092,10 @@ pub mod layout {
         use crate::graph_drawing::frontend::log;
 
         fn conforms<V: Graphic + Display + log::Name, E: Graphic>(
-            vcg: &Vcg<V, E>, 
-            layout_problem: &LayoutProblem<V>, 
-            locs_by_level2: &Vec<Vec<&Obj<V>>>, 
-            nodes_by_container2: &HashMap<V, Vec<(VerticalRank, OriginalHorizontalRank)>>, 
+            vcg: &Vcg<V, E>,
+            layout_problem: &LayoutProblem<V>,
+            locs_by_level2: &Vec<Vec<&Obj<V>>>,
+            nodes_by_container2: &HashMap<V, Vec<(VerticalRank, OriginalHorizontalRank)>>,
             p: &mut [&mut [usize]]
         ) -> bool {
             let Vcg{nodes_by_container_transitive: nodes_by_container, ..} = vcg;
@@ -3205,7 +3205,7 @@ pub mod layout {
             let mut locs_by_level2 = vec![];
             for (ovr, locs) in locs_by_level.iter() {
                 let n = *locs;
-                let level = (0..n).map(|ohr| { 
+                let level = (0..n).map(|ohr| {
                     loc_to_node
                         .get(&(*ovr, OriginalHorizontalRank(ohr)))
                         .or_err(
@@ -3240,7 +3240,7 @@ pub mod layout {
                                 let h2 = &hops[h2i];
                                 // eprintln!("hop: {h1} {h2} -> {}", crosses(h1, h2, p[rank.0], p[rank.0+1]));
                                 cn += crosses(h1, h2, p[rank.0], p[rank.0+1]);
-                            }   
+                            }
                         }
                     }
                 }
@@ -3264,7 +3264,7 @@ pub mod layout {
             for (n, s) in solution.iter().enumerate() {
                 eprintln!("{n}: {s:?}");
             }
-            
+
             let mut solved_locs = BTreeMap::new();
             for (lvl, shrs) in solution.iter().enumerate() {
                 solved_locs.insert(VerticalRank(lvl), shrs
@@ -3278,7 +3278,7 @@ pub mod layout {
 
             Ok(LayoutSolution{crossing_number, solved_locs})
         }
-    
+
 
         #[cfg(test)]
         mod tests {
@@ -3300,7 +3300,7 @@ pub mod layout {
 
             #[test]
             fn test_search() {
-                for size in 1..6 {      
+                for size in 1..6 {
                     let mut v = (0..size).collect::<Vec<_>>();
                     let mut ps = vec![];
                     search(&mut v, |p| ps.push(p.to_vec()));
@@ -3311,7 +3311,7 @@ pub mod layout {
 
             #[test]
             fn test_multisearch() {
-                for size in 1..5 {  
+                for size in 1..5 {
                     let mut vs = vec![];
                     for size2 in 1..=size {
                         vs.push((0..size2).collect::<Vec<_>>());
@@ -3327,11 +3327,11 @@ pub mod layout {
                         eprintln!("n: {}, p: {:?}", n, p);
                     }
                     assert_eq!(ps.len(), vs2.iter().map(|v| (1..=v.len()).product::<usize>()).product());
-                    assert_eq!(ps.len(), ps.iter().unique().count()); 
+                    assert_eq!(ps.len(), ps.iter().unique().count());
                 }
             }
         }
-        
+
     }
 
     /// Solve for horizontal ranks that minimize edge crossing
@@ -3345,33 +3345,33 @@ pub mod layout {
 
 pub mod geometry {
     //! Generate beautiful geometry consistent with given relations.
-    //! 
-    //! # Summary 
-    //! 
-    //! The purpose of the `geometry` module is to generate beautiful geometry 
-    //! (positions, widths, paths) consistent with given geometric relations between 
-    //! graphical objects to be positioned (ex: "object A should be placed to the left 
+    //!
+    //! # Summary
+    //!
+    //! The purpose of the `geometry` module is to generate beautiful geometry
+    //! (positions, widths, paths) consistent with given geometric relations between
+    //! graphical objects to be positioned (ex: "object A should be placed to the left
     //! of object b").
-    //! 
+    //!
     //! # Guide-level explanation
-    //! 
-    //! Convex optimization is a powerful framework for finding sets of numbers 
+    //!
+    //! Convex optimization is a powerful framework for finding sets of numbers
     //! (representing the coordinates of points and guides) that "solve" a given
     //! layout problem in an optimal way consistent with given costs and constraints.
-    //! 
-    //! Conveniently, it allows us to express both geometric constraints like 
-    //! "the horizontal position of the right-hand border of box A must be less 
+    //!
+    //! Conveniently, it allows us to express both geometric constraints like
+    //! "the horizontal position of the right-hand border of box A must be less
     //! the horizontal position of the left-hand side of the bounding box of hop C1"
-    //! as well as more flexible desiderata like "subject to these constraints, 
+    //! as well as more flexible desiderata like "subject to these constraints,
     //! minimize the square of the difference of the positions of hops C1.1 and C2.2".
-    //! 
+    //!
     //! # Reference-level explanation
-    //! 
-    //! `geometry` is implemented in terms of the [OSQP](https://osqp.org) convex 
+    //!
+    //! `geometry` is implemented in terms of the [OSQP](https://osqp.org) convex
     //! quadratic program solver and its Rust bindings in the [osqp] crate.
-    //! 
+    //!
     //! Abstractly, the data and the steps required to convert geometric relations into geometry are:
-    //! 
+    //!
     //! 1. the input data need to be organized (here, via [`calculate_sols()`]) so that constraints can be generated and so that the optimization objective can be formed.
     //! 2. then, once constraints and the objective are generated, they need to be formatted as an [osqp::CscMatrix] and associated `&[f64]` slices, passed to [osqp::Problem], and solved.
     //! 3. then, the resulting [osqp_rust::Solution] needs to be destructured so that the resulting solution values can be returned to [`position_sols()`]'s caller as a [GeometrySolution].
@@ -3385,6 +3385,7 @@ pub mod geometry {
 
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::Graph;
+    use petgraph::algo::is_cyclic_directed;
     use petgraph::dot::Dot;
     use petgraph::visit::{EdgeRef};
     use tracing::{event, Level};
@@ -3482,7 +3483,7 @@ pub mod geometry {
         pub loc: Obj<V>,
         pub n: LocSol,
     }
-    
+
     #[derive(Clone, Debug)]
     pub struct HopRow<V: Clone + Debug + Display + Ord + Hash + log::Name> {
         pub lvl: VerticalRank,
@@ -3510,7 +3511,7 @@ pub mod geometry {
         pub top: f64,
         pub bottom: f64,
     }
-    
+
     #[derive(Clone, Debug, Default)]
     pub struct GeometryProblem<V: Clone + Debug + Display + Ord + Hash + log::Name> {
         pub all_locs: Vec<LocRow<V>>,
@@ -3518,7 +3519,7 @@ pub mod geometry {
         pub all_hops: Vec<HopRow<V>>,
         pub sol_by_loc: HashMap<(VerticalRank, OriginalHorizontalRank), LocSol>,
         pub sol_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol>,
-        pub locix_by_layout_sol: HashMap<LayoutSol, LocIx>, 
+        pub locix_by_layout_sol: HashMap<LayoutSol, LocIx>,
         pub size_by_loc: HashMap<LocIx, NodeSize>,
         pub size_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSize>,
         pub height_scale: Option<f64>,
@@ -3613,18 +3614,18 @@ pub mod geometry {
             })
         }
     }
-    
+
     /// ovr, ohr
     pub type LocIx = (VerticalRank, OriginalHorizontalRank);
 
     pub type HopIx<V> = (VerticalRank, OriginalHorizontalRank, V, V);
-    
+
     /// ovr, ohr -> loc
     pub type LocNodeMap<V> = HashMap<LocIx, Obj<V>>;
-    
+
     /// lvl -> (mhr, nhr)
     pub type HopMap = BTreeMap<VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank)>;
-    
+
     pub fn calculate_sols<'s, V>(
         layout_problem: &'s LayoutProblem<V>,
         layout_solution: &'s LayoutSolution,
@@ -3646,15 +3647,15 @@ pub mod geometry {
             .collect::<Vec<_>>();
 
         eprintln!("ALL_LOCS {all_locs:#?}");
-    
+
         let mut sol_by_loc = HashMap::new();
         for LocRow{ovr, ohr, n, ..} in all_locs.iter() {
             sol_by_loc.insert((*ovr, *ohr), *n);
         }
-    
+
         let all_hops0 = hops_by_level
             .iter()
-            .flat_map(|h| 
+            .flat_map(|h|
                 h.1.iter().map(|Hop{mhr, nhr, vl, wl, lvl}| {
                     (*mhr, *nhr, vl.clone(), wl.clone(), *lvl)
                 })
@@ -3665,7 +3666,7 @@ pub mod geometry {
             .collect::<Vec<_>>();
         let all_hops = hops_by_level
             .iter()
-            .flat_map(|h| 
+            .flat_map(|h|
                 h.1.iter().map(|Hop{mhr, nhr, vl, wl, lvl}| {
                     (*mhr, *nhr, vl.clone(), wl.clone(), *lvl)
                 })
@@ -3675,19 +3676,19 @@ pub mod geometry {
                         #[allow(clippy::unwrap_used)] // an edge with no hops really should panic
                         let (lvl, (mhr, nhr)) = hops.iter().rev().next().unwrap();
                         (*nhr, OriginalHorizontalRank(std::usize::MAX - mhr.0), vl.clone(), wl.clone(), *lvl+1)
-                }) 
+                })
             )
             .enumerate()
             .map(|(n, (mhr, nhr, vl, wl, lvl))| {
                 HopRow{lvl, mhr, nhr, vl, wl, n: HopSol(n)}
             })
             .collect::<Vec<_>>();
-        
+
         let mut sol_by_hop = HashMap::new();
         for HopRow{lvl, mhr, vl, wl, n, ..} in all_hops.iter() {
             sol_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), *n);
         }
-    
+
         let size_by_loc = HashMap::new();
         let size_by_hop = HashMap::new();
 
@@ -3705,20 +3706,20 @@ pub mod geometry {
         for hop in all_hops.iter() {
             locix_by_layout_sol.insert(LayoutSol::HopSol(hop.n), (hop.lvl, hop.mhr));
         }
-    
+
         GeometryProblem{
-            all_locs, 
-            all_hops0, 
-            all_hops, 
-            sol_by_loc, 
-            sol_by_hop, 
+            all_locs,
+            all_hops0,
+            all_hops,
+            sol_by_loc,
+            sol_by_hop,
             locix_by_layout_sol,
-            size_by_loc, 
-            size_by_hop, 
+            size_by_loc,
+            size_by_hop,
             height_scale,
             line_height,
             char_width,
-            nesting_top_padding, 
+            nesting_top_padding,
             nesting_bottom_padding
         }
     }
@@ -3726,8 +3727,8 @@ pub mod geometry {
     #[derive(Debug, Default)]
     pub struct OptimizationProblem<S: Sol, C: Coeff> {
         v: Vars<S>,
-        c: Constraints<S, C>, 
-        pd: Vec<Monomial<S, C>>, 
+        c: Constraints<S, C>,
+        pd: Vec<Monomial<S, C>>,
         q: Vec<Monomial<S, C>>,
     }
 
@@ -3781,7 +3782,7 @@ pub mod geometry {
             })
         }
     }
-    
+
     #[derive(Debug, Default)]
     pub struct GeometrySolution {
         pub ls: BTreeMap<LocSol, f64>,
@@ -3863,11 +3864,11 @@ pub mod geometry {
 
     #[allow(dead_code)]
     fn update_min_width<V: Graphic + Display + Len + log::Name, E: Graphic>(
-        vcg: &Vcg<V, E>, 
+        vcg: &Vcg<V, E>,
         layout_problem: &LayoutProblem<V>,
         layout_solution: &LayoutSolution,
-        geometry_problem: &GeometryProblem<V>, 
-        min_width: &mut usize, 
+        geometry_problem: &GeometryProblem<V>,
+        min_width: &mut usize,
         vl: &V
     ) -> Result<(), Error> {
         let Vcg{vert: dag, vert_vxmap: dag_map, containers, ..} = vcg;
@@ -3878,7 +3879,7 @@ pub mod geometry {
         let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
         let mut v_dsts = v_ers
             .iter()
-            .map(|er| { 
+            .map(|er| {
                 dag
                     .node_weight(er.target())
                     .map(Clone::clone)
@@ -3888,7 +3889,7 @@ pub mod geometry {
             .collect::<Result<Vec<_>, _>>()?;
         let mut w_srcs = w_ers
             .iter()
-            .map(|er| { 
+            .map(|er| {
                 dag
                     .node_weight(er.source())
                     .map(Clone::clone)
@@ -3924,7 +3925,7 @@ pub mod geometry {
             .filter_map(|(vl, wl)| {
                 hops_by_edge.get(&(vl.clone(), wl.clone()))
                     .and_then(|hops| hops.iter().next())
-                    .and_then(|(lvl, (mhr, _nhr))| 
+                    .and_then(|(lvl, (mhr, _nhr))|
                         Some((*lvl, *mhr, vl.clone(), wl.clone())))
             })
             .collect::<Vec<_>>();
@@ -3938,7 +3939,7 @@ pub mod geometry {
                     )
             })
             .collect::<Vec<_>>();
-        
+
         let out_width: f64 = v_out_first_hops
             .iter()
             .map(|idx| {
@@ -3967,7 +3968,7 @@ pub mod geometry {
     fn left(sloc: (VerticalRank, SolvedHorizontalRank)) -> Option<(VerticalRank, SolvedHorizontalRank)> {
         sloc.1.checked_sub(1).map(|shrl| (sloc.0, shrl))
     }
-    
+
     #[derive(Clone, Copy, Debug)]
     enum Direction {
         Vertical,
@@ -4018,7 +4019,7 @@ pub mod geometry {
         layout_solution: &LayoutSolution,
         geometry_problem: &GeometryProblem<V>,
         logs: &mut log::Logger,
-    ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error> 
+    ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error>
     where
         V: Graphic + std::cmp::PartialEq<str>,
         E: Graphic + std::cmp::PartialEq<&'static str>,
@@ -4046,7 +4047,7 @@ pub mod geometry {
         }
 
         let solved_to_orig = solved_locs.iter()
-            .flat_map(|(ovr, row)| 
+            .flat_map(|(ovr, row)|
                 row.iter().map(|(ohr, shr)| (*ovr, *ohr, *shr))
             )
             .map(|(ovr, ohr, shr)| ((ovr, shr), (ovr, ohr)))
@@ -4065,19 +4066,16 @@ pub mod geometry {
                 let solved_ix = solved_vxmap[solved];
                 let left_obj = &loc_to_node[orig];
                 let solved_obj = &loc_to_node[&solved_to_orig[&left]];
-                if !obj_graph.contains_edge(left_ix, solved_ix) && 
-                    !matches!(left_obj, Obj::Border(_)) && 
-                    !matches!(solved_obj, Obj::Border(_)) {
+                if !obj_graph.contains_edge(left_ix, solved_ix) &&
+                    !matches!(left_obj, Obj::Border(_)) &&
+                    !matches!(solved_obj, Obj::Border(_)) &&
+                    !matches!((left_obj, solved_obj),
+                        (Obj::Container(ObjContainer{vl: container}),
+                        Obj::Node(ObjNode{vl: wl}) | Obj::Container(ObjContainer{vl: wl}))
+                        if nodes_by_container[container].contains(wl)) {
                     obj_graph.add_edge(left_ix, solved_ix, obj_edge(Direction::Horizontal, "solved-left".into(), 20.));
                 }
             }
-            // if let Some(right) = right(*solved) {
-            //     let solved_ix = solved_vxmap[solved];
-            //     let right_ix = solved_vxmap[&right];
-            //     if !obj_graph.contains_edge(solved_ix, right_ix) {
-            //         obj_graph.add_edge(solved_ix, right_ix, obj_edge(Direction::Horizontal, "solved-right".into(), 40.));
-            //     }
-            // }
             // todo: hop edges, nested edges, ...
         }
 
@@ -4114,13 +4112,13 @@ pub mod geometry {
             }
         }
         eprintln!("VERT EDGE DONE");
-        
+
         if let Some(obj_svg) = as_svg(&obj_graph) {
             logs.log_svg(Some("obj_graph"), None::<String>, Vec::<String>::new(), obj_svg).unwrap();
         }
-       
 
-        // 2. Map objects to their corresponding positioning variables and 
+
+        // 2. Map objects to their corresponding positioning variables and
         // constraints between those variables.
         let mut con_graph = Graph::<AnySol, ConEdge>::new();
         let mut con_vxmap = HashMap::new();
@@ -4166,7 +4164,7 @@ pub mod geometry {
                     let height = 20.;
                     con_graph.add_edge(left, right, con_edge("container-width".into(), width));
                     con_graph.add_edge(top, bottom, con_edge("container-height".into(), height));
-                
+
                     for node in &nodes_by_container[container] {
                         let child_loc_ix = &node_to_loc[&Obj::from_vl(node, containers)];
                         let child_sol = sol_by_loc[child_loc_ix];
@@ -4191,9 +4189,9 @@ pub mod geometry {
             eprintln!("EDGE IX: {:?} -> {:?}, {}", er.source(), er.target(), edge);
             let src = obj_graph.node_weight(er.source()).unwrap();
             let dst = obj_graph.node_weight(er.target()).unwrap();
-            if matches!((src, dst), 
-                (Obj::Container(ObjContainer{vl: container}), 
-                    Obj::Node(ObjNode{vl: wl}) | Obj::Container(ObjContainer{vl: wl})) 
+            if matches!((src, dst),
+                (Obj::Container(ObjContainer{vl: container}),
+                    Obj::Node(ObjNode{vl: wl}) | Obj::Container(ObjContainer{vl: wl}))
                     if nodes_by_container[container].contains(wl)) {
                 continue;
             }
@@ -4246,7 +4244,12 @@ pub mod geometry {
         if let Some(con_svg) = as_svg(&con_graph) {
             logs.log_svg(Some("con_graph"), None::<String>, Vec::<String>::new(), con_svg).unwrap();
         }
-        
+
+        #[cfg(debug_assertions)]
+        if is_cyclic_directed(&con_graph) {
+            eprintln!("ERROR: CYCLIC CONSTRAINT GRAPH DETECTED");
+        }
+
         // 3. Translate those variables and constraints into optimization problems to be solved.
         let mut vertical_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
         let mut horizontal_problem = OptimizationProblem { v: Vars::new(), c: Constraints::new(), pd: vec![], q: vec![] };
@@ -4333,7 +4336,7 @@ pub mod geometry {
             // .max_iter(400)
             // .polish(true)
             .verbose(true);
-        
+
         let n = v.len();
 
         let sparse_pd = &pd[..];
@@ -4344,7 +4347,7 @@ pub mod geometry {
         let mut q2 = Vec::with_capacity(n);
         q2.resize(n, 0.);
         for q in q.iter() {
-            q2[q.var.index] += q.coeff.into(); 
+            q2[q.var.index] += q.coeff.into();
         }
 
         let mut l2 = vec![];
@@ -4383,7 +4386,7 @@ pub mod geometry {
 
         let mut prob = osqp::Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], settings)
             .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
-        
+
         let result = prob.solve();
         eprintln!("STATUS {:?}", result);
         let solution = match result {
@@ -4419,8 +4422,8 @@ pub mod geometry {
                 if AnySolKind::from(sol) == kind {
                     let sol_idx = extract_index(*sol);
                     Some((sol_idx, solutions[var.index].1))
-                } else { 
-                    None 
+                } else {
+                    None
                 }
             })
             .collect::<Vec<_>>();
@@ -4431,19 +4434,19 @@ pub mod geometry {
     }
 
     pub fn solve_optimization_problems(
-        horizontal_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>, 
+        horizontal_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>,
         vertical_problem: &OptimizationProblem<AnySol, OrderedFloat<f64>>
-    ) -> Result<GeometrySolution, Error> { 
+    ) -> Result<GeometrySolution, Error> {
         let OptimizationProblem{v: vh, ..} = horizontal_problem;
         let OptimizationProblem{v: vv, ..} = vertical_problem;
 
         eprintln!("SOLVE HORIZONTAL");
         let (solutions_h, status_h) = solve_problem(&horizontal_problem)?;
-           
+
         eprintln!("SOLVE VERTICAL");
         let (solutions_v, status_v) = solve_problem(&vertical_problem)?;
 
-        let ls = extract_variable(&vh, &solutions_h, AnySolKind::L, "ls".into(), |s| { 
+        let ls = extract_variable(&vh, &solutions_h, AnySolKind::L, "ls".into(), |s| {
             if let AnySol::L(l) = s { l } else { panic!() }
         });
 
@@ -4451,7 +4454,7 @@ pub mod geometry {
             if let AnySol::R(r) = s { r } else { panic!() }
         });
 
-        let ss = extract_variable(&vh, &solutions_h, AnySolKind::S, "ss".into(), |s| { 
+        let ss = extract_variable(&vh, &solutions_h, AnySolKind::S, "ss".into(), |s| {
             if let AnySol::S(s) = s { s } else { panic!() }
         });
 
@@ -4486,7 +4489,7 @@ pub mod frontend {
     use log::{names};
 
     pub fn estimate_widths<I>(
-        vcg: &Vcg<I, I>, 
+        vcg: &Vcg<I, I>,
         cvcg: &Cvcg<I, I>,
         layout_problem: &LayoutProblem<I>,
         geometry_problem: &mut GeometryProblem<I>
@@ -4497,7 +4500,7 @@ pub mod frontend {
         let char_width = 9.0;
         let line_height = geometry_problem.line_height.unwrap_or(20.);
         let arrow_width = 40.0;
-        
+
         let vert_node_labels = &vcg.vert_node_labels;
         let vert_edge_labels = &vcg.vert_edge_labels;
         let size_by_loc = &mut geometry_problem.size_by_loc;
@@ -4509,7 +4512,7 @@ pub mod frontend {
         let condensed_vxmap = &cvcg.condensed_vxmap;
 
         eprintln!("LOC_TO_NODE WIDTHS: {loc_to_node:#?}");
-        
+
         for (loc, node) in loc_to_node.iter() {
             let (ovr, ohr) = loc;
             if let Obj::Node(ObjNode{vl}) = node {
@@ -4544,7 +4547,7 @@ pub mod frontend {
                 size_by_loc.insert((*ovr, *pair), NodeSize{width: 10., left: 0., right: 0., height: 0.});
             }
         }
-    
+
         for ((vl, wl), hops) in hops_by_edge.iter() {
             let mut action_width = 10.0;
             let mut percept_width = 10.0;
@@ -4595,8 +4598,8 @@ pub mod frontend {
                 });
                 if size_by_loc.get(&(*lvl, *mhr)).is_none() {
                     size_by_loc.insert((*lvl, *mhr), NodeSize{
-                        width: action_width + percept_width, 
-                        left: 0., 
+                        width: action_width + percept_width,
+                        left: 0.,
                         right: 0.,
                         height: 0.,
                     });
@@ -4606,7 +4609,7 @@ pub mod frontend {
 
         eprintln!("SIZE_BY_LOC: {size_by_loc:#?}");
         eprintln!("SIZE_BY_HOP: {size_by_hop:#?}");
-    
+
         Ok(())
     }
 
@@ -4628,7 +4631,7 @@ pub mod frontend {
     self_cell!{
         pub struct RenderCell<'s> {
             owner: Cow<'s, str>,
-            
+
             #[covariant]
             dependent: Depiction,
         }
@@ -4650,15 +4653,15 @@ pub mod frontend {
                     })
                     .in_current_span()?
             }
-    
+
             let items = p.end_of_input()
                 .map_err(|_| {
                     Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
                 })?;
-    
+
             event!(Level::TRACE, ?items, "PARSE");
             eprintln!("PARSE {items:#?}");
-    
+
             let mut val = eval(&items[..]);
 
             event!(Level::TRACE, ?val, "EVAL");
@@ -4671,18 +4674,18 @@ pub mod frontend {
 
             eprintln!("SCOPES: {scopes:#?}");
             eprintln!("RESOLVE: {val:#?}");
-    
+
             let hcg = calculate_hcg(&val)?;
             let vcg = calculate_vcg(&val, &hcg, logs)?;
 
             event!(Level::TRACE, ?val, "HCG");
             eprintln!("HCG {hcg:#?}");
-    
+
             let Vcg{vert, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
-    
+
             let cvcg = condense(vert)?;
             let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
-    
+
             let distance = {
                 let containers = &containers;
                 let nodes_by_container = &nodes_by_container;
@@ -4758,21 +4761,21 @@ pub mod frontend {
                     )
                 })
             }).map_err(|err| err.in_current_span())?;
-    
+
             let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, hcg, logs)?;
 
             // ... adjust problem for horizontal edges
-    
+
             let layout_solution = minimize_edge_crossing(&vcg, &layout_problem)?;
-    
+
             let mut geometry_problem = calculate_sols(&layout_problem, &layout_solution);
-    
+
             estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
-    
+
             let (horizontal_problem, vertical_problem) = position_sols(&vcg, &layout_problem, &layout_solution, &geometry_problem, logs)?;
 
             let geometry_solution = solve_optimization_problems(&horizontal_problem, &vertical_problem)?;
-            
+
             Ok(Depiction{
                 items,
                 val,
@@ -4860,7 +4863,7 @@ pub mod frontend {
 
         impl Logger {
             pub fn new() -> Self {
-                Self { 
+                Self {
                     logs: vec![],
                 }
             }
@@ -4871,8 +4874,8 @@ pub mod frontend {
                 ty: impl Into<String>,
                 pairs: impl IntoIterator<Item=(K, V)>,
                 mut f: F
-            ) -> Result<(), Error> where 
-                F: FnMut(K, V, &mut Logger) -> Result<(), Error> 
+            ) -> Result<(), Error> where
+                F: FnMut(K, V, &mut Logger) -> Result<(), Error>
             {
                 self.with_group(ty.into(), name.into(), Vec::<String>::new(), |l| {
                     for (k, v) in pairs.into_iter() {
@@ -4889,8 +4892,8 @@ pub mod frontend {
                 ty: impl Into<String>,
                 elements: impl IntoIterator<Item=V>,
                 mut f: F
-            ) -> Result<(), Error> where 
-                F: FnMut(V, &mut Logger) -> Result<(), Error> 
+            ) -> Result<(), Error> where
+                F: FnMut(V, &mut Logger) -> Result<(), Error>
             {
                 self.with_group(ty.into(), name.into(), Vec::<String>::new(), |l| {
                     for v in elements.into_iter() {
@@ -4902,7 +4905,7 @@ pub mod frontend {
             }
 
             pub fn log_pair<'n>(
-                &mut self, 
+                &mut self,
                 src_ty: impl Into<String>,
                 src_names: Vec<Box<dyn Name + 'n>>,
                 src_val: impl Into<String>,
@@ -4920,7 +4923,7 @@ pub mod frontend {
                 self.logs.push(Record::String{
                     name: None,
                     ty: Some(format!("{src_ty}->{dst_ty}")),
-                    names: src_names, 
+                    names: src_names,
                     val: format!("{src_val} -> {dst_val}")
                 });
                 Ok(())
@@ -4947,8 +4950,8 @@ pub mod frontend {
             pub fn log_string(&mut self, name: impl Into<String>, val: impl std::fmt::Debug) -> Result<(), Error> {
                 self.logs.push(Record::String{
                     name: Some(name.into()),
-                    ty: None, 
-                    names: vec![], 
+                    ty: None,
+                    names: vec![],
                     val: format!("{val:#?}")
                 });
                 Ok(())
@@ -4960,28 +4963,28 @@ pub mod frontend {
                 let names = names.into_iter().map(|n| n.into()).collect::<Vec<String>>();
                 self.logs.push(Record::Svg{
                     name,
-                    ty, 
-                    names, 
+                    ty,
+                    names,
                     val,
                 });
                 Ok(())
             }
 
             pub fn with_group<F>(
-                &mut self, 
-                ty: impl Into<String>, 
-                name: impl Into<String>, 
-                names: Vec<impl Into<String>>, 
+                &mut self,
+                ty: impl Into<String>,
+                name: impl Into<String>,
+                names: Vec<impl Into<String>>,
                 f: F
-            ) -> Result<(), Error> where 
-                F: FnOnce(&mut Logger) -> Result<(), Error> 
+            ) -> Result<(), Error> where
+                F: FnOnce(&mut Logger) -> Result<(), Error>
             {
                 let mut nested_logger = Logger::new();
                 f(&mut nested_logger)?;
                 self.logs.push(Record::Group{
                     name: Some(name.into()),
-                    ty: Some(ty.into()), 
-                    names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(), 
+                    ty: Some(ty.into()),
+                    names: names.into_iter().map(|n| n.into()).collect::<Vec<_>>(),
                     val: nested_logger.logs
                 });
                 Ok(())
@@ -5031,7 +5034,7 @@ pub mod frontend {
 
         impl Default for Drawing {
             fn default() -> Self {
-                Self { 
+                Self {
                     crossing_number: Default::default(),
                     status_v: Default::default(),
                     status_h: Default::default(),
@@ -5051,7 +5054,7 @@ pub mod frontend {
 
             let render_cell = super::render(Cow::Owned(data), &mut logs)?;
             let depiction = render_cell.borrow_dependent();
-            
+
             let val = &depiction.val;
             // let geometry_solution = &depiction.geometry_solution;
             let rs = &depiction.geometry_solution.rs;
@@ -5089,7 +5092,7 @@ pub mod frontend {
             // Log the resolved value
             // logs.log_string("VAL", val);
             val.log("VAL".into(), &mut logs).map_err(|err| err.in_current_span())?;
-            
+
             loc_to_node.log((), &mut logs).map_err(|err| err.in_current_span())?;
 
             let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
@@ -5098,9 +5101,9 @@ pub mod frontend {
                 Obj::Container(ObjContainer{vl}) => vl.to_string().names(),
                 Obj::Border(ObjBorder{border: Border{vl, ovr, ohr, pair}}) => names![vl.to_string(), ovr, ohr, pair],
             };
-            // let ls2n = |layout_sol| { 
-            //     let loc_ix = locix_by_layout_sol[&layout_sol]; 
-            //     l2n(loc_ix.0, loc_ix.1) 
+            // let ls2n = |layout_sol| {
+            //     let loc_ix = locix_by_layout_sol[&layout_sol];
+            //     l2n(loc_ix.0, loc_ix.1)
             // };
 
             // sol_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
@@ -5137,7 +5140,7 @@ pub mod frontend {
                     let width = (rpos - lpos).round();
                     let hpos = lpos.round();
                     let height = bs[&n] - ts[&n];
-                    
+
                     let key = vl.to_string();
                     let label = vert_node_labels
                         .get(vl)
@@ -5170,7 +5173,7 @@ pub mod frontend {
                     .or_err(Kind::KeyNotFoundError{key: container.to_string()})?
                     .clone();
                 if label == "_" { label = String::new(); };
-                
+
                 let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
                 texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: cn, estimated_size});
             }
@@ -5199,7 +5202,7 @@ pub mod frontend {
                     let hops = if let Some(hops) = hops { hops } else { continue; };
                     // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
 
-                    let offset = match ew { 
+                    let offset = match ew {
                         x if x == "actuates" => -10.0,
                         x if x == "actuator" => -10.0,
                         x if x == "senses" => 10.0,
@@ -5253,7 +5256,7 @@ pub mod frontend {
                             hn0.push(hn);
                         }
                         hn0.push(hnd);
-                        
+
                         if n == 0 {
                             estimated_size0 = Some(size_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())].clone());
                             let mut vpos = vpos;
@@ -5306,7 +5309,7 @@ pub mod frontend {
                         //     vpos2 += 26.;
                         // }
 
-                        if n == hops.len() - 1 && *ew == "actuates" { 
+                        if n == hops.len() - 1 && *ew == "actuates" {
                             vpos2 -= 7.0; // arrowhead length
                         }
 
@@ -5410,7 +5413,7 @@ pub mod frontend {
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let label_text = reverse.join("\n");
                     let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
-                    let label = if !reverse.is_empty() { 
+                    let label = if !reverse.is_empty() {
                         Some(Label{text: label_text, hpos: lr, width: label_width, vpos: vposl })
                     } else {
                         None
@@ -5424,7 +5427,7 @@ pub mod frontend {
                 .into_iter()
                 .chain(arrows.into_iter())
                 .collect::<Vec<_>>();
-            
+
             nodes.sort_by_key(|node| match node {
                 Node::Div{z_index, ..} => *z_index,
                 Node::Svg{z_index, ..} => *z_index,
@@ -5512,12 +5515,12 @@ pub mod frontend {
                             );
                     },
                     Node::Svg{path, rel, label, classes, ..} => {
-                        
+
                         let mut path_elt = Path::new()
                             .set("class", classes)
                             .set("d", path)
                             .set("stroke", "black");
-                        
+
                         match rel.as_str() {
                             "actuates" | "forward" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
                             "senses" | "reverse" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
@@ -5591,7 +5594,7 @@ pub mod frontend {
                         let marker_orient = if rel == "actuates" || rel == "forward" { "auto" } else { "auto-start-reverse" };
                         // let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
                         // let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
-                        
+
                         children.push(cx.render(rsx!{
                             div {
                                 key: "{key}",
@@ -5619,7 +5622,7 @@ pub mod frontend {
                                             fill: "#000",
                                         }
                                     }
-                                    { 
+                                    {
                                         match rel.as_str() {
                                             "actuates" | "forward" => {
                                                 rsx!(path {
@@ -5643,7 +5646,7 @@ pub mod frontend {
                                         }
                                     }
                                 }
-                                {match label { 
+                                {match label {
                                     Some(Label{text, hpos, width: _, vpos}) => {
                                         let translate = match &rel[..] {
                                             "actuates" => "translate(calc(-100% - 1.5ex))",
@@ -5657,7 +5660,7 @@ pub mod frontend {
                                             "reverse" => "4px",
                                             _ => "0px",
                                         };
-                                        // let border = match rel.as_str() { 
+                                        // let border = match rel.as_str() {
                                         //     // "actuates" => "border border-red-300",
                                         //     // "senses" => "border border-blue-300",
                                         //     _ => "",
@@ -5896,7 +5899,7 @@ mod tests {
     use logos::Logos;
 
     #[test]
-    #[allow(clippy::unwrap_used)]    
+    #[allow(clippy::unwrap_used)]
     pub fn no_swaps() -> Result<(), Error> {
         let mut logs = Logger::new();
         let data = "Aa Ab Ac: y / z\nXx Xy Xz: w / x";
@@ -5915,7 +5918,7 @@ mod tests {
                 Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
             })
             .in_current_span()?;
-        
+
         let val = eval::eval(&v[..]);
 
         let hcg = calculate_hcg(&val)?;
@@ -6010,7 +6013,7 @@ mod tests {
         assert_eq!(&h0[..], &s0[..]);
         assert_eq!(&h1[..], &s1[..]);
         assert_eq!(&h2[..], &s2[..]);
-        
+
         let layout_solution = minimize_edge_crossing(&vcg, &layout_problem)?;
         let LayoutSolution{crossing_number, solved_locs} = &layout_solution;
         assert_eq!(*crossing_number, 0);
@@ -6034,7 +6037,7 @@ mod tests {
         assert_eq!(sAb, sAc); // uncrossing happened
         assert_eq!(sXx, sXy);
         assert_eq!(sXy, sXz);
-        
+
 
         let geometry_problem = calculate_sols(&layout_problem, &layout_solution);
         let all_locs = &geometry_problem.all_locs;
