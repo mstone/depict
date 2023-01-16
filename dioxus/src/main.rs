@@ -26,7 +26,7 @@ use tracing_error::{ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PLACEHOLDER: &str = indoc!("
-a [ b ]
+a b: c
 ");
 
 pub struct AppProps {

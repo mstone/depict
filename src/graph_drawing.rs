@@ -270,29 +270,6 @@ pub mod error {
     }
 }
 
-pub mod graph {
-    //! Graph-theoretic helpers
-    use std::fmt::Debug;
-
-    use petgraph::{EdgeDirection::Incoming, Graph};
-    use sorted_vec::SortedVec;
-    use tracing::{event, Level};
-
-    use super::error::{Error, Kind, OrErrExt};
-
-    /// Find the roots of the input graph `dag`
-    pub fn roots<V: Clone + Debug + Ord, E>(dag: &Graph<V, E>) -> Result<SortedVec<V>, Error> {
-        let roots = dag
-            .externals(Incoming)
-            .map(|vx| dag.node_weight(vx).or_err(Kind::IndexingError{}).map(Clone::clone))
-            .into_iter()
-            .collect::<Result<Vec<_>, Error>>()?;
-        let roots = SortedVec::from_unsorted(roots);
-        event!(Level::DEBUG, ?roots, "ROOTS");
-        Ok(roots)
-    }
-}
-
 pub mod index {
     //! Index types for graph_drawing
     //! 
@@ -1104,7 +1081,7 @@ pub mod eval {
             body = Some(Body::All(model.to_vec()));
         }
         Val::Process{ 
-            name: None, 
+            name: Some("root".into()), 
             label: None, 
             body,
         }
@@ -1681,7 +1658,6 @@ pub mod layout {
     use crate::graph_drawing::eval::{Val, self, Body};
     use crate::graph_drawing::frontend::log::{names, Name, Names};
     use crate::graph_drawing::geometry::LocIx;
-    use crate::graph_drawing::graph::roots;
 
     #[derive(Clone, Debug, Default)]
     pub struct Hcg<V: Graphic> {
@@ -2071,7 +2047,8 @@ pub mod layout {
             container_depths,
         };
 
-        let body = if let Val::Process{body: Some(body), ..} = process { Ok(body) } else { Err(Kind::MissingDrawingError{}.in_current_span()) }?;
+        let body = &Body::All(vec![process.clone()]);
+        // let body = if let Val::Process{body: Some(body), ..} = process { Ok(body) } else { Err(Kind::MissingDrawingError{}.in_current_span()) }?;
 
         let mut queue = vec![];
 
@@ -2265,15 +2242,6 @@ pub mod layout {
             }
         }
 
-
-        let vert_roots = roots(&vcg.vert)?;
-        let root_ix = or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, "root".into());
-        vcg.vert_node_labels.insert("root".into(), "".to_string());
-        for node in vert_roots.iter() {
-            let node_ix = vcg.vert_vxmap[node];
-            vcg.vert.add_edge(root_ix, node_ix, "fake".into());
-        }
-
         let container_depths = &mut vcg.container_depths;
         for vl in vcg.containers.iter() {
             let subdag = vcg.vert.filter_map(|_nx, nl| {
@@ -2285,13 +2253,12 @@ pub mod layout {
             }, |_ex, el|{
                 Some(el.clone())
             });
-            let subroots = roots(&subdag)?;
             let distance = {
                 let containers = &vcg.containers;
                 let nodes_by_container = &vcg.nodes_by_container_transitive;
                 let container_depths = &container_depths;
-                |src: &Cow<str>, dst: &Cow<str>, l: &mut log::Logger| {
-                    if !containers.contains(src) {
+                |src: Cow<str>, dst: Cow<str>, l: &mut log::Logger| {
+                    if !containers.contains(&src) {
                         l.log_pair(
                             "(V, V)",
                             names![src, dst],
@@ -2302,7 +2269,7 @@ pub mod layout {
                         ).unwrap();
                         -1
                     } else {
-                        if nodes_by_container[src].contains(dst) {
+                        if nodes_by_container[&src].contains(&dst) {
                             l.log_pair(
                                 "(V, V)",
                                 names![src, dst],
@@ -2319,18 +2286,17 @@ pub mod layout {
                                 format!("{}, {}", src, dst),
                                 "isize, &str",
                                 vec![],
-                                format!("{}, container_depths", -(container_depths[src] as isize))
+                                format!("{}, container_depths", -(container_depths[&src] as isize))
                             ).unwrap();
-                            -(container_depths[src] as isize)
+                            -(container_depths[&src] as isize)
                         }
                     }
                 }
             };
-            let subpaths_by_rank = rank(&subdag, &subroots, distance, logs)?;
+            let subpaths_by_rank = rank(&subdag, distance, logs)?;
             let depth = std::cmp::max(1, subpaths_by_rank.len());
             container_depths.insert(vl.clone(), depth);
             eprintln!("CONTAINER {vl}");
-            eprintln!("SUBROOTS {subroots:#?}");
             eprintln!("SUBDAG {subdag:#?}");
             eprintln!("SUBPATHS {subpaths_by_rank:#?}");
             eprintln!("DEPTH {depth}");
@@ -2381,29 +2347,47 @@ pub mod layout {
         Ok(Cvcg{condensed, condensed_vxmap})
     }
 
-    /// Rank a `dag`, starting from `roots`, by finding longest paths
+    /// Rank a `dag`, starting from its roots, by finding longest paths
     /// from the roots to each node, e.g., using Floyd-Warshall with
     /// negative weights.
-    pub fn rank<'s, V: Graphic + Display + log::Name, E>(
-        dag: &'s Graph<V, E>, 
-        roots: &'s SortedVec<V>,
-        distance: impl Fn(&V, &V, &mut log::Logger) -> isize,
+    pub fn rank<V, E>(
+        dag: &Graph<V, E>,
+        distance: impl Fn(V, V, &mut log::Logger) -> isize,
         logs: &mut log::Logger,
-    ) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> {
+    ) -> Result<BTreeMap<VerticalRank, SortedVec<(V, V)>>, Error> 
+    where 
+        V: Graphic + From<String>,
+        E: Clone + Default,
+    {
+        let mut dag: Graph<V, E> = dag.clone();
+
+        let roots = dag
+            .externals(Incoming)
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let root_ix = dag.add_node("root".to_string().into());
+        for node_ix in roots.iter() {
+            dag.add_edge(root_ix, *node_ix, Default::default());
+        }
+
         let mut paths_fw = Ok(HashMap::new());
-        logs.with_group("(V,V)->(isize, reason)", "floyd_warshall", Vec::<String>::new(), {
-            |l| {
-                fn constrain<'s, E: 's, F: FnMut(EdgeReference<'s, E>) -> isize>(f: F) -> F { f }
-                paths_fw = floyd_warshall(&dag, constrain(|er: EdgeReference<'s, E>| {
-                    let src = dag.node_weight(er.source()).unwrap();
-                    let dst = dag.node_weight(er.target()).unwrap();
-                    let dist = distance(src, dst, l);
-                    eprintln!("DISTANCE MUT: {src:?} {dst:?} {dist:?}");
-                    dist
-                }));
-                Ok(())
-            }
-        }).map_err(|err| err.in_current_span())?;
+        {
+            logs.with_group("(V,V)->(isize, reason)", "floyd_warshall", Vec::<String>::new(), {
+                |l| {
+                    fn constrain<'s, E: 's, F: FnMut(EdgeReference<'s, E>) -> isize>(f: F) -> F { f }
+                    paths_fw = floyd_warshall(&dag, constrain(|er| {
+                        let src = dag.node_weight(er.source()).unwrap();
+                        let dst = dag.node_weight(er.target()).unwrap();
+                        let dist = distance(src.clone(), dst.clone(), l);
+                        eprintln!("DISTANCE MUT: {src:?} {dst:?} {dist:?}");
+                        dist
+                    }));
+                    Ok(())
+                }
+            }).map_err(|err| err.in_current_span())?;
+        }
+
         let paths_fw = paths_fw.map_err(|cycle|
             Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
         )?;
@@ -2414,7 +2398,7 @@ pub mod layout {
                 .map(|((vx, wx), wgt)| {
                     let vl = dag.node_weight(*vx).or_err(Kind::IndexingError{})?.clone();
                     let wl = dag.node_weight(*wx).or_err(Kind::IndexingError{})?.clone();
-                    Ok((*wgt, vl, wl))
+                    Ok((*wgt, vx, wx, vl, wl))
                 })
                 .into_iter()
                 .collect::<Result<Vec<_>, Error>>()?
@@ -2425,8 +2409,8 @@ pub mod layout {
         let paths_from_roots = SortedVec::from_unsorted(
             paths_fw2
                 .iter()
-                .filter_map(|(wgt, vl, wl)| {
-                    if *wgt <= 0 && roots.contains(vl) {
+                .filter_map(|(wgt, vx, _wx, vl, wl)| {
+                    if *wgt <= 0 && roots.contains(vx) {
                         Some((VerticalRank(-(*wgt) as usize), vl.clone(), wl.clone()))
                     } else {
                         None
@@ -2438,11 +2422,11 @@ pub mod layout {
         eprintln!("PATHS_FROM_ROOTS: {paths_from_roots:#?}");
 
         let mut paths_by_rank = BTreeMap::new();
-        for (wgt, vx, wx) in paths_from_roots.iter() {
+        for (wgt, vl, wl) in paths_from_roots.iter() {
             paths_by_rank
                 .entry(*wgt)
                 .or_insert_with(SortedVec::new)
-                .insert((vx.clone(), wx.clone()));
+                .insert((vl.clone(), wl.clone()));
         }
         event!(Level::DEBUG, ?paths_by_rank, "PATHS_BY_RANK");
         eprintln!("RANK_PATHS_BY_RANK: {paths_by_rank:#?}");
@@ -2952,12 +2936,9 @@ pub mod layout {
             let bx = or_insert(&mut vert, &mut vx_map, b.clone());
             vert.add_edge(ax, bx, actuates.clone());
 
-            let mut roots = SortedVec::new();
-            roots.insert(a.clone());
-
             let mut logs = Logger::new();
 
-            let paths_by_rank = rank(&vert, &roots, |a, b, l| -1, &mut logs).unwrap();
+            let paths_by_rank = rank(&vert, |a, b, l| -1, &mut logs).unwrap();
             assert_eq!(paths_by_rank[&VerticalRank(0)], SortedVec::from_unsorted(vec![(a.clone(), a.clone())]));
             assert_eq!(paths_by_rank[&VerticalRank(1)], SortedVec::from_unsorted(vec![(a.clone(), b.clone())]));
         }
@@ -3411,6 +3392,7 @@ pub mod geometry {
     use tracing::{event, Level};
     use tracing_error::InstrumentError;
 
+    use crate::graph_drawing::layout::ObjNode;
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples, as_scipy, as_numpy};
 
     use super::error::{LayoutError};
@@ -4040,7 +4022,7 @@ pub mod geometry {
         logs: &mut log::Logger,
     ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error> 
     where
-        V: Graphic,
+        V: Graphic + std::cmp::PartialEq<str>,
         E: Graphic + std::cmp::PartialEq<&'static str>,
     {
         let containers = &vcg.containers;
@@ -4071,15 +4053,6 @@ pub mod geometry {
             )
             .map(|(ovr, ohr, shr)| ((ovr, shr), (ovr, ohr)))
             .collect::<HashMap<_, _>>();
-
-        let right = |sloc: (VerticalRank, SolvedHorizontalRank)| {
-            let row = &solved_locs[&sloc.0];
-            if sloc.1.0 + 1 >= row.len() {
-                None
-            } else {
-                Some((sloc.0, sloc.1 + 1))
-            }
-        };
 
         let mut obj_edges = 0;
         let mut obj_edge = |dir: Direction, reason: String, margin: f64| {
@@ -4138,7 +4111,7 @@ pub mod geometry {
                 if let [ref cur, ref nxt, ..] = window {
                     let src = (cur.0, solved_locs[&cur.0][&cur.1]);
                     let dst = (nxt.0, solved_locs[&nxt.0][&nxt.1]);
-                    obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], obj_edge(Direction::Vertical, "window".into(), 20.));
+                    obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], obj_edge(Direction::Vertical, format!("vert-edge: {}", *er.weight()), 20.));
                 }
             }
         }
@@ -4207,7 +4180,7 @@ pub mod geometry {
                         let padding = 10.;
                         con_graph.add_edge(left, child_left, con_edge("child-padding-left".into(), padding));
                         con_graph.add_edge(child_right, right, con_edge("child-padding-right".into(), padding));
-                        con_graph.add_edge(top, child_top, con_edge("child-padding-top".into(), padding));
+                        con_graph.add_edge(top, child_top, con_edge("child-padding-top".into(), 2.*padding));
                         con_graph.add_edge(child_bottom, bottom, con_edge("child-padding-bottom".into(), padding));
                     }
                 },
@@ -4220,6 +4193,12 @@ pub mod geometry {
             eprintln!("EDGE IX: {:?} -> {:?}, {}", er.source(), er.target(), edge);
             let src = obj_graph.node_weight(er.source()).unwrap();
             let dst = obj_graph.node_weight(er.target()).unwrap();
+            if matches!((src, dst), 
+                (Obj::Container(ObjContainer{vl: container}), 
+                    Obj::Node(ObjNode{vl: wl}) | Obj::Container(ObjContainer{vl: wl})) 
+                    if nodes_by_container[container].contains(wl)) {
+                continue;
+            }
             let src_loc_ix = node_to_loc[src];
             let dst_loc_ix = node_to_loc[dst];
 
@@ -4326,7 +4305,7 @@ pub mod geometry {
     }
 
     #[cfg(not(feature="desktop"))]
-    fn as_svg<V, E>(con_graph: &Graph<V, E>) -> Option<String> {
+    fn as_svg<V, E>(_graph: &Graph<V, E>) -> Option<String> {
         None
     }
 
@@ -4499,7 +4478,6 @@ pub mod frontend {
     use logos::Logos;
     use ordered_float::OrderedFloat;
     use self_cell::self_cell;
-    use sorted_vec::SortedVec;
     use tracing::{event, Level};
     use tracing_error::{InstrumentResult, InstrumentError};
 
@@ -4640,7 +4618,6 @@ pub mod frontend {
         pub val: Val<Cow<'s, str>>,
         pub vcg: Vcg<Cow<'s, str>, Cow<'s, str>>,
         pub cvcg: Cvcg<Cow<'s, str>, Cow<'s, str>>,
-        pub roots: SortedVec<Cow<'s, str>>,
         pub paths_by_rank: RankedPaths<Cow<'s, str>>,
         pub layout_problem: LayoutProblem<Cow<'s, str>>,
         pub layout_solution: LayoutSolution,
@@ -4708,14 +4685,12 @@ pub mod frontend {
             let cvcg = condense(vert)?;
             let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
     
-            let roots = crate::graph_drawing::graph::roots(condensed)?;
-    
             let distance = {
                 let containers = &containers;
                 let nodes_by_container = &nodes_by_container;
                 let container_depths = &container_depths;
-                |src: &Cow<str>, dst: &Cow<str>, l: &mut log::Logger| {
-                    if !containers.contains(src) {
+                |src: Cow<str>, dst: Cow<str>, l: &mut log::Logger| {
+                    if !containers.contains(&src) {
                         // if hcg.constraints.contains(&HorizontalConstraint{a: src.clone(), b: dst.clone()})
                         // || hcg.constraints.contains(&HorizontalConstraint{a: dst.clone(), b: src.clone()}) {
                         //     0
@@ -4732,7 +4707,7 @@ pub mod frontend {
                         ).unwrap();
                         -1
                     } else {
-                        if nodes_by_container[src].contains(dst) {
+                        if nodes_by_container[&src].contains(&dst) {
                             l.log_pair(
                                 "(V, V)",
                                 names![src, dst],
@@ -4749,14 +4724,14 @@ pub mod frontend {
                                 format!("{}, {}", src, dst),
                                 "isize, &str",
                                 vec![],
-                                format!("{}, container_depths", -(container_depths[src] as isize))
+                                format!("{}, container_depths", -(container_depths[&src] as isize))
                             ).unwrap();
-                            -(container_depths[src] as isize)
+                            -(container_depths[&src] as isize)
                         }
                     }
                 }
             };
-            let mut paths_by_rank = rank(condensed, &roots, distance, logs)?;
+            let mut paths_by_rank = rank(condensed, distance, logs)?;
 
             logs.with_map("paths_by_rank", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
                 l.with_map(format!("paths_by_rank[{rank}]"), "SortedVec<(V, V)>", paths.iter().map(|p| (&p.0, &p.1)), |from, to, l| {
@@ -4805,7 +4780,6 @@ pub mod frontend {
                 val,
                 vcg,
                 cvcg,
-                roots,
                 paths_by_rank,
                 layout_problem,
                 layout_solution,
@@ -5027,7 +5001,7 @@ pub mod frontend {
         use tracing::{instrument, event};
         use tracing_error::InstrumentError;
 
-        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{VerticalRank, OriginalHorizontalRank, LocSol, HopSol}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
+        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{LocSol, HopSol}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
 
         use super::log::{self, Log};
 
@@ -5081,7 +5055,7 @@ pub mod frontend {
             let depiction = render_cell.borrow_dependent();
             
             let val = &depiction.val;
-            let geometry_solution = &depiction.geometry_solution;
+            // let geometry_solution = &depiction.geometry_solution;
             let rs = &depiction.geometry_solution.rs;
             let ls = &depiction.geometry_solution.ls;
             let ss = &depiction.geometry_solution.ss;
@@ -5107,8 +5081,8 @@ pub mod frontend {
             let container_depths = &depiction.vcg.container_depths;
             let nesting_depths = &depiction.vcg.nesting_depths;
             let solved_locs = &depiction.layout_solution.solved_locs;
-            let horizontal_problem = &depiction.horizontal_problem;
-            let vertical_problem = &depiction.vertical_problem;
+            // let horizontal_problem = &depiction.horizontal_problem;
+            // let vertical_problem = &depiction.vertical_problem;
 
             let char_width = &depiction.geometry_problem.char_width.unwrap_or(9.);
 
@@ -5126,32 +5100,30 @@ pub mod frontend {
                 Obj::Container(ObjContainer{vl}) => vl.to_string().names(),
                 Obj::Border(ObjBorder{border: Border{vl, ovr, ohr, pair}}) => names![vl.to_string(), ovr, ohr, pair],
             };
-            let ls2n = |layout_sol| { 
-                let loc_ix = locix_by_layout_sol[&layout_sol]; 
-                l2n(loc_ix.0, loc_ix.1) 
-            };
+            // let ls2n = |layout_sol| { 
+            //     let loc_ix = locix_by_layout_sol[&layout_sol]; 
+            //     l2n(loc_ix.0, loc_ix.1) 
+            // };
 
-            sol_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            sol_by_hop.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            // sol_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            // sol_by_hop.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
             locix_by_layout_sol.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
             solved_locs.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            size_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            size_by_hop.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs).map_err(|err| err.in_current_span())?;
-            vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs).map_err(|err| err.in_current_span())?;
-            geometry_solution.log(ls2n, &mut logs).map_err(|err| err.in_current_span())?;
+            // size_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            // size_by_hop.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
+            // horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs).map_err(|err| err.in_current_span())?;
+            // vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs).map_err(|err| err.in_current_span())?;
+            // geometry_solution.log(ls2n, &mut logs).map_err(|err| err.in_current_span())?;
 
             let mut logs = logs.to_vec();
             logs.reverse();
 
             // Render Nodes
-            let root_n = sol_by_loc[&(VerticalRank(0), OriginalHorizontalRank(0))];
-            let root_width = rs[&root_n] - ls[&root_n];
+            let viewbox_width = (rs.values().copied().map(ordered_float::OrderedFloat).max().unwrap_or_default() - ls.values().copied().map(ordered_float::OrderedFloat).min().unwrap_or_default()).0;
             let viewbox_height = (bs.values().copied().map(ordered_float::OrderedFloat).max().unwrap_or_default() - ts.values().copied().map(ordered_float::OrderedFloat).min().unwrap_or_default()).0;
 
             for (loc, node) in loc_to_node.iter() {
                 let (ovr, ohr) = loc;
-                if (*ovr, *ohr) == (VerticalRank(0), OriginalHorizontalRank(0)) { continue; }
 
                 if let Obj::Node(ObjNode{vl}) = node {
                     let n = sol_by_loc[&(*ovr, *ohr)];
@@ -5210,7 +5182,6 @@ pub mod frontend {
             for cer in condensed.edge_references() {
                 let mut prev_vwe = None;
                 for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
-                    if *vl == "root" { continue; }
                     if ew.as_ref().starts_with("implied") { continue; }
 
                     if prev_vwe == Some((vl, wl, ew)) {
@@ -5461,15 +5432,15 @@ pub mod frontend {
                 Node::Svg{z_index, ..} => *z_index,
             });
 
-            event!(tracing::Level::TRACE, %root_width, ?nodes, "NODES");
+            event!(tracing::Level::TRACE, %viewbox_width, ?nodes, "NODES");
             eprintln!("NODES: {nodes:#?}");
 
             Ok(Drawing{
                 crossing_number: Some(crossing_number),
                 status_v,
                 status_h,
-                viewbox_width: root_width,
-                viewbox_height: viewbox_height,
+                viewbox_width,
+                viewbox_height,
                 nodes,
                 logs,
             })
@@ -5922,7 +5893,7 @@ mod tests {
     use std::borrow::Cow;
 
     use super::{error::Error};
-    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, graph::roots, index::{VerticalRank, OriginalHorizontalRank}, geometry::calculate_sols, error::Kind, eval, frontend::log::Logger}};
+    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, index::{VerticalRank, OriginalHorizontalRank}, geometry::calculate_sols, error::Kind, eval, frontend::log::Logger}};
     use tracing_error::InstrumentResult;
     use logos::Logos;
 
@@ -5964,8 +5935,6 @@ mod tests {
         assert_eq!(condensed.node_weight(cvx), Some(&Cow::from("Ab")));
         assert_eq!(condensed.node_weight(cwx), Some(&Cow::from("Ac")));
 
-        let roots = roots(&condensed)?;
-
         let distance = |src: &Cow<str>, dst: &Cow<str>, logs: &mut Logger| {
             if !containers.contains(src) {
                 -1
@@ -5977,7 +5946,7 @@ mod tests {
                 }
             }
         };
-        let paths_by_rank = rank(&condensed, &roots, distance, &mut logs)?;
+        let paths_by_rank = rank(&condensed, distance, Cow::from, &mut logs)?;
         assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("Ac")));
 
         let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg, &mut logs)?;
