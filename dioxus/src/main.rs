@@ -26,7 +26,7 @@ use tracing_error::{ExtractSpanTrace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PLACEHOLDER: &str = indoc!("
-a b: c
+a b: c / d
 ");
 
 pub struct AppProps {
@@ -135,7 +135,7 @@ pub fn parse_highlights<'s>(data: &'s str) -> Result<Val<Cow<'s, str>>, Error> {
     use logos::Logos;
     use std::collections::HashMap;
     use tracing_error::InstrumentResult;
-    
+
     if data.trim().is_empty() {
         return Ok(Val::default())
     }
@@ -183,7 +183,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let drawing = use_state(&cx, Drawing::default);
     let highlight = use_state(&cx, || String::from(""));
 
-    let drawing_sender = use_coroutine(cx, |mut rx| { 
+    let drawing_sender = use_coroutine(cx, |mut rx| {
         let drawing = drawing.clone();
         async move {
             while let Some(msg) = rx.next().await {
@@ -252,7 +252,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     }));
 
     let data_svg = as_data_svg(drawing.get().clone());
-    
+
     // parse and eval the highlight string to get a sub-model to highlight
     let highlight_styles = match parse_highlights(&highlight.get()[..]) {
         Ok(Val::Process { body: Some(Body::All(bs)), .. }) => {
@@ -331,9 +331,9 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
     let style_default = "
-        svg { stroke: currentColor; stroke-width: 1; } 
-        .fake svg { stroke: hsl(0, 0%, 50%); } 
-        path { stroke-dasharray: none; } 
+        svg { stroke: currentColor; stroke-width: 1; }
+        .fake svg { stroke: hsl(0, 0%, 50%); }
+        path { stroke-dasharray: none; }
         .arrow.fake path { stroke-dasharray: 5; }
         .keyword { font-weight: bold; color: rgb(207, 34, 46); }
         .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
@@ -367,7 +367,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         autofocus: "true",
                         spellcheck: "false",
                         // placeholder: "",
-                        oninput: move |e| { 
+                        oninput: move |e| {
                             event!(Level::TRACE, "INPUT");
                             model.set(e.value.clone());
                             model_sender.send(e.value.clone());
@@ -503,7 +503,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     })
 }
 
-pub fn main() -> io::Result<()> {    
+pub fn main() -> io::Result<()> {
     tracing_subscriber::Registry::default()
         .with(tracing_error::ErrorLayer::default())
         .with(tracing_subscriber::fmt::layer())
