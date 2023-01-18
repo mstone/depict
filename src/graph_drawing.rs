@@ -3891,13 +3891,12 @@ pub mod geometry {
         }
     }
 
-    #[allow(dead_code)]
     fn update_min_width<V: Graphic + Display + Len + log::Name, E: Graphic>(
         vcg: &Vcg<V, E>,
         layout_problem: &LayoutProblem<V>,
         layout_solution: &LayoutSolution,
         geometry_problem: &GeometryProblem<V>,
-        min_width: &mut usize,
+        min_width: &mut OrderedFloat<f64>,
         vl: &V
     ) -> Result<(), Error> {
         let Vcg{vert: dag, vert_vxmap: dag_map, containers, ..} = vcg;
@@ -3984,9 +3983,12 @@ pub mod geometry {
             })
             .sum();
 
-        let in_width = in_width.round() as usize;
-        let out_width = out_width.round() as usize;
-        let orig_width = max(max(4, *min_width), 9 * vl.len());
+        let of = OrderedFloat::<f64>::from;
+
+        let out_width = of(out_width);
+        let in_width = of(in_width);
+
+        let orig_width = max(max(of(4.), *min_width), of(9. * vl.len() as f64));
         // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
         *min_width = max(orig_width, max(in_width, out_width));
         event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
@@ -4079,7 +4081,7 @@ pub mod geometry {
         logs: &mut log::Logger,
     ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error>
     where
-        V: Graphic + std::cmp::PartialEq<str>,
+        V: Graphic + Len + std::cmp::PartialEq<str>,
         E: Graphic + std::cmp::PartialEq<&'static str>,
     {
         let containers = &vcg.containers;
@@ -4088,6 +4090,7 @@ pub mod geometry {
         let node_to_loc = &layout_problem.node_to_loc;
         let hops_by_edge = &layout_problem.hops_by_edge;
         let solved_locs = &layout_solution.solved_locs;
+        let size_by_loc = &geometry_problem.size_by_loc;
         let sol_by_loc = &geometry_problem.sol_by_loc;
         let sol_by_hop = &geometry_problem.sol_by_hop;
 
@@ -4189,15 +4192,17 @@ pub mod geometry {
 
         for (loc_ix, obj) in loc_to_node.iter() {
             match obj {
-                Obj::Node(_) => {
+                Obj::Node(ObjNode{vl}) => {
                     let ls = sol_by_loc[&loc_ix];
                     let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(ls));
                     let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(ls));
                     let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(ls));
                     let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(ls));
-                    let width = 20.;
+                    let node_width = &size_by_loc[loc_ix];
+                    let mut width = of(node_width.width);
+                    update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut width, vl)?;
                     let height = 26.;
-                    con_graph.add_edge(left, right, con_edge("node-width".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(width)})));
+                    con_graph.add_edge(left, right, con_edge("node-width".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: width})));
                     con_graph.add_edge(top, bottom, con_edge("node-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
                 },
                 Obj::Hop(ObjHop{vl, wl, ..}) => {
@@ -4217,9 +4222,11 @@ pub mod geometry {
                     let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(container_sol));
                     let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(container_sol));
                     let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(container_sol));
-                    let width = 20.;
+                    let node_width = &size_by_loc[loc_ix];
+                    let mut width = of(node_width.width);
+                    update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut width, vl)?;
                     let height = 20.;
-                    con_graph.add_edge(left, right, con_edge("container-width".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(width)})));
+                    con_graph.add_edge(left, right, con_edge("container-width".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: width})));
                     con_graph.add_edge(top, bottom, con_edge("container-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
 
                     for node in &nodes_by_container[container] {
