@@ -1850,9 +1850,6 @@ pub mod layout {
         /// nesting_depths records how deeply nested each item is.
         pub nesting_depths: HashMap<V, usize>,
 
-        /// nesting_depth_by_container records how many levels of nesting each container contains
-        pub nesting_depth_by_container: HashMap<V, usize>,
-
         /// container_depths records how many ranks each container spans
         pub container_depths: HashMap<V, usize>,
     }
@@ -2005,8 +2002,7 @@ pub mod layout {
                 _ => {},
             }
         }
-        if let Some(parent) = parent {
-            vcg.nesting_depth_by_container.insert(parent.clone(), max_depth);
+        if parent.is_some() {
             max_depth += 1;
             parents.pop();
         }
@@ -2037,7 +2033,6 @@ pub mod layout {
         let containers = HashSet::new();
         let nodes_by_container = HashMap::new();
         let nodes_by_container_transitive = HashMap::new();
-        let nesting_depth_by_container = HashMap::new();
         let nesting_depths: HashMap<Cow<str>, usize> = HashMap::new();
         let container_depths: HashMap<Cow<str>, usize> = HashMap::new();
         let mut vcg = Vcg{
@@ -2049,7 +2044,6 @@ pub mod layout {
             nodes_by_container,
             nodes_by_container_transitive,
             nesting_depths,
-            nesting_depth_by_container,
             container_depths,
         };
 
@@ -2059,8 +2053,6 @@ pub mod layout {
         let mut queue = vec![];
 
         walk_body(&mut queue, &mut vcg, body, &None, vec![], 0);
-
-        eprintln!("NESTING DEPTH BY CONTAINER: {:#?}", &vcg.nesting_depth_by_container);
 
         eprintln!("QUEUE: {queue:#?}");
 
