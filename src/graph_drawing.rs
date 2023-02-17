@@ -4256,7 +4256,7 @@ pub mod geometry {
 
             let src_guide_sol = match (src, edge.dir) {
                 (Obj::Node(_) | Obj::Container(_), Direction::Horizontal) => {
-                    AnySol::L(sol_by_loc[&src_loc_ix])
+                    AnySol::R(sol_by_loc[&src_loc_ix])
                 },
                 (Obj::Node(_) | Obj::Container(_) | Obj::Hop(_), Direction::Vertical) => {
                     AnySol::B(sol_by_loc[&src_loc_ix])
