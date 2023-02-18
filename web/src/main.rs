@@ -196,10 +196,23 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     // }));
 
     let data_svg = as_data_svg(drawing.get().clone());
-    let keyword = "font-weight: bold; color: rgb(207, 34, 46);";
-    let example = "font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;";
+    let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
+    let style_default = "
+        svg { stroke: currentColor; stroke-width: 1; }
+        .fake svg { stroke: hsl(0, 0%, 50%); }
+        path { stroke-dasharray: none; }
+        .arrow.fake path { stroke-dasharray: 5; }
+        .keyword { font-weight: bold; color: rgb(207, 34, 46); }
+        .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
+    ";
     cx.render(rsx!{
+        head {
+            style {
+                "{style_default}"
+            }
+            // highlight_styles
+        }
         div {
             // key: "editor",
             style: "width: 100%; z-index: 20; padding: 1rem;",
@@ -230,202 +243,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                 }
                 div {
                     style: "display: flex; flex-direction: row; justify-content: space-between;",
-                    div {
-                        style: "font-size: 0.875rem; line-height: 1.25rem; width: calc(100% - 8rem);",
-                        div {
-                            details {
-                                // open: "true",
-                                summary {
-                                    span {
-                                        style: "color: #000;",
-                                        "Syntax + Examples"
-                                    }
-                                }
-                                div {
-                                    p {
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "nodes"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ":"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "actions"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "/"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "feedback"
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "person microwave food: open start stop / beep : heat"
-                                        },
-                                    }
-                                    p {
-                                        span {
-                                            style: "{keyword}",
-                                            "-"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "nodes"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ":"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "flows"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "/"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "responses"
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "- left right: input / reply"
-                                        },
-                                    }
-                                    p {
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "container"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "["
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "components"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "]"
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "plane [ pilot navigator ]"
-                                        },
-                                    }
-                                    p {
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "abbreviation"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ":"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "..."
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "c: controller; p: process; c p: setpoint / feedback"
-                                        },
-                                    }
-                                    p {
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "nodes"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ":"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "long-label"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ","
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "labels"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            "/"
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "long-label"
-                                        }
-                                        " "
-                                        span {
-                                            style: "{keyword}",
-                                            ","
-                                        }
-                                        " "
-                                        span {
-                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
-                                            "labels"
-                                        }
-                                        " "
-                                    }
-                                    p {
-                                        style: "text-align: right;",
-                                        span {
-                                            style: "{example}",
-                                            "controller process: a long action, / a long feedback, another feedback"
-                                        },
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    syntax_guide,
                     div {
                         style: "display: flex; flex-direction: column; align-items: end;",
                         a {
