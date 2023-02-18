@@ -1,17 +1,17 @@
 
-//! depict is library for drawing beautiful, readable pictures of 
+//! depict is library for drawing beautiful, readable pictures of
 //! models of systems, processes, and concepts of operation (ConOps).
-//! 
+//!
 //! # Summary
-//! 
-//! depict may be best understood as a compiler from a textual language of 
-//! "depict-expressions" ("depictions") to "pictures". It is implemented as a 
+//!
+//! depict may be best understood as a compiler from a textual language of
+//! "depict-expressions" ("depictions") to "pictures". It is implemented as a
 //! library for easy use by downstream packages like depict's desktop and web
 //! front-ends.
 pub mod printer {
     //! A pretty-printer for "depiction" parse trees
-    //! 
-    //! (The main purpose of the pretty-printer is to help test the 
+    //!
+    //! (The main purpose of the pretty-printer is to help test the
     //! [parser](super::parser) via [proptest].)
     use std::borrow::Cow;
 
@@ -67,18 +67,18 @@ pub mod printer {
         use crate::parser::{Item, Parser, Token};
 
         fn deseq(v: Vec<Item>) -> Vec<Item> {
-            if let [Item::Seq(v)] = &v[..] { 
+            if let [Item::Seq(v)] = &v[..] {
                 v.clone()
-            } else { 
+            } else {
                 v
             }
         }
-        
+
         /// Generate an arbitrary [Item]
-        /// 
-        /// (Note: one challenge in this area is that in normal use, [Item] has 
-        /// associativity and precedence invariants enforced by [Parser] and, 
-        /// as a consequence, "arbitary" items need to be carefully constructed 
+        ///
+        /// (Note: one challenge in this area is that in normal use, [Item] has
+        /// associativity and precedence invariants enforced by [Parser] and,
+        /// as a consequence, "arbitary" items need to be carefully constructed
         /// to enforce these invariants.)
         fn arb_item() -> impl Strategy<Value = Item<'static>> {
             let leaf = "[a-z]+".prop_map(|s| Item::Text(Cow::from(s)));
@@ -93,13 +93,13 @@ pub mod printer {
             leaf3.prop_recursive(
                 1, 4, 3, |inner| {
                     prop_oneof![
-                        // note: this pair of cases, plus the depth limitation above, 
+                        // note: this pair of cases, plus the depth limitation above,
                         // is a crude work-around for needing to generate only right-
                         // associated trees of colons
                         (inner.clone(), inner.clone()).prop_map(|(i, j)| Item::Colon(deseq(vec![i]), deseq(vec![j]))),
-                        (inner.clone(), inner.clone(), inner.clone()).prop_map(|(i, j, k)| 
+                        (inner.clone(), inner.clone(), inner.clone()).prop_map(|(i, j, k)|
                             Item::Colon(
-                                deseq(vec![i]), 
+                                deseq(vec![i]),
                                 vec![Item::Colon(deseq(vec![j]), deseq(vec![k]))]
                             )),
 
@@ -148,40 +148,40 @@ pub mod printer {
 
 pub mod parser {
     //! The parser for "depictions"
-    //! 
+    //!
     //! # Summary
-    //! 
+    //!
     //! The language of depictions loosely consists of:
-    //! 
+    //!
     //! * definitions ::= *name* **:** *expr*,
     //! * relations ::=  *name* *name* ... (**:** *labels* (**/** */ *labels*)?)*
     //! * labels ::= *label*... for single-word labels or *label* (**,** *label*)* for multi-word labels
     //! * nesting ::= **[** *model* **]**
     //! * alternatives ::= **{** *model* **}**
-    //! 
+    //!
     //! # Links
-    //! 
+    //!
     //! [Model] and [Item] values can be pretty-printed by [`print()`](crate::printer::print) and [`print1()`](crate::printer::print1), respectively.
-    //! 
+    //!
     //! # Guide-level Explanation
-    //! 
+    //!
     //! (tbd.)
-    //! 
+    //!
     //! # Reference-level Explanation
-    //! 
+    //!
     //! The parser for the loose grammar shown above is actually produced by the [pomelo]
     //! LALR(1) parser-generator proc-macro.
-    //! 
-    //! The two key ideas of the LALR(1) grammar given to pomelo are 
-    //! 
-    //! 1. to build the parse tree by giving merge rules for how to combine adjacent 
-    //! parse-tree fragments to be driven by a single "juxtaposition rule" that, 
+    //!
+    //! The two key ideas of the LALR(1) grammar given to pomelo are
+    //!
+    //! 1. to build the parse tree by giving merge rules for how to combine adjacent
+    //! parse-tree fragments to be driven by a single "juxtaposition rule" that,
     //! combined with precedence information, drives the merging process backward from
     //! right to left according to the shift-reduce conflict resolutions specified by
     //! the precedence rules
-    //! 
+    //!
     //! 2. to check that the resulting parser produces desirable parse trees by
-    //! demanding that it be a partial inverse to the [printer](crate::printer) 
+    //! demanding that it be a partial inverse to the [printer](crate::printer)
     //! pretty-printer.
     use enum_kinds::EnumKind;
     use std::borrow::Cow;
@@ -207,21 +207,21 @@ pub mod parser {
     }
 
     // A couple of relations guide the merging process.
-    // 
+    //
     // Textual items are Texts, Tildes, and Seqs.
     // Binary items are Colons and Slashes.
     // Unary items are Sq and Br.
-    // 
+    //
     // First, eats: a < b or a > b for "a eats b" or "b eats a".
-    // 
+    //
     // In general, binary items eat textual items.
     // Colons eat Slashes on their right.
     // Colons eat textual items to their left.
-    // While a right colon is eating the *hs of a seq, 
-    // the right colon will eat the right-most textual elements, 
+    // While a right colon is eating the *hs of a seq,
+    // the right colon will eat the right-most textual elements,
     // but the seq will eat the colon thereafter unless it has been emptied.
-    // While a right colon is eating the rhs of a left-colon, 
-    // the right colon will eat the right-most textual elements, 
+    // While a right colon is eating the rhs of a left-colon,
+    // the right colon will eat the right-most textual elements,
     // but if another left colon appears, recurse.
     // Slashes eat textual items on their left, and steal them from colon-rights.
     // Colons do not eat commas on their right; Commas make sequences.
@@ -229,7 +229,7 @@ pub mod parser {
     // to the colon's rhs' end if any, or to the colon's rhs otherwise
     // When fully eaten, Seqs dissolve.
     // Non-seq textual items are conceptually wrapped in a Seq for eating purposes.
-    
+
     pub fn seq<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
         Item::Seq(vec![i, j])
     }
@@ -255,9 +255,9 @@ pub mod parser {
                 let mut end = i.right().pop().unwrap();
                 let ekind = ItemKind::from(&end);
                 match (ikind, ekind, jkind) {
-                    (Seq  , Text  | Br | Sq        , Slash | Colon | Seq) | 
+                    (Seq  , Text  | Br | Sq        , Slash | Colon | Seq) |
                     (Seq  , Slash | Colon | Comma  , Colon              ) |
-                    (Colon, Text  | Br | Sq | Comma, Slash | Colon | Seq) => { 
+                    (Colon, Text  | Br | Sq | Comma, Slash | Colon | Seq) => {
                         // we eat end; i eats us.
                         self.left().insert(0, end);
                     },
@@ -269,7 +269,7 @@ pub mod parser {
                     (_, Text, Comma) => {
                         comma_buffer.push(end);
                     },
-                    (Seq, _, Slash | Colon) => { 
+                    (Seq, _, Slash | Colon) => {
                         // i eats us.
                         i.right().push(end);
                     },
@@ -314,7 +314,7 @@ pub mod parser {
             } else if jkind == Seq && ikind != Comma {
                 i.right().append(self.left());
                 i
-            } else if ikind == Seq && i.right().is_empty() { 
+            } else if ikind == Seq && i.right().is_empty() {
                 self
             } else {
                 i.right().push(self);
@@ -347,16 +347,16 @@ pub mod parser {
 
     /// Combine the two right-most items.
     fn merge_item<'s>(i: Item<'s>, j: Item<'s>) -> Item<'s> {
-        eprint!("MERGE {i:?} {j:?}");
+        // eprint!("MERGE {i:?} {j:?}");
         let r = j.eat_left(i);
-        eprintln!(" -> {r:?}");
+        // eprintln!(" -> {r:?}");
         r
     }
-    
+
     pomelo! {
         %module fact;
         // %parser #[derive(Clone)] pub struct Parser<'s> {};
-        // %stack_type 
+        // %stack_type
         %include {
             use std::borrow::Cow;
             use super::{Model, Item, merge_item};
@@ -402,10 +402,10 @@ pub mod parser {
         // %trace;
 
         start ::= model;
-        model ::= model?(i) Nl expr1?(j) { 
+        model ::= model?(i) Nl expr1?(j) {
             let mut i = i.unwrap_or_default();
-            if let Some(j) = j { i.push(j) }; 
-            i 
+            if let Some(j) = j { i.push(j) };
+            i
         };
         model ::= expr1(j) { vec![j] };
 
@@ -421,7 +421,7 @@ pub mod parser {
     }
 
     impl<'s> Display for Item<'s> {
-        fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> { 
+        fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
             write!(fmt, "{}", crate::printer::print1(self))
         }
     }
@@ -430,7 +430,7 @@ pub mod parser {
     pub use fact::Parser;
 
     /// The [pomelo!]-generated depiction lexer.
-    /// 
+    ///
     /// To use, please bring the [Logos] trait into scope like so:
     /// ```ignore
     /// use logos::Logos;

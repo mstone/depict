@@ -147,19 +147,19 @@ pub fn parse_highlights<'s>(data: &'s str) -> Result<Val<Cow<'s, str>>, Error> {
             Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
         })?;
 
-    eprintln!("HIGHLIGHT PARSE {items:#?}");
+    // eprintln!("HIGHLIGHT PARSE {items:#?}");
 
     let mut val = eval(&items[..]);
 
-    eprintln!("HIGHLIGHT EVAL {val:#?}");
+    // eprintln!("HIGHLIGHT EVAL {val:#?}");
 
     let mut scopes = HashMap::new();
     let val2 = val.clone();
     index(&val2, &mut vec![], &mut scopes);
     resolve(&mut val, &mut vec![], &scopes);
 
-    eprintln!("HIGHLIGHT SCOPES: {scopes:#?}");
-    eprintln!("HIGHLIGHT RESOLVE: {val:#?}");
+    // eprintln!("HIGHLIGHT SCOPES: {scopes:#?}");
+    // eprintln!("HIGHLIGHT RESOLVE: {val:#?}");
     Ok(val)
 }
 
@@ -242,7 +242,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                     match b {
                         Val::Process { name: Some(pname), .. } | Val::Process { label: Some(pname), .. } => {
                             let style = format!(".box.highlight_{pname} {{ background-color: red; color: white; }} .highlight_{pname} {{ color: red; }}");
-                            eprintln!("STYLE: {style}");
+                            // eprintln!("STYLE: {style}");
                             rsx!{
                                 style {
                                     "{style}"
@@ -251,7 +251,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         },
                         Val::Chain{ name: Some(cname), .. } => {
                             let style = format!(".arrow.highlight_{cname} {{ color: red; }}");
-                            eprintln!("STYLE: {style}");
+                            // eprintln!("STYLE: {style}");
                             rsx!{
                                 style {
                                     "{style}"
@@ -266,7 +266,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                                             match &pq[1] {
                                                 Val::Process { name: Some(qname), .. } | Val::Process { label: Some(qname), .. } => {
                                                     let style = format!(".arrow.{pname}_{qname} svg > path {{ stroke: red; }}");
-                                                    eprintln!("STYLE: {style}");
+                                                    // eprintln!("STYLE: {style}");
                                                     rsx!{
                                                         style {
                                                             "{style}"
@@ -274,13 +274,13 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                                                     }
                                                 }
                                                 _ => {
-                                                    eprintln!("UNSTYLE CHAIN WINDOW: {pq:#?}");
+                                                    // eprintln!("UNSTYLE CHAIN WINDOW: {pq:#?}");
                                                     rsx!{()}
                                                 }
                                             }
                                         }
                                         _ => {
-                                            eprintln!("UNSTYLE CHAIN: {pq:#?}");
+                                            // eprintln!("UNSTYLE CHAIN: {pq:#?}");
                                             rsx!{()}
                                         }
                                     }
@@ -288,7 +288,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             }
                         }
                         _ => {
-                            eprintln!("UNSTYLE: {b:#?}");
+                            // eprintln!("UNSTYLE: {b:#?}");
                             rsx!{()}
                         }
                     }

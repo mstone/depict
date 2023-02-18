@@ -593,7 +593,7 @@ pub mod eval {
     }
 
     fn eval_path<'s, 't>(path: &'t [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
-        eprintln!("EVAL_PATH: {path:?}");
+        // eprintln!("EVAL_PATH: {path:?}");
         path.iter().filter_map(|i| {
             match i {
                 Item::Text(s) if s == "LEFT" || s == "<" || s == ">" || s == "-" => None,
@@ -677,7 +677,7 @@ pub mod eval {
     }
 
     fn eval_seq<'s, 't>(mut ls: &'t [Item<'s>]) -> Option<Body<Cow<'s, str>>> {
-        eprintln!("EVAL_SEQ: {ls:?}");
+        // eprintln!("EVAL_SEQ: {ls:?}");
         let mut body: Option<Body<_>> = None;
 
         if ls.len() == 1 {
@@ -799,7 +799,7 @@ pub mod eval {
         current_path: &'u mut Vec<Cow<'s, str>>,
         scopes: &'u HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
     ) {
-        eprintln!("RESOLVE {current_path:?}");
+        // eprintln!("RESOLVE {current_path:?}");
         let mut resolution = None;
         match val {
             Val::Process { name, body, label, .. } => {
@@ -808,14 +808,14 @@ pub mod eval {
                 }
                 if name.is_none() && body.is_none() {
                     if let Some(label) = label {
-                        eprintln!("RESOLVE {current_path:?} found reference: {label}");
+                        // eprintln!("RESOLVE {current_path:?} found reference: {label}");
                         let label = label.to_string();
                         let mut base_path = current_path.clone();
                         let path = label.split(".").map(|s| s.to_string()).map(Cow::Owned).collect::<Vec<Cow<'s, str>>>();
                         while !base_path.is_empty() {
                             let mut test_path = base_path.clone();
                             test_path.append(&mut path.clone());
-                            eprintln!("RESOLVE test path: {test_path:?}");
+                            // eprintln!("RESOLVE test path: {test_path:?}");
                             if let Some(val) = scopes.get(&test_path).copied() {
                                 resolution = Some(val.clone());
                                 break
@@ -854,14 +854,14 @@ pub mod eval {
                 }
             },
         }
-        eprintln!("RESOLVE resolution: {resolution:?}");
+        // eprintln!("RESOLVE resolution: {resolution:?}");
         if let Some(resolution) = resolution {
             *val = resolution;
         }
     }
 
     fn merge<'s>(existing_process: &mut Val<Cow<'s, str>>, rhs: &mut Val<Cow<'s, str>>) {
-        eprintln!("EVAL_MERGE: {existing_process:#?} {rhs:#?}");
+        // eprintln!("EVAL_MERGE: {existing_process:#?} {rhs:#?}");
         if let (Val::Process { body, .. }, Val::Process { body: rbody, .. }) = (existing_process, rhs) {
             let rbody = <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(rbody.get_or_insert_with(Default::default).as_mut());
             <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(body.get_or_insert_with(Default::default).as_mut()).append(rbody);
@@ -883,7 +883,7 @@ pub mod eval {
 
         fn push(&mut self, mut rhs: Val<Cow<'s, str>>) {
             use std::collections::hash_map::Entry::*;
-            eprintln!("PUSH {rhs:#?}");
+            // eprintln!("PUSH {rhs:#?}");
             let rhs_name = match &rhs {
                 Val::Process { name, label, .. } => {
                     // the only unnamed process is the administrative / top-level wrapper process
@@ -967,7 +967,7 @@ pub mod eval {
                     if l.len() == 1 && matches!(l[0], Item::Text(..)){
                         if let Item::Text(name) = &l[0] {
                             let rbody = eval_seq(&r[..]);
-                            eprintln!("BOOM {l:?} {r:?} {rbody:?}");
+                            // eprintln!("BOOM {l:?} {r:?} {rbody:?}");
                             if let Some(rbody) = rbody {
                                 let mut rbody: Vec<Val<_>> = rbody.into();
                                 rbody.get_mut(0).map(|fst| {
@@ -1049,7 +1049,7 @@ pub mod eval {
             }
         }
 
-        eprintln!("EVAL MODEL: {model:#?}");
+        // eprintln!("EVAL MODEL: {model:#?}");
 
         if !model.is_empty() {
             body = Some(Body::All(model.to_vec()));
@@ -1325,7 +1325,7 @@ pub mod osqp {
             self.eq(&[t.clone(), -v.get(lhs), v.get(rhs)]);
             t.coeff = t.coeff * coeff.into();
             pd.push(t);
-            eprintln!("SYM {t} {lhs} {rhs}");
+            // eprintln!("SYM {t} {lhs} {rhs}");
         }
     }
 
@@ -1752,7 +1752,7 @@ pub mod layout {
                 preliminary_rank.insert(wl.clone(), *rank);
             }
         }
-        eprintln!("HCG PRELIMINARY RANK: {preliminary_rank:#?}");
+        // eprintln!("HCG PRELIMINARY RANK: {preliminary_rank:#?}");
 
         let mut preliminary_rank_inv: BTreeMap<VerticalRank, BTreeSet<Cow<'s, str>>> = BTreeMap::new();
         for (node, rank) in preliminary_rank.iter() {
@@ -1786,12 +1786,12 @@ pub mod layout {
                 modified_rank.insert(node.clone(), max_rank);
             }
         }
-        eprintln!("HCG MODIFIED RANK: {modified_rank:#?}");
+        // eprintln!("HCG MODIFIED RANK: {modified_rank:#?}");
 
         for (node, rank) in modified_rank.iter() {
             paths_by_rank.entry(*rank).or_default().insert(("root".into(), node.clone()));
         }
-        eprintln!("HCG MODIFIED PATHS_BY_RANK: {paths_by_rank:#?}");
+        // eprintln!("HCG MODIFIED PATHS_BY_RANK: {paths_by_rank:#?}");
     }
 
     #[derive(Clone, Debug, Default)]
@@ -1929,7 +1929,7 @@ pub mod layout {
             parents.push(parent.clone());
         }
         for chain in body {
-            eprintln!("WALK_BODY CHAIN parent: {parent:?}, chain: {chain:#?}");
+            // eprintln!("WALK_BODY CHAIN parent: {parent:?}, chain: {chain:#?}");
             match chain {
                 Val::Process{label: Some(node), body: None, ..} => {
                     or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
@@ -2025,7 +2025,7 @@ pub mod layout {
 
         walk_body(&mut queue, &mut vcg, body, &None, vec![], 0);
 
-        eprintln!("QUEUE: {queue:#?}");
+        // eprintln!("QUEUE: {queue:#?}");
 
         for (path, rel, labels_by_level, parent) in queue {
             if let (Some(parent), Some(eval::Val::Process{label: Some(node), ..})) = (parent, path.first()) {
@@ -2120,8 +2120,8 @@ pub mod layout {
         // we add implied edges based on horizontal relationships and containment relationships.
         let sorted_nodes_by_container = vcg.nodes_by_container_transitive.iter().collect::<BTreeMap<_, _>>();
         let sorted_constraints = hcg.constraints.iter().collect::<BTreeSet<_>>();
-        eprintln!("NODES_BY_CONTAINER: {:#?}", sorted_nodes_by_container);
-        eprintln!("PRELIMINARY VERT: {:#?}", vcg.vert);
+        // eprintln!("NODES_BY_CONTAINER: {:#?}", sorted_nodes_by_container);
+        // eprintln!("PRELIMINARY VERT: {:#?}", vcg.vert);
         for HorizontalConstraint{a, b} in sorted_constraints.iter() {
             let ax = vcg.vert_vxmap[a];
             let bx = vcg.vert_vxmap[b];
@@ -2165,7 +2165,7 @@ pub mod layout {
             }).collect::<Vec<_>>();
             a_incoming_plus_containers.append(&mut a_incoming);
             b_incoming_plus_containers.append(&mut b_incoming);
-            eprintln!("IMPLIED {a} {b} {a_incoming_plus_containers:?} {b_incoming_plus_containers:?}");
+            // eprintln!("IMPLIED {a} {b} {a_incoming_plus_containers:?} {b_incoming_plus_containers:?}");
             for (src, src_ix) in a_incoming_plus_containers {
                 vcg.vert.add_edge(src_ix, bx, "implied_forward".into());
                 vcg.vert_edge_labels
@@ -2265,10 +2265,10 @@ pub mod layout {
             let subpaths_by_rank = rank(&subdag, distance, logs)?;
             let depth = std::cmp::max(1, subpaths_by_rank.len());
             container_depths.insert(vl.clone(), depth);
-            eprintln!("CONTAINER {vl}");
-            eprintln!("SUBDAG {subdag:#?}");
-            eprintln!("SUBPATHS {subpaths_by_rank:#?}");
-            eprintln!("DEPTH {depth}");
+            // eprintln!("CONTAINER {vl}");
+            // eprintln!("SUBDAG {subdag:#?}");
+            // eprintln!("SUBPATHS {subpaths_by_rank:#?}");
+            // eprintln!("DEPTH {depth}");
         }
 
         let nesting_depths = &mut vcg.nesting_depths;
@@ -2276,9 +2276,9 @@ pub mod layout {
             nesting_depths.insert(vl.clone(), vcg.nodes_by_container_transitive.values().filter(|nodes| nodes.contains(vl)).count());
         }
 
-        eprintln!("VCG: {vcg:#?}");
-        let vcg_dot = Dot::new(&vcg.vert);
-        eprintln!("VCG DOT:\n{vcg_dot:?}");
+        // eprintln!("VCG: {vcg:#?}");
+        // let vcg_dot = Dot::new(&vcg.vert);
+        // eprintln!("VCG DOT:\n{vcg_dot:?}");
 
         Ok(vcg)
     }
@@ -2309,8 +2309,8 @@ pub mod layout {
                 condensed.add_edge(cvx, cwx, exs);
             }
         }
-        let dot = Dot::new(&condensed);
-        eprintln!("CONDENSED:\n{dot:?}");
+        // let dot = Dot::new(&condensed);
+        // eprintln!("CONDENSED:\n{dot:?}");
         Ok(Cvcg{condensed, condensed_vxmap})
     }
 
@@ -2347,7 +2347,7 @@ pub mod layout {
                         let src = dag.node_weight(er.source()).unwrap();
                         let dst = dag.node_weight(er.target()).unwrap();
                         let dist = distance(src.clone(), dst.clone(), l);
-                        eprintln!("DISTANCE MUT: {src:?} {dst:?} {dist:?}");
+                        // eprintln!("DISTANCE MUT: {src:?} {dst:?} {dist:?}");
                         dist
                     }));
                     Ok(())
@@ -2370,7 +2370,7 @@ pub mod layout {
                 .into_iter()
                 .collect::<Result<Vec<_>, Error>>()?
         );
-        eprintln!("FLOYD-WARSHALL: {paths_fw2:#?}");
+        // eprintln!("FLOYD-WARSHALL: {paths_fw2:#?}");
 
         let paths_from_roots = SortedVec::from_unsorted(
             paths_fw2
@@ -2384,7 +2384,7 @@ pub mod layout {
                 })
                 .collect::<Vec<_>>()
         );
-        eprintln!("PATHS_FROM_ROOTS: {paths_from_roots:#?}");
+        // eprintln!("PATHS_FROM_ROOTS: {paths_from_roots:#?}");
 
         let mut paths_by_rank = BTreeMap::new();
         for (wgt, vl, wl) in paths_from_roots.iter() {
@@ -2393,7 +2393,7 @@ pub mod layout {
                 .or_insert_with(SortedVec::new)
                 .insert((vl.clone(), wl.clone()));
         }
-        eprintln!("RANK_PATHS_BY_RANK: {paths_by_rank:#?}");
+        // eprintln!("RANK_PATHS_BY_RANK: {paths_by_rank:#?}");
 
         Ok(paths_by_rank)
     }
@@ -2712,8 +2712,8 @@ pub mod layout {
             }
         }
 
-        eprintln!("PATHS_BY_RANK 0: {paths_by_rank:#?}");
-        eprintln!("VX_RANK {vx_rank:#?}");
+        // eprintln!("PATHS_BY_RANK 0: {paths_by_rank:#?}");
+        // eprintln!("VX_RANK {vx_rank:#?}");
 
         logs.with_map("vx_rank", "BTreeMap<V, VerticalRank>", vx_rank.iter(), |wl, rank, l| {
             l.log_pair(
@@ -2777,7 +2777,7 @@ pub mod layout {
                 })
                 .collect::<Vec<_>>()
         );
-        eprintln!("SORTED CONDENSED EDGES: {sorted_condensed_edges:#?}");
+        // eprintln!("SORTED CONDENSED EDGES: {sorted_condensed_edges:#?}");
 
         let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
@@ -2830,7 +2830,7 @@ pub mod layout {
             })
         })?;
 
-        eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
+        // eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
 
         let mut container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>> = HashMap::new();
 
@@ -2859,12 +2859,12 @@ pub mod layout {
                 container_borders.entry(vl.clone()).or_default().push((vr, (ohr, mhr)));
             }
 
-            eprintln!("VERTICAL RANK SPAN: {vl}: {:?}", ovr.0..(ovr.0+depth));
-            eprintln!("CONTAINER BORDERS: {vl}: {container_borders:#?}");
-            eprintln!("LOCS_BY_LEVEL V3: {vl}: {locs_by_level:#?}");
+            // eprintln!("VERTICAL RANK SPAN: {vl}: {:?}", ovr.0..(ovr.0+depth));
+            // eprintln!("CONTAINER BORDERS: {vl}: {container_borders:#?}");
+            // eprintln!("LOCS_BY_LEVEL V3: {vl}: {locs_by_level:#?}");
         }
 
-        eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
+        // eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
 
         let mut g_hops = Graph::<LocIx, (VerticalRank, V, V)>::new();
         let mut g_hops_vx = HashMap::new();
@@ -3146,12 +3146,12 @@ pub mod layout {
             let Vcg{containers, nodes_by_container_transitive: nodes_by_container, ..} = vcg;
             let LayoutProblem{loc_to_node, node_to_loc, locs_by_level, hops_by_level, ..} = layout_problem;
 
-            eprintln!("MINIMIZE");
-            eprintln!("LOCS_BY_LEVEL: {locs_by_level:#?}");
-            eprintln!("HOPS_BY_LEVEL: {hops_by_level:#?}");
+            // eprintln!("MINIMIZE");
+            // eprintln!("LOCS_BY_LEVEL: {locs_by_level:#?}");
+            // eprintln!("HOPS_BY_LEVEL: {hops_by_level:#?}");
             let mut l2n = loc_to_node.iter().collect::<Vec<_>>();
             l2n.sort();
-            eprintln!("LOC_TO_NODE: {l2n:#?}");
+            // eprintln!("LOC_TO_NODE: {l2n:#?}");
 
             let mut shrs = vec![];
             for (_rank, locs) in locs_by_level.iter() {
@@ -3222,11 +3222,11 @@ pub mod layout {
             });
 
             let solution = solution.or_err(LayoutError::HeapsError{error: "no solution found".into()})?;
-            eprintln!("HEAPS CN: {crossing_number}");
-            eprintln!("HEAPS SOL: ");
-            for (n, s) in solution.iter().enumerate() {
-                eprintln!("{n}: {s:?}");
-            }
+            // eprintln!("HEAPS CN: {crossing_number}");
+            // eprintln!("HEAPS SOL: ");
+            // for (n, s) in solution.iter().enumerate() {
+            //     eprintln!("{n}: {s:?}");
+            // }
 
             let mut solved_locs = BTreeMap::new();
             for (lvl, shrs) in solution.iter().enumerate() {
@@ -3237,7 +3237,7 @@ pub mod layout {
                     .collect::<BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>>());
             }
 
-            eprintln!("SOLVED_LOCS: {solved_locs:#?}");
+            // eprintln!("SOLVED_LOCS: {solved_locs:#?}");
 
             Ok(LayoutSolution{crossing_number, solved_locs})
         }
@@ -3596,7 +3596,7 @@ pub mod geometry {
         let LayoutProblem{loc_to_node, hops_by_level, hops_by_edge, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = layout_solution;
 
-        eprintln!("SOLVED_LOCS {solved_locs:#?}");
+        // eprintln!("SOLVED_LOCS {solved_locs:#?}");
 
         let all_locs = solved_locs
             .iter()
@@ -3607,7 +3607,7 @@ pub mod geometry {
             .map(|(n, (ovr, ohr, shr, loc))| LocRow{ovr, ohr, shr, loc: loc.clone(), n: LocSol(n)})
             .collect::<Vec<_>>();
 
-        eprintln!("ALL_LOCS {all_locs:#?}");
+        // eprintln!("ALL_LOCS {all_locs:#?}");
 
         let mut sol_by_loc = HashMap::new();
         for LocRow{ovr, ohr, n, ..} in all_locs.iter() {
@@ -4115,7 +4115,7 @@ pub mod geometry {
             }
         }
 
-        eprintln!("obj graph: {}", Dot::new(&obj_graph));
+        // eprintln!("obj graph: {}", Dot::new(&obj_graph));
 
         if let Some(obj_svg) = as_svg(&obj_graph) {
             logs.log_svg(Some("obj_graph"), None::<String>, Vec::<String>::new(), obj_svg).unwrap();
@@ -4194,7 +4194,7 @@ pub mod geometry {
 
         for er in obj_graph.edge_references() {
             let edge = er.weight();
-            eprintln!("EDGE IX: {:?} -> {:?}, {}", er.source(), er.target(), edge);
+            // eprintln!("EDGE IX: {:?} -> {:?}, {}", er.source(), er.target(), edge);
             let src = obj_graph.node_weight(er.source()).unwrap();
             let dst = obj_graph.node_weight(er.target()).unwrap();
             if matches!((src, dst),
@@ -4241,9 +4241,9 @@ pub mod geometry {
                 }
             };
 
-            eprintln!("con_vxmap: {:#?}", con_vxmap);
-            eprintln!("con: {}", Dot::new(&con_graph));
-            eprintln!("EDGE: {src},{src_guide_sol} -> {dst},{dst_guide_sol}, {edge}");
+            // eprintln!("con_vxmap: {:#?}", con_vxmap);
+            // eprintln!("con: {}", Dot::new(&con_graph));
+            // eprintln!("EDGE: {src},{src_guide_sol} -> {dst},{dst_guide_sol}, {edge}");
             let src_ix = *con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}"));
             let dst_ix = *con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}"));
             con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(edge.margin.0)})));
@@ -4273,7 +4273,7 @@ pub mod geometry {
             }
         }
 
-        eprintln!("con graph: {}", Dot::new(&con_graph));
+        // eprintln!("con graph: {}", Dot::new(&con_graph));
 
         if let Some(con_svg) = as_svg(&con_graph) {
             logs.log_svg(Some("con_graph"), None::<String>, Vec::<String>::new(), con_svg).unwrap();
@@ -4363,7 +4363,8 @@ pub mod geometry {
     ) -> Result<(Vec<(Var<S>, f64)>, OSQPStatusKind), Error> {
         let OptimizationProblem{v, c, pd, q} = optimization_problem;
 
-        let settings = &osqp::Settings::default()
+        let settings = osqp::Settings::default()
+            .verbose(false)
             // .adaptive_rho(false)
             // .rho(6.)
             // .check_termination(Some(200))
@@ -4374,14 +4375,17 @@ pub mod geometry {
             // .max_iter(128_000)
             // .max_iter(400)
             // .polish(true)
-            .verbose(true);
+        ;
+        #[cfg(debug_assertions)]
+        let settings = settings.verbose(true);
+        let settings = &settings;
 
         let n = v.len();
 
         let sparse_pd = &pd[..];
-        eprintln!("sparsePd: {sparse_pd:?}");
+        // eprintln!("sparsePd: {sparse_pd:?}");
         let p2 = as_diag_csc_matrix(Some(n), Some(n), sparse_pd);
-        print_tuples("P2", &p2);
+        // print_tuples("P2", &p2);
 
         let mut q2 = Vec::with_capacity(n);
         q2.resize(n, 0.);
@@ -4395,39 +4399,39 @@ pub mod geometry {
             l2.push((*l).into());
             u2.push((*u).into());
         }
-        eprintln!("V[{}]: {v}", v.len());
-        eprintln!("C[{}]: {c}", &c.len());
+        // eprintln!("V[{}]: {v}", v.len());
+        // eprintln!("C[{}]: {c}", &c.len());
 
         let a2: osqp::CscMatrix = c.clone().into();
 
-        eprintln!("P2[{},{}]: {p2:?}", p2.nrows, p2.ncols);
-        eprintln!("Q2[{}]: {q2:?}", q2.len());
-        eprintln!("L2[{}]: {l2:?}", l2.len());
-        eprintln!("U2[{}]: {u2:?}", u2.len());
-        eprintln!("A2[{},{}]: {a2:?}", a2.nrows, a2.ncols);
-        eprintln!("NUMPY");
-        eprintln!("import osqp");
-        eprintln!("import numpy as np");
-        eprintln!("import scipy.sparse as sp");
-        eprintln!("");
-        eprintln!("inf = np.inf");
-        eprintln!("np.set_printoptions(precision=1, suppress=True)");
-        as_scipy("P", &p2);
-        as_numpy("q", &q2);
-        as_scipy("A", &a2);
-        as_numpy("l", &l2);
-        as_numpy("u", &u2);
-        eprintln!("m = osqp.OSQP()");
-        eprintln!("m.setup(P=P, q=q, A=A, l=l, u=u)");
-        eprintln!("r = m.solve()");
-        eprintln!("r.info.status");
-        eprintln!("r.x");
+        // eprintln!("P2[{},{}]: {p2:?}", p2.nrows, p2.ncols);
+        // eprintln!("Q2[{}]: {q2:?}", q2.len());
+        // eprintln!("L2[{}]: {l2:?}", l2.len());
+        // eprintln!("U2[{}]: {u2:?}", u2.len());
+        // eprintln!("A2[{},{}]: {a2:?}", a2.nrows, a2.ncols);
+        // eprintln!("NUMPY");
+        // eprintln!("import osqp");
+        // eprintln!("import numpy as np");
+        // eprintln!("import scipy.sparse as sp");
+        // eprintln!("");
+        // eprintln!("inf = np.inf");
+        // eprintln!("np.set_printoptions(precision=1, suppress=True)");
+        // as_scipy("P", &p2);
+        // as_numpy("q", &q2);
+        // as_scipy("A", &a2);
+        // as_numpy("l", &l2);
+        // as_numpy("u", &u2);
+        // eprintln!("m = osqp.OSQP()");
+        // eprintln!("m.setup(P=P, q=q, A=A, l=l, u=u)");
+        // eprintln!("r = m.solve()");
+        // eprintln!("r.info.status");
+        // eprintln!("r.x");
 
         let mut prob = osqp::Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], settings)
             .map_err(|e| Error::from(LayoutError::from(e)))?;
 
         let result = prob.solve();
-        eprintln!("STATUS {:?}", result);
+        // eprintln!("STATUS {:?}", result);
         let solution = match result {
             osqp::Status::Solved(solution) => Ok((solution, OSQPStatusKind::Solved)),
             osqp::Status::SolvedInaccurate(solution) => Ok((solution, OSQPStatusKind::SolvedInaccurate)),
@@ -4467,7 +4471,7 @@ pub mod geometry {
             })
             .collect::<Vec<_>>();
         vs.sort_by_key(|(idx, _)| *idx);
-        eprintln!("{name}: {vs:?}");
+        // eprintln!("{name}: {vs:?}");
         let vs = vs.iter().copied().collect::<BTreeMap<Idx, Val>>();
         vs
     }
@@ -4479,10 +4483,10 @@ pub mod geometry {
         let OptimizationProblem{v: vh, ..} = horizontal_problem;
         let OptimizationProblem{v: vv, ..} = vertical_problem;
 
-        eprintln!("SOLVE HORIZONTAL");
+        // eprintln!("SOLVE HORIZONTAL");
         let (solutions_h, status_h) = solve_problem(&horizontal_problem)?;
 
-        eprintln!("SOLVE VERTICAL");
+        // eprintln!("SOLVE VERTICAL");
         let (solutions_v, status_v) = solve_problem(&vertical_problem)?;
 
         let ls = extract_variable(&vh, &solutions_h, AnySolKind::L, "ls".into(), |s| {
@@ -4547,7 +4551,7 @@ pub mod frontend {
         let condensed = &cvcg.condensed;
         let condensed_vxmap = &cvcg.condensed_vxmap;
 
-        eprintln!("LOC_TO_NODE WIDTHS: {loc_to_node:#?}");
+        // eprintln!("LOC_TO_NODE WIDTHS: {loc_to_node:#?}");
 
         for (loc, node) in loc_to_node.iter() {
             let (ovr, ohr) = loc;
@@ -4643,8 +4647,8 @@ pub mod frontend {
             }
         }
 
-        eprintln!("SIZE_BY_LOC: {size_by_loc:#?}");
-        eprintln!("SIZE_BY_HOP: {size_by_hop:#?}");
+        // eprintln!("SIZE_BY_LOC: {size_by_loc:#?}");
+        // eprintln!("SIZE_BY_HOP: {size_by_hop:#?}");
 
         Ok(())
     }
@@ -4689,24 +4693,24 @@ pub mod frontend {
                     Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
                 })?;
 
-            eprintln!("PARSE {items:#?}");
+            // eprintln!("PARSE {items:#?}");
 
             let mut val = eval(&items[..]);
 
-            eprintln!("EVAL {val:#?}");
+            // eprintln!("EVAL {val:#?}");
 
             let mut scopes = HashMap::new();
             let val2 = val.clone();
             index(&val2, &mut vec![], &mut scopes);
             resolve(&mut val, &mut vec![], &scopes);
 
-            eprintln!("SCOPES: {scopes:#?}");
-            eprintln!("RESOLVE: {val:#?}");
+            // eprintln!("SCOPES: {scopes:#?}");
+            // eprintln!("RESOLVE: {val:#?}");
 
             let hcg = calculate_hcg(&val)?;
             let vcg = calculate_vcg(&val, &hcg, logs)?;
 
-            eprintln!("HCG {hcg:#?}");
+            // eprintln!("HCG {hcg:#?}");
 
             let Vcg{vert, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
 
@@ -5150,7 +5154,7 @@ pub mod frontend {
                 if let Obj::Node(ObjNode{vl}) = node {
                     let n = sol_by_loc[&(*ovr, *ohr)];
 
-                    eprintln!("TEXT {vl} {ovr} {ohr} {n}");
+                    // eprintln!("TEXT {vl} {ovr} {ohr} {n}");
 
                     let lpos = ls[&n];
                     let rpos = rs[&n];
@@ -5186,7 +5190,7 @@ pub mod frontend {
                 let width = (rpos - lpos).round();
                 let hpos = lpos.round();
                 let height = bs[&cn] - ts[&cn];
-                eprintln!("HEIGHT: {container} {height}");
+                // eprintln!("HEIGHT: {container} {height}");
 
                 let key = format!("{container}");
                 let mut label = vert_node_labels
@@ -5258,7 +5262,7 @@ pub mod frontend {
                         vmin + fraction * (vmax - vmin)
                     })
                         .collect::<Vec<_>>();
-                    eprintln!("vl: {vl}, wl: {wl}, fs: {fs}, vmin: {vmin}, vmax: {vmax}, nh: {nh}, vs: {vs:?}");
+                    // eprintln!("vl: {vl}, wl: {wl}, fs: {fs}, vmin: {vmin}, vmax: {vmax}, nh: {nh}, vs: {vs:?}");
                     for (n, hop) in hops.iter().enumerate() {
                         let (lvl, (mhr, nhr)) = *hop;
                         // let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
@@ -5269,7 +5273,7 @@ pub mod frontend {
                         let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
                         let hposd = (sposd + offset).round(); //  + 10. * lvl.0 as f64;
                         let lvl_offset = container_depths.get(vl).copied().unwrap_or(0);
-                        eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {}", ndv, lvl_offset);
+                        // eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {}", ndv, lvl_offset);
                         let vpos = vs[n];
                         let mut vpos2 = vs[n+1];
 
@@ -5454,7 +5458,7 @@ pub mod frontend {
                 Node::Svg{z_index, ..} => *z_index,
             });
 
-            eprintln!("NODES: {nodes:#?}");
+            // eprintln!("NODES: {nodes:#?}");
 
             Ok(Drawing{
                 crossing_number: Some(crossing_number),
