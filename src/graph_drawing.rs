@@ -131,9 +131,6 @@ pub mod error {
     use std::ops::Range;
 
     use petgraph::algo::NegativeCycle;
-    use tracing_error::{TracedError, ExtractSpanTrace, SpanTrace, InstrumentError};
-
-    use miette::Diagnostic;
 
     use super::frontend::log::Error as LogError;
 
@@ -143,8 +140,7 @@ pub mod error {
     use osqp_rust as osqp;
 
     #[non_exhaustive]
-    #[derive(Debug, Diagnostic, thiserror::Error)]
-    #[diagnostic(code(depict::graph_drawing::error))]
+    #[derive(Debug, thiserror::Error)]
     pub enum Kind {
         #[error("indexing error")]
         IndexingError {},
@@ -190,49 +186,27 @@ pub mod error {
     }
 
     #[non_exhaustive]
-    #[derive(Debug, Diagnostic, thiserror::Error)]
-    #[diagnostic(code(depict::graph_drawing::error))]
+    #[derive(Debug, thiserror::Error)]
     pub enum Error {
         #[error(transparent)]
         TypeError{
-            #[from] source: TracedError<TypeError>,
+            #[from] source: TypeError,
         },
         #[error(transparent)]
         GraphDrawingError{
-            #[from] source: TracedError<Kind>,
+            #[from] source: Kind,
         },
         #[error(transparent)]
         RankingError{
-            #[from] source: TracedError<RankingError>,
+            #[from] source: RankingError,
         },
         #[error(transparent)]
         LayoutError{
-            #[from] source: TracedError<LayoutError>,
+            #[from] source: LayoutError,
         },
         #[error(transparent)]
         LogError{
-            #[from] source: TracedError<LogError>,
-        }
-    }
-
-    impl From<Kind> for Error {
-        fn from(source: Kind) -> Self {
-            Self::GraphDrawingError {
-                source: source.into(),
-            }
-        }
-    }
-
-    impl ExtractSpanTrace for Error {
-        fn span_trace(&self) -> Option<&SpanTrace> {
-            use std::error::Error as _;
-            match self {
-                Error::TypeError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
-                Error::GraphDrawingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
-                Error::RankingError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
-                Error::LayoutError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
-                Error::LogError{source} => source.source().and_then(ExtractSpanTrace::span_trace),
-            }
+            #[from] source: LogError,
         }
     }
 
@@ -242,10 +216,10 @@ pub mod error {
         fn or_err(self, error: E) -> Result<Self::Item, Error>;
     }
 
-    impl<V, E> OrErrExt<E> for Option<V> where tracing_error::TracedError<E>: From<E>, Error: From<tracing_error::TracedError<E>> {
+    impl<V, E> OrErrExt<E> for Option<V> where Error: From<E> {
         type Item = V;
         fn or_err(self, error: E) -> Result<V, Error> {
-            self.ok_or_else(|| Error::from(error.in_current_span()))
+            self.ok_or_else(|| Error::from(error))
         }
     }
 
@@ -263,7 +237,7 @@ pub mod error {
                     Ok(inner)
                 },
                 None => {
-                    Err(Error::from(Kind::IndexingError{}.in_current_span()))
+                    Err(Error::from(Kind::IndexingError{}))
                 },
             }
         }
@@ -1657,8 +1631,6 @@ pub mod layout {
     use petgraph::graph::{Graph, NodeIndex, EdgeReference};
     use petgraph::visit::{EdgeRef, IntoNodeReferences};
     use sorted_vec::SortedVec;
-    use tracing::{event, Level};
-    use tracing_error::InstrumentError;
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::eval::{Val, self, Body};
@@ -2048,7 +2020,6 @@ pub mod layout {
         };
 
         let body = &Body::All(vec![process.clone()]);
-        // let body = if let Val::Process{body: Some(body), ..} = process { Ok(body) } else { Err(Kind::MissingDrawingError{}.in_current_span()) }?;
 
         let mut queue = vec![];
 
@@ -2305,7 +2276,6 @@ pub mod layout {
             nesting_depths.insert(vl.clone(), vcg.nodes_by_container_transitive.values().filter(|nodes| nodes.contains(vl)).count());
         }
 
-        event!(Level::TRACE, ?vcg, "VCG");
         eprintln!("VCG: {vcg:#?}");
         let vcg_dot = Dot::new(&vcg.vert);
         eprintln!("VCG DOT:\n{vcg_dot:?}");
@@ -2340,7 +2310,6 @@ pub mod layout {
             }
         }
         let dot = Dot::new(&condensed);
-        event!(Level::DEBUG, ?dot, "CONDENSED");
         eprintln!("CONDENSED:\n{dot:?}");
         Ok(Cvcg{condensed, condensed_vxmap})
     }
@@ -2383,11 +2352,11 @@ pub mod layout {
                     }));
                     Ok(())
                 }
-            }).map_err(|err| err.in_current_span())?;
+            })?;
         }
 
         let paths_fw = paths_fw.map_err(|cycle|
-            Error::from(RankingError::NegativeCycleError{cycle}.in_current_span())
+            Error::from(RankingError::NegativeCycleError{cycle})
         )?;
 
         let paths_fw2 = SortedVec::from_unsorted(
@@ -2401,7 +2370,6 @@ pub mod layout {
                 .into_iter()
                 .collect::<Result<Vec<_>, Error>>()?
         );
-        event!(Level::DEBUG, ?paths_fw2, "FLOYD-WARSHALL");
         eprintln!("FLOYD-WARSHALL: {paths_fw2:#?}");
 
         let paths_from_roots = SortedVec::from_unsorted(
@@ -2416,7 +2384,6 @@ pub mod layout {
                 })
                 .collect::<Vec<_>>()
         );
-        event!(Level::DEBUG, ?paths_from_roots, "PATHS_FROM_ROOTS");
         eprintln!("PATHS_FROM_ROOTS: {paths_from_roots:#?}");
 
         let mut paths_by_rank = BTreeMap::new();
@@ -2426,7 +2393,6 @@ pub mod layout {
                 .or_insert_with(SortedVec::new)
                 .insert((vl.clone(), wl.clone()));
         }
-        event!(Level::DEBUG, ?paths_by_rank, "PATHS_BY_RANK");
         eprintln!("RANK_PATHS_BY_RANK: {paths_by_rank:#?}");
 
         Ok(paths_by_rank)
@@ -2758,7 +2724,7 @@ pub mod layout {
                 names![rank],
                 format!("{rank}v")
             )
-        }).map_err(|err| err.in_current_span())?;
+        })?;
 
         let mut loc_to_node = HashMap::new();
         let mut node_to_loc = HashMap::new();
@@ -2786,9 +2752,8 @@ pub mod layout {
                 loc_ix.names(),
                 format!("{loc_ix:?}")
             )
-        }).map_err(|err| err.in_current_span())?;
+        })?;
 
-        event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V1");
         let is_contains = |er: &EdgeReference<_>| {
             let src = dag.node_weight(er.source()).unwrap();
             let dst = dag.node_weight(er.target()).unwrap();
@@ -2814,8 +2779,6 @@ pub mod layout {
         );
         eprintln!("SORTED CONDENSED EDGES: {sorted_condensed_edges:#?}");
 
-        event!(Level::DEBUG, ?sorted_condensed_edges, "CONDENSED GRAPH");
-
         let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
         for (vl, wl, _) in sorted_condensed_edges.iter() {
@@ -2836,8 +2799,6 @@ pub mod layout {
                 mhrs.push(mhr);
             }
             mhrs.push(whr);
-
-            event!(Level::DEBUG, %vl, %wl, %vvr, %wvr, %vhr, %whr, ?mhrs, "HOP");
 
             for lvl in vvr.0..wvr.0 {
                 let lvl = VerticalRank(lvl); // pending https://github.com/rust-lang/rust/issues/42168
@@ -2867,11 +2828,7 @@ pub mod layout {
                     format!("{mhr}, {nhr}")
                 )
             })
-        }).map_err(|err| err.in_current_span())?;
-
-        event!(Level::DEBUG, ?locs_by_level, "LOCS_BY_LEVEL V2");
-
-        event!(Level::DEBUG, ?hops_by_level, "HOPS_BY_LEVEL");
+        })?;
 
         eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
 
@@ -2918,8 +2875,6 @@ pub mod layout {
                 g_hops.add_edge(gvx, gwx, (*lvl, vl.clone(), wl.clone()));
             }
         }
-        let g_hops_dot = Dot::new(&g_hops);
-        event!(Level::DEBUG, ?g_hops_dot, "HOPS GRAPH");
 
         Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders, hcg})
     }
@@ -3396,8 +3351,6 @@ pub mod geometry {
     use petgraph::algo::is_cyclic_directed;
     use petgraph::dot::Dot;
     use petgraph::visit::{EdgeRef};
-    use tracing::{event, Level};
-    use tracing_error::InstrumentError;
 
     use crate::graph_drawing::layout::ObjNode;
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples, as_scipy, as_numpy};
@@ -3903,7 +3856,7 @@ pub mod geometry {
                 dag
                     .node_weight(er.target())
                     .map(Clone::clone)
-                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.in_current_span().into())
+                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.into())
             })
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
@@ -3913,7 +3866,7 @@ pub mod geometry {
                 dag
                     .node_weight(er.source())
                     .map(Clone::clone)
-                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.in_current_span().into())
+                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.into())
             })
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
@@ -3983,7 +3936,6 @@ pub mod geometry {
         let orig_width = max(max(of(4.), *min_width), of(9. * vl.len() as f64));
         // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
         *min_width = max(orig_width, max(in_width, out_width));
-        event!(Level::TRACE, %vl, %min_width, %orig_width, %in_width, %out_width, "MIN WIDTH");
         // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
         Ok(())
     }
@@ -4472,7 +4424,7 @@ pub mod geometry {
         eprintln!("r.x");
 
         let mut prob = osqp::Problem::new(p2, &q2[..], a2, &l2[..], &u2[..], settings)
-            .map_err(|e| Error::from(LayoutError::from(e).in_current_span()))?;
+            .map_err(|e| Error::from(LayoutError::from(e)))?;
 
         let result = prob.solve();
         eprintln!("STATUS {:?}", result);
@@ -4481,7 +4433,7 @@ pub mod geometry {
             osqp::Status::SolvedInaccurate(solution) => Ok((solution, OSQPStatusKind::SolvedInaccurate)),
             osqp::Status::MaxIterationsReached(solution) => Ok((solution, OSQPStatusKind::MaxIterationsReached)),
             osqp::Status::TimeLimitReached(solution) => Ok((solution, OSQPStatusKind::TimeLimitReached)),
-            _ => Err(LayoutError::OsqpError{error: "failed to solve problem".into(),}.in_current_span()),
+            _ => Err(LayoutError::OsqpError{error: "failed to solve problem".into(),}),
         }?;
         let x = solution.0.x();
 
@@ -4554,7 +4506,6 @@ pub mod geometry {
         });
 
         let res = GeometrySolution{ls, rs, ss, ts, bs, status_h, status_v};
-        event!(Level::DEBUG, ?res, "LAYOUT");
         Ok(res)
     }
 
@@ -4566,8 +4517,6 @@ pub mod frontend {
     use logos::Logos;
     use ordered_float::OrderedFloat;
     use self_cell::self_cell;
-    use tracing::{event, Level};
-    use tracing_error::{InstrumentResult, InstrumentError};
 
     use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border, ObjNode, ObjBorder}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
@@ -4727,18 +4676,12 @@ pub mod frontend {
     pub fn render<'s, 't>(data: Cow<'s, str>, logs: &'t mut log::Logger) -> Result<RenderCell<'s>, Error> {
         RenderCell::try_new(data, |data| {
             let mut p = Parser::new();
-            {
-                let lex = Token::lexer(&data);
-                let tks = lex.collect::<Vec<_>>();
-                event!(Level::TRACE, ?tks, "LEX");
-            }
             let mut lex = Token::lexer(data);
             while let Some(tk) = lex.next() {
                 p.parse(tk)
                     .map_err(|_| {
                         Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-                    })
-                    .in_current_span()?
+                    })?
             }
 
             let items = p.end_of_input()
@@ -4746,12 +4689,10 @@ pub mod frontend {
                     Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
                 })?;
 
-            event!(Level::TRACE, ?items, "PARSE");
             eprintln!("PARSE {items:#?}");
 
             let mut val = eval(&items[..]);
 
-            event!(Level::TRACE, ?val, "EVAL");
             eprintln!("EVAL {val:#?}");
 
             let mut scopes = HashMap::new();
@@ -4765,7 +4706,6 @@ pub mod frontend {
             let hcg = calculate_hcg(&val)?;
             let vcg = calculate_vcg(&val, &hcg, logs)?;
 
-            event!(Level::TRACE, ?val, "HCG");
             eprintln!("HCG {hcg:#?}");
 
             let Vcg{vert, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
@@ -4832,7 +4772,7 @@ pub mod frontend {
                         format!("{to}"),
                     )
                 })
-            }).map_err(|err| err.in_current_span())?;
+            })?;
 
             fixup_hcg_rank(&hcg, &mut paths_by_rank);
 
@@ -4847,7 +4787,7 @@ pub mod frontend {
                         format!("{to}"),
                     )
                 })
-            }).map_err(|err| err.in_current_span())?;
+            })?;
 
             let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, hcg, logs)?;
 
@@ -5086,9 +5026,6 @@ pub mod frontend {
     pub mod dom {
         use std::{borrow::Cow};
 
-        use tracing::{instrument, event};
-        use tracing_error::InstrumentError;
-
         use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{LocSol, HopSol}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
 
         use super::log::{self, Log};
@@ -5133,10 +5070,7 @@ pub mod frontend {
             }
         }
 
-        #[instrument(skip(data))]
         pub fn draw(data: String) -> Result<Drawing, Error> {
-            use crate::graph_drawing::frontend::log;
-
             let mut logs = log::Logger::new();
 
             let render_cell = super::render(Cow::Owned(data), &mut logs)?;
@@ -5178,9 +5112,9 @@ pub mod frontend {
 
             // Log the resolved value
             // logs.log_string("VAL", val);
-            val.log("VAL".into(), &mut logs).map_err(|err| err.in_current_span())?;
+            val.log("VAL".into(), &mut logs)?;
 
-            loc_to_node.log((), &mut logs).map_err(|err| err.in_current_span())?;
+            loc_to_node.log((), &mut logs)?;
 
             let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
                 Obj::Node(ObjNode{vl: node}) => node.to_string().names(),
@@ -5193,15 +5127,15 @@ pub mod frontend {
                 l2n(loc_ix.0, loc_ix.1)
             };
 
-            // sol_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            // sol_by_hop.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            locix_by_layout_sol.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            solved_locs.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            // size_by_loc.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            // size_by_hop.log(l2n, &mut logs).map_err(|err| err.in_current_span())?;
-            horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs).map_err(|err| err.in_current_span())?;
-            vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs).map_err(|err| err.in_current_span())?;
-            geometry_solution.log(ls2n, &mut logs).map_err(|err| err.in_current_span())?;
+            // sol_by_loc.log(l2n, &mut logs)?;
+            // sol_by_hop.log(l2n, &mut logs)?;
+            locix_by_layout_sol.log(l2n, &mut logs)?;
+            solved_locs.log(l2n, &mut logs)?;
+            // size_by_loc.log(l2n, &mut logs)?;
+            // size_by_hop.log(l2n, &mut logs)?;
+            horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs)?;
+            vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs)?;
+            geometry_solution.log(ls2n, &mut logs)?;
 
             let mut logs = logs.to_vec();
             logs.reverse();
@@ -5520,7 +5454,6 @@ pub mod frontend {
                 Node::Svg{z_index, ..} => *z_index,
             });
 
-            event!(tracing::Level::TRACE, %viewbox_width, ?nodes, "NODES");
             eprintln!("NODES: {nodes:#?}");
 
             Ok(Drawing{
@@ -5981,7 +5914,7 @@ mod tests {
 
     use super::{error::Error};
     use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, index::{VerticalRank, OriginalHorizontalRank}, geometry::calculate_sols, error::Kind, eval, frontend::log::Logger}};
-    use tracing_error::InstrumentResult;
+
     use logos::Logos;
 
     #[test]
@@ -5995,15 +5928,13 @@ mod tests {
             p.parse(tk)
                 .map_err(|_| {
                     Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-                })
-                .in_current_span()?
+                })?
         }
 
         let v: Vec<Item> = p.end_of_input()
             .map_err(|_| {
                 Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-            })
-            .in_current_span()?;
+            })?;
 
         let val = eval::eval(&v[..]);
 

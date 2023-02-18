@@ -17,13 +17,7 @@ use futures::StreamExt;
 // use dioxus_desktop::use_window;
 use tao::dpi::LogicalSize;
 
-use color_spantrace::colorize;
-
 use indoc::indoc;
-
-use tracing::{event, Level};
-use tracing_error::{ExtractSpanTrace};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const PLACEHOLDER: &str = indoc!("
 a b: c / d
@@ -134,25 +128,18 @@ pub fn parse_highlights<'s>(data: &'s str) -> Result<Val<Cow<'s, str>>, Error> {
     use depict::graph_drawing::eval::{eval, index, resolve};
     use logos::Logos;
     use std::collections::HashMap;
-    use tracing_error::InstrumentResult;
 
     if data.trim().is_empty() {
         return Ok(Val::default())
     }
 
     let mut p = Parser::new();
-    {
-        let lex = Token::lexer(data);
-        let tks = lex.collect::<Vec<_>>();
-        event!(Level::TRACE, ?tks, "HIGHLIGHT LEX");
-    }
     let mut lex = Token::lexer(data);
     while let Some(tk) = lex.next() {
         p.parse(tk)
             .map_err(|_| {
                 Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-            })
-            .in_current_span()?
+            })?
     }
 
     let items = p.end_of_input()
@@ -160,12 +147,10 @@ pub fn parse_highlights<'s>(data: &'s str) -> Result<Val<Cow<'s, str>>, Error> {
             Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
         })?;
 
-    event!(Level::TRACE, ?items, "HIGHLIGHT PARSE");
     eprintln!("HIGHLIGHT PARSE {items:#?}");
 
     let mut val = eval(&items[..]);
 
-    event!(Level::TRACE, ?val, "HIGHLIGHT EVAL");
     eprintln!("HIGHLIGHT EVAL {val:#?}");
 
     let mut scopes = HashMap::new();
@@ -213,15 +198,10 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             drawing_sender.send(drawing);
                         },
                         Ok(Err(err)) => {
-                            if let Some(st) = err.span_trace() {
-                                let st_col = colorize(st);
-                                event!(Level::ERROR, ?err, %st_col, "DRAWING ERROR SPANTRACE");
-                            } else {
-                                event!(Level::ERROR, ?err, "DRAWING ERROR");
-                            }
+                            eprintln!("DRAWING ERROR: {err:#?}");
                         }
                         Err(_) => {
-                            event!(Level::ERROR, ?nodes, "PANIC");
+                            eprintln!("PANIC: {nodes:#?}");
                         }
                     }
                 }
@@ -368,7 +348,6 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         spellcheck: "false",
                         // placeholder: "",
                         oninput: move |e| {
-                            event!(Level::TRACE, "INPUT");
                             model.set(e.value.clone());
                             model_sender.send(e.value.clone());
                         },
@@ -387,7 +366,6 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         "autocapitalize": "off",
                         spellcheck: "false",
                         oninput: move |e| {
-                            event!(Level::TRACE, "HIGHLIGHT INPUT");
                             highlight.set(e.value.clone());
                         }
                     }
@@ -504,12 +482,6 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 }
 
 pub fn main() -> io::Result<()> {
-    tracing_subscriber::Registry::default()
-        .with(tracing_error::ErrorLayer::default())
-        .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     let mut menu_bar = tao::menu::MenuBar::new();
     let mut app_menu = tao::menu::MenuBar::new();
     let mut edit_menu = tao::menu::MenuBar::new();

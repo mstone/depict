@@ -1,12 +1,9 @@
 #![feature(c_variadic)]
 
-use std::{default::Default, panic::catch_unwind, io::BufWriter, borrow::Cow};
+use std::{default::Default, panic::catch_unwind};
 
 use depict::{graph_drawing::{
-    error::{Kind, Error, OrErrExt},
-    layout::{Obj}, 
-    index::{LocSol, HopSol, VerticalRank, OriginalHorizontalRank},
-    frontend::dom::{draw, Drawing, Label, Node},
+    frontend::dom::{draw, Drawing},
     frontend::dioxus::{render, as_data_svg}
 }};
 
@@ -65,8 +62,8 @@ unsafe extern "C" fn printf(format: *const ::std::os::raw::c_char, mut args: ...
     #[cfg(not(target_family="wasm"))]
     let format = format as *const i8;
     let bytes_written = printf_compat::format(
-        format, 
-        args.as_va_list(), 
+        format,
+        args.as_va_list(),
         printf_compat::output::fmt_write(&mut s)
     );
     log::info!("{s}");
@@ -162,7 +159,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     // let drawing = use_state(&cx, || serde_json::from_str::<DrawResp>(PLACEHOLDER_DRAWING).unwrap().drawing);
     let drawing = use_state(&cx, || draw(PLACEHOLDER.into()).unwrap());
-    
+
     let drawing_client = use_coroutine(&cx, |mut rx: UnboundedReceiver<String>| {
         to_owned![drawing];
         async move {
@@ -224,14 +221,14 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         autofocus: "true",
                         spellcheck: "false",
                         // placeholder: "",
-                        oninput: move |e| { 
+                        oninput: move |e| {
                             event!(Level::TRACE, "INPUT");
                             drawing_client.send(e.value.clone());
                         },
                         "{model}"
                     }
                 }
-                div { 
+                div {
                     style: "display: flex; flex-direction: row; justify-content: space-between;",
                     div {
                         style: "font-size: 0.875rem; line-height: 1.25rem; width: calc(100% - 8rem);",
@@ -449,7 +446,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             "Licenses",
                         },
                         div {
-                            (depict::licenses::LICENSES.dirs().map(|dir| {
+                            depict::licenses::LICENSES.dirs().map(|dir| {
                                 let path = dir.path().display();
                                 cx.render(rsx!{
                                     div {
@@ -476,7 +473,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                                         }
                                     }
                                 })
-                            }))
+                            })
                         }
                     }
                 }
@@ -500,7 +497,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                 nodes
             }
         }
-    })   
+    })
 }
 
 fn main() {
@@ -508,11 +505,11 @@ fn main() {
     console_error_panic_hook::set_once();
 
     dioxus_web::launch_with_props(
-        app, 
-        AppProps { 
-        }, 
+        app,
+        AppProps {
+        },
         dioxus_web::Config::new()
-    ); 
+    );
 }
 
 

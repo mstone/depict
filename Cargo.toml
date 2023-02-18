@@ -27,7 +27,6 @@ enum-kinds = "0.5.1"
 include_dir = "0.7"
 itertools = "0.10"
 logos = "0.12"
-miette = { version = "4", features = [ "fancy" ] }
 ordered-float = "3"
 petgraph = "0.6"
 pomelo = { version = "0.1" }
@@ -35,8 +34,6 @@ self_cell = "0.10.2"
 sorted-vec = "0.7"
 svg = "0.10"
 thiserror = "1.0"
-tracing = "0.1"
-tracing-error = { version = "0.2", features = [ "traced-error" ] }
 typed-index-collections = "3.0"
 
 # osqp
@@ -54,10 +51,10 @@ path = "src/lib.rs"
 [workspace]
 members = [
   "dioxus",
-  "objc",
+  #"objc",
   "parse",
-  "server",
-  "tikz",
+  #"server",
+  #"tikz",
   "web",
 ]
 
