@@ -1065,15 +1065,17 @@ pub mod eval {
     mod tests {
         use super::*;
         use crate::parser::Item;
+        use pretty_assertions::{assert_eq, assert_ne};
 
         const a: &'static str = "a";
         const b: &'static str = "b";
         const c: &'static str = "c";
         const d: &'static str = "d";
         const dash: &'static str = "-";
+        fn r<'s>() -> Val<Cow<'s, str>> { Val::Process{name: Some("root".into()), label: None, body: None} }
         fn p<'s>() -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: None} }
         fn l<'s>(x: &'static str) -> Val<Cow<'s, str>> { p().set_label(Some(x.into())).clone() }
-        fn mp<'s>(p: &Val<Cow<'s, str>>) -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: Some(Body::All(vec![p.clone()]))}}
+        fn mp<'s>(p: &Val<Cow<'s, str>>) -> Val<Cow<'s, str>> { Val::Process{name: Some("root".into()), label: None, body: Some(Body::All(vec![p.clone()]))}}
         fn t<'s>(x: &'static str) -> Item<'s> { Item::Text(Cow::from(x)) }
         fn vi<'s>(x: &[Item<'static>]) -> Vec<Item<'s>> { x.iter().cloned().collect::<Vec<_>>() }
         fn sq<'s>(x: &[Item<'static>]) -> Item<'s>{ Item::Sq(vi(x)) }
@@ -1084,7 +1086,7 @@ pub mod eval {
         #[test]
         fn test_eval_empty() {
             //
-            assert_eq!(eval(&[]), p());
+            assert_eq!(eval(&[]), r());
         }
 
 
@@ -5957,28 +5959,33 @@ mod tests {
         assert_eq!(condensed.node_weight(cvx), Some(&Cow::from("Ab")));
         assert_eq!(condensed.node_weight(cwx), Some(&Cow::from("Ac")));
 
-        let distance = |src: &Cow<str>, dst: &Cow<str>, logs: &mut Logger| {
-            if !containers.contains(src) {
-                -1
-            } else {
-                if nodes_by_container[src].contains(dst) {
-                    0
+        let distance = {
+            let containers = &containers;
+            let nodes_by_container = &nodes_by_container;
+            let container_depths = &container_depths;
+            |src: Cow<str>, dst: Cow<str>, logs: &mut Logger| {
+                if !containers.contains(&src) {
+                    -1
                 } else {
-                    -(container_depths[src] as isize)
+                    if nodes_by_container[&src].contains(&dst) {
+                        0
+                    } else {
+                        -(container_depths[&src] as isize)
+                    }
                 }
             }
         };
         let paths_by_rank = rank(&condensed, distance, &mut logs)?;
-        assert_eq!(paths_by_rank[&VerticalRank(3)][0], (Cow::from("root"), Cow::from("Ac")));
+        assert_eq!(paths_by_rank[&VerticalRank(2)][0], (Cow::from("Aa"), Cow::from("Ac")));
 
         let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg, &mut logs)?;
         let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
-        let nAa = Obj::Node(Cow::from("Aa"));
-        let nAb = Obj::Node(Cow::from("Ab"));
-        let nAc = Obj::Node(Cow::from("Ac"));
-        let nXx = Obj::Node(Cow::from("Xx"));
-        let nXy = Obj::Node(Cow::from("Xy"));
-        let nXz = Obj::Node(Cow::from("Xz"));
+        let nAa = Obj::Node(ObjNode{ vl: Cow::from("Aa") });
+        let nAb = Obj::Node(ObjNode{ vl: Cow::from("Ab") });
+        let nAc = Obj::Node(ObjNode{ vl: Cow::from("Ac") });
+        let nXx = Obj::Node(ObjNode{ vl: Cow::from("Xx") });
+        let nXy = Obj::Node(ObjNode{ vl: Cow::from("Xy") });
+        let nXz = Obj::Node(ObjNode{ vl: Cow::from("Xz") });
         let lAa = node_to_loc[&nAa];
         let lAb = node_to_loc[&nAb];
         let lAc = node_to_loc[&nAc];
@@ -6006,34 +6013,25 @@ mod tests {
         assert_eq!(nXz2, &nXz);
 
 
-        assert_eq!(hops_by_level.len(), 3);
+        assert_eq!(hops_by_level.len(), 2);
         let h0 = &hops_by_level[&VerticalRank(0)];
         let h1 = &hops_by_level[&VerticalRank(1)];
-        let h2 = &hops_by_level[&VerticalRank(2)];
         let ohr = OriginalHorizontalRank;
         let vr = VerticalRank;
-        let lRr = &node_to_loc[&Obj::Node("root".into())];
-        let h0A: Hop<Cow<str>> = Hop { mhr: lRr.1, nhr: lAa.1, vl: "root".into(), wl: "Aa".into(), lvl: lRr.0 };
-        let h0X: Hop<Cow<str>> = Hop { mhr: lRr.1, nhr: lXx.1, vl: "root".into(), wl: "Xx".into(), lvl: lRr.0 };
-        let h1A: Hop<Cow<str>> = Hop { mhr: lAa.1, nhr: lAb.1, vl: "Aa".into(), wl: "Ab".into(), lvl: lAa.0 };
-        let h1X: Hop<Cow<str>> = Hop { mhr: lXx.1, nhr: lXy.1, vl: "Xx".into(), wl: "Xy".into(), lvl: lXx.0 };
-        let h2A: Hop<Cow<str>> = Hop { mhr: lAb.1, nhr: lAc.1, vl: "Ab".into(), wl: "Ac".into(), lvl: lAb.0 };
-        let h2X: Hop<Cow<str>> = Hop { mhr: lXy.1, nhr: lXz.1, vl: "Xy".into(), wl: "Xz".into(), lvl: lXy.0 };
+        let h0A: Hop<Cow<str>> = Hop { mhr: lAa.1, nhr: lAb.1, vl: "Aa".into(), wl: "Ab".into(), lvl: lAa.0 };
+        let h0X: Hop<Cow<str>> = Hop { mhr: lXx.1, nhr: lXy.1, vl: "Xx".into(), wl: "Xy".into(), lvl: lXx.0 };
+        let h1A: Hop<Cow<str>> = Hop { mhr: lAb.1, nhr: lAc.1, vl: "Ab".into(), wl: "Ac".into(), lvl: lAb.0 };
+        let h1X: Hop<Cow<str>> = Hop { mhr: lXy.1, nhr: lXz.1, vl: "Xy".into(), wl: "Xz".into(), lvl: lXy.0 };
         let mut s0 = vec![h0A.clone(), h0X.clone()];
         let mut s1 = vec![h1A.clone(), h1X.clone()];
-        let mut s2 = vec![h2A.clone(), h2X.clone()];
         s0.sort();
         s1.sort();
-        s2.sort();
         let mut h0 = h0.iter().cloned().collect::<Vec<_>>();
         h0.sort();
         let mut h1 = h1.iter().cloned().collect::<Vec<_>>();
         h1.sort();
-        let mut h2 = h2.iter().cloned().collect::<Vec<_>>();
-        h2.sort();
         assert_eq!(&h0[..], &s0[..]);
         assert_eq!(&h1[..], &s1[..]);
-        assert_eq!(&h2[..], &s2[..]);
 
         let layout_solution = minimize_edge_crossing(&vcg, &layout_problem)?;
         let LayoutSolution{crossing_number, solved_locs} = &layout_solution;

@@ -17,6 +17,7 @@ server = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 
 [dev-dependencies]
+pretty_assertions = "1"
 proptest = "1"
 
 [dependencies]
