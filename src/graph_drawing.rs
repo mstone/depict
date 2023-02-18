@@ -2503,7 +2503,16 @@ pub mod layout {
         pub fn as_vl(&self) -> Option<&V> {
             match self {
                 Obj::Node(ObjNode{vl}) => Some(vl),
-                Obj::Hop(_) => None,
+                Obj::Hop(ObjHop{vl, ..}) => Some(vl),
+                Obj::Container(ObjContainer{vl}) => Some(vl),
+                Obj::Border(_) => None,
+            }
+        }
+
+        pub fn as_wl(&self) -> Option<&V> {
+            match self {
+                Obj::Node(ObjNode{vl}) => Some(vl),
+                Obj::Hop(ObjHop{wl, ..}) => Some(wl),
                 Obj::Container(ObjContainer{vl}) => Some(vl),
                 Obj::Border(_) => None,
             }
@@ -4245,14 +4254,14 @@ pub mod geometry {
 
             // eprintln!("con_vxmap: {:#?}", con_vxmap);
             // eprintln!("con: {}", Dot::new(&con_graph));
-            // eprintln!("EDGE: {src},{src_guide_sol} -> {dst},{dst_guide_sol}, {edge}");
+            eprintln!("EDGE: {src},{src_guide_sol} -> {dst},{dst_guide_sol}, {edge}");
             let src_ix = *con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}"));
             let dst_ix = *con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}"));
             con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(edge.margin.0)})));
 
             if let Some(hop) = edge.hop {
                 let vl = src.as_vl().unwrap().clone();
-                let wl = dst.as_vl().unwrap().clone();
+                let wl = dst.as_wl().unwrap().clone();
                 let src_sol = AnySol::S(sol_by_hop[&(hop.src.0, hop.src.1, vl.clone(), wl.clone())]);
                 let dst_sol = AnySol::S(sol_by_hop[&(hop.dst.0, hop.dst.1, vl.clone(), wl.clone())]);
                 let hop_src_ix = or_insert(&mut con_graph, &mut con_vxmap, src_sol);
