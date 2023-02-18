@@ -5921,6 +5921,19 @@ pub mod frontend {
             })
         }
     }
+
+
+    #[cfg(test)]
+    mod tests {
+        fn check(model: &str) {
+            super::dom::draw(model.into());
+        }
+
+        #[test]
+        pub fn test_long_hop() {
+            check("a b c; a c");
+        }
+    }
 }
 
 #[cfg(test)]
