@@ -1629,7 +1629,6 @@ pub mod layout {
 
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::algo::{floyd_warshall, dijkstra};
-    use petgraph::dot::Dot;
     use petgraph::graph::{Graph, NodeIndex, EdgeReference};
     use petgraph::visit::{EdgeRef, IntoNodeReferences};
     use sorted_vec::SortedVec;
@@ -3360,10 +3359,10 @@ pub mod geometry {
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::Graph;
     use petgraph::algo::is_cyclic_directed;
-    use petgraph::dot::Dot;
     use petgraph::visit::{EdgeRef};
 
     use crate::graph_drawing::layout::ObjNode;
+    #[allow(unused_imports)]
     use crate::graph_drawing::osqp::{as_diag_csc_matrix, print_tuples, as_scipy, as_numpy};
 
     use super::error::{LayoutError};
@@ -3970,6 +3969,75 @@ pub mod geometry {
         }
     }
 
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+    pub struct GeomLabel<V: Graphic, E: Graphic> {
+        vl: V,
+        wl: V,
+        rel: E,
+    }
+
+    impl<V: Graphic, E: Graphic> Display for GeomLabel<V, E> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Label({}, {}, {})", self.vl, self.wl, self.rel)
+        }
+    }
+
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+    pub enum Geom<V: Graphic, E: Graphic> {
+        Node(Obj<V>),
+        Hop(Obj<V>),
+        Container(Obj<V>),
+        Border(Obj<V>),
+        Label(GeomLabel<V, E>),
+    }
+
+    impl<V: Graphic, E: Graphic> From<Obj<V>> for Geom<V, E> {
+        fn from(value: Obj<V>) -> Self {
+            match value {
+                Obj::Node(_) => Geom::Node(value),
+                Obj::Hop(_) => Geom::Hop(value),
+                Obj::Container(_) => Geom::Container(value),
+                Obj::Border(_) => Geom::Border(value),
+                Obj::Border(_) => unreachable!(),
+            }
+        }
+    }
+
+    impl<V: Graphic, E: Graphic> Geom<V, E> {
+        fn as_obj(&self) -> Option<&Obj<V>> {
+            match self {
+                Geom::Node(v) => Some(v),
+                Geom::Hop(v) => Some(v),
+                Geom::Container(v) => Some(v),
+                Geom::Border(v) => Some(v),
+                Geom::Label(_) => None,
+            }
+        }
+
+        pub fn as_vl(&self) -> Option<&V> {
+            match self {
+                Geom::Node(v) | Geom::Hop(v) | Geom::Container(v) | Geom::Border(v) => v.as_vl(),
+                Geom::Label(label) => Some(&label.vl),
+            }
+        }
+
+        pub fn as_wl(&self) -> Option<&V> {
+            match self {
+                Geom::Node(v) | Geom::Hop(v) | Geom::Container(v) | Geom::Border(v) => v.as_wl(),
+                Geom::Label(label) => Some(&label.wl),
+            }
+        }
+    }
+
+    impl<V: Graphic, E: Graphic> Display for Geom<V, E> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Geom::Node(v) | Geom::Hop(v) | Geom::Container(v) | Geom::Border(v) => write!(f, "{v}"),
+                Geom::Label(label) => write!(f, "{label}"),
+            }
+        }
+    }
+
     #[derive(Clone, Copy, Debug)]
     struct GeomHop{
         initial: bool,
@@ -4037,10 +4105,11 @@ pub mod geometry {
     ) -> Result<(OptimizationProblem<AnySol, OrderedFloat<f64>>, OptimizationProblem<AnySol, OrderedFloat<f64>>), Error>
     where
         V: Graphic + Len + std::cmp::PartialEq<str>,
-        E: Graphic + std::cmp::PartialEq<&'static str>,
+        E: Graphic + std::cmp::PartialEq<str>,
     {
         let containers = &vcg.containers;
         let nodes_by_container = &vcg.nodes_by_container;
+        let vert_edge_labels = &vcg.vert_edge_labels;
         let loc_to_node = &layout_problem.loc_to_node;
         let node_to_loc = &layout_problem.node_to_loc;
         let hops_by_edge = &layout_problem.hops_by_edge;
@@ -4048,16 +4117,17 @@ pub mod geometry {
         let size_by_loc = &geometry_problem.size_by_loc;
         let sol_by_loc = &geometry_problem.sol_by_loc;
         let sol_by_hop = &geometry_problem.sol_by_hop;
+        let size_by_hop = &geometry_problem.size_by_hop;
 
         let of = OrderedFloat::<f64>::from;
 
         // let obj_count = all_locs.len() + all_hops.len();
         // 1. Record how all objects are positioned relative to one another.
-        let mut obj_graph = Graph::<Obj<V>, ObjEdge>::new();
+        let mut obj_graph = Graph::<Geom<V, E>, ObjEdge>::new();
         let mut obj_vxmap = HashMap::new();
         let mut solved_vxmap = HashMap::new();
         for (loc_ix, obj) in loc_to_node.iter() {
-            let ix = or_insert(&mut obj_graph, &mut obj_vxmap, obj.clone());
+            let ix = or_insert(&mut obj_graph, &mut obj_vxmap, obj.clone().into());
             let shr = solved_locs[&loc_ix.0][&loc_ix.1];
             solved_vxmap.insert((loc_ix.0, shr), ix);
         }
@@ -4096,7 +4166,8 @@ pub mod geometry {
         }
 
         for er in vcg.vert.edge_references() {
-            if *er.weight() != "actuates" && *er.weight() != "senses" && *er.weight() != "fake" {
+            let ew = er.weight();
+            if ew != "actuates" && ew != "senses" && ew != "fake" {
                 continue;
             }
             let src = vcg.vert.node_weight(er.source()).unwrap();
@@ -4105,6 +4176,19 @@ pub mod geometry {
             let tgt_obj = Obj::from_vl(tgt, containers);
             let src_loc = node_to_loc[&src_obj];
             let tgt_loc = node_to_loc[&tgt_obj];
+            let src_ix = solved_vxmap[&(src_loc.0, solved_locs[&src_loc.0][&src_loc.1])];
+            let dst_ix = solved_vxmap[&(tgt_loc.0, solved_locs[&tgt_loc.0][&tgt_loc.1])];
+
+            let default_hop_size = HopSize{width: 0., left: 20., right: 20., height: 50., top: 0., bottom: 0.};
+            let hop_size = &size_by_hop.get(&(src_loc.0, src_loc.1, src.clone(), tgt.clone())).unwrap_or(&default_hop_size);
+            let label_width = match ew {
+                x if x == "actuates" => hop_size.left,
+                x if x == "senses" => hop_size.right,
+                _ => 20.,
+            };
+            // let label = vert_edge_labels.get(src).and_then(|dsts| dsts.get(tgt)).and_then(|rels| rels.get(ew));
+            let label_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Label(GeomLabel{vl: src.clone(), wl: tgt.clone(), rel: ew.clone()}));
+
             let hops = &hops_by_edge.get(&(src.clone(), tgt.clone()));
             let hops = if hops.is_none() {
                 vec![src_loc, tgt_loc]
@@ -4121,7 +4205,9 @@ pub mod geometry {
                     let initial = cur == &src_loc;
                     let terminal = nxt == &tgt_loc;
                     let geom_hop = GeomHop{initial, terminal, src: *cur, dst: *nxt};
-                    obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], obj_edge(Direction::Vertical, format!("vert-edge: {}", *er.weight()), Some(geom_hop), 40.));
+                    obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), Some(geom_hop.clone()), 40.));
+                    obj_graph.add_edge(solved_vxmap[&src], label_ix, obj_edge(Direction::Vertical, ew.to_string(), Some(geom_hop.clone()), 10.));
+                    obj_graph.add_edge(label_ix, solved_vxmap[&dst], obj_edge(Direction::Vertical, ew.to_string(), Some(geom_hop.clone()), 10.));
                 }
             }
         }
@@ -4209,25 +4295,27 @@ pub mod geometry {
             let src = obj_graph.node_weight(er.source()).unwrap();
             let dst = obj_graph.node_weight(er.target()).unwrap();
             if matches!((src, dst),
-                (Obj::Container(ObjContainer{vl: container}),
-                    Obj::Node(ObjNode{vl: wl}) | Obj::Container(ObjContainer{vl: wl}))
+                (Geom::Container(Obj::Container(ObjContainer{vl: container})),
+                    Geom::Node(Obj::Node(ObjNode{vl: wl})) | Geom::Container(Obj::Container(ObjContainer{vl: wl})))
                     if nodes_by_container[container].contains(wl)) {
                 continue;
             }
-            let src_loc_ix = node_to_loc[src];
-            let dst_loc_ix = node_to_loc[dst];
+            let Some(src_obj) = src.as_obj() else { continue };
+            let Some(dst_obj) = dst.as_obj() else { continue };
+            let src_loc_ix = node_to_loc[src_obj];
+            let dst_loc_ix = node_to_loc[dst_obj];
 
             let src_guide_sol = match (src, edge.dir) {
-                (Obj::Node(_) | Obj::Container(_), Direction::Horizontal) => {
+                (Geom::Node(_) | Geom::Container(_), Direction::Horizontal) => {
                     AnySol::R(sol_by_loc[&src_loc_ix])
                 },
-                (Obj::Node(_) | Obj::Container(_) | Obj::Hop(_), Direction::Vertical) => {
+                (Geom::Node(_) | Geom::Container(_) | Geom::Hop(_), Direction::Vertical) => {
                     AnySol::B(sol_by_loc[&src_loc_ix])
                 },
-                (Obj::Border(ObjBorder{ border: Border{vl, ..}}), Direction::Horizontal) => {
+                (Geom::Border(Obj::Border(ObjBorder{ border: Border{vl, ..}})), Direction::Horizontal) => {
                     AnySol::R(sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]])
                 },
-                (Obj::Hop(ObjHop{vl, wl, ..}), Direction::Horizontal) => {
+                (Geom::Hop(Obj::Hop(ObjHop{vl, wl, ..})), Direction::Horizontal) => {
                     AnySol::S(sol_by_hop[&(src_loc_ix.0, src_loc_ix.1, vl.clone(), wl.clone())])
                 },
                 _ => {
@@ -4235,16 +4323,16 @@ pub mod geometry {
                 }
             };
             let dst_guide_sol = match (dst, edge.dir) {
-                (Obj::Node(_) | Obj::Container(_), Direction::Horizontal) => {
+                (Geom::Node(_) | Geom::Container(_), Direction::Horizontal) => {
                     AnySol::L(sol_by_loc[&dst_loc_ix])
                 },
-                (Obj::Node(_) | Obj::Container(_) | Obj::Hop(_), Direction::Vertical) => {
+                (Geom::Node(_) | Geom::Container(_) | Geom::Hop(_), Direction::Vertical) => {
                     AnySol::T(sol_by_loc[&dst_loc_ix])
                 },
-                (Obj::Border(ObjBorder{border: Border{vl, ..}}), Direction::Horizontal) => {
+                (Geom::Border(Obj::Border(ObjBorder{border: Border{vl, ..}})), Direction::Horizontal) => {
                     AnySol::L(sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]])
                 },
-                (Obj::Hop(ObjHop{vl, wl, ..}), Direction::Horizontal) => {
+                (Geom::Hop(Obj::Hop(ObjHop{vl, wl, ..})), Direction::Horizontal) => {
                     AnySol::S(sol_by_hop[&(dst_loc_ix.0, dst_loc_ix.1, vl.clone(), wl.clone())])
                 },
                 _ => {
@@ -4339,7 +4427,7 @@ pub mod geometry {
     fn as_svg<V: Display, E: Display>(graph: &Graph<V, E>) -> Option<String> {
         use std::{process::{Stdio, Command}, io::Write};
 
-        let dot = format!("{}", Dot::new(graph));
+        let dot = format!("{}", petgraph::dot::Dot::new(graph));
         let mut child = Command::new("dot")
             .arg("-Tsvg")
             .stdin(Stdio::piped())
