@@ -2116,7 +2116,6 @@ pub mod layout {
 
         // to ensure that nodes in horizontal relationships have correct vertical positioning,
         // we add implied edges based on horizontal relationships and containment relationships.
-        let sorted_nodes_by_container = vcg.nodes_by_container_transitive.iter().collect::<BTreeMap<_, _>>();
         let sorted_constraints = hcg.constraints.iter().collect::<BTreeSet<_>>();
         // eprintln!("NODES_BY_CONTAINER: {:#?}", sorted_nodes_by_container);
         // eprintln!("PRELIMINARY VERT: {:#?}", vcg.vert);
@@ -2616,7 +2615,7 @@ pub mod layout {
                             format!("{loc}"),
                         )
                     },
-                    Obj::Hop(loc@ObjHop{lvl, mhr, vl, wl}) => {
+                    Obj::Hop(loc@ObjHop{lvl, vl, wl, ..}) => {
                         l.log_pair(
                             "Loc",
                             loc_ix.names(),
@@ -3462,9 +3461,9 @@ pub mod geometry {
     use crate::graph_drawing::frontend::log::{self, names, Names};
 
     impl<V: Graphic> log::Log for HashMap<Obj<V>, VarRank> {
-        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
+        fn log(&self, _cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("obj_by_varrank", "ObjByVarrank", self.iter(), |obj, sol, l| {
-                let mut src_names = obj.names();
+                let src_names = obj.names();
                 l.log_pair(
                     "Varrank",
                     names![sol],
@@ -3542,7 +3541,7 @@ pub mod geometry {
         let mut varrank_by_obj = HashMap::new();
         let mut loc_by_varrank = HashMap::new();
 
-        for (ovr, ohr, shr, obj) in solved_locs
+        for (ovr, ohr, _shr, obj) in solved_locs
             .iter()
             .flat_map(|(ovr, nodes)| nodes
                 .iter()
@@ -3552,7 +3551,7 @@ pub mod geometry {
             loc_by_varrank.insert(rank, (ovr, ohr));
         }
 
-        for (mhr, nhr, vl, wl, lvl) in hops_by_level
+        for (mhr, _nhr, vl, wl, lvl) in hops_by_level
             .iter()
             .flat_map(|h|
                 h.1.iter().map(|Hop{mhr, nhr, vl, wl, lvl}| {
@@ -3893,22 +3892,11 @@ pub mod geometry {
                 Obj::Hop(_) => Geom::Hop(value),
                 Obj::Container(_) => Geom::Container(value),
                 Obj::Border(_) => Geom::Border(value),
-                Obj::Border(_) => unreachable!(),
             }
         }
     }
 
     impl<V: Graphic, E: Graphic> Geom<V, E> {
-        fn as_obj(&self) -> Option<&Obj<V>> {
-            match self {
-                Geom::Node(v) => Some(v),
-                Geom::Hop(v) => Some(v),
-                Geom::Container(v) => Some(v),
-                Geom::Border(v) => Some(v),
-                Geom::Label(_) => None,
-            }
-        }
-
         pub fn as_vl(&self) -> Option<&V> {
             match self {
                 Geom::Node(v) | Geom::Hop(v) | Geom::Container(v) | Geom::Border(v) => v.as_vl(),
@@ -3931,14 +3919,6 @@ pub mod geometry {
                 Geom::Label(label) => write!(f, "{label}"),
             }
         }
-    }
-
-    #[derive(Clone, Copy, Debug)]
-    struct GeomHop{
-        initial: bool,
-        terminal: bool,
-        src: LocIx,
-        dst: LocIx,
     }
 
     #[derive(Clone, Debug)]
@@ -4003,7 +3983,6 @@ pub mod geometry {
     {
         let containers = &vcg.containers;
         let nodes_by_container = &vcg.nodes_by_container;
-        let vert_edge_labels = &vcg.vert_edge_labels;
         let loc_to_node = &layout_problem.loc_to_node;
         let node_to_loc = &layout_problem.node_to_loc;
         let hops_by_edge = &layout_problem.hops_by_edge;
@@ -4072,16 +4051,6 @@ pub mod geometry {
             let src_ix = solved_vxmap[&(src_loc.0, solved_locs[&src_loc.0][&src_loc.1])];
             let dst_ix = solved_vxmap[&(dst_loc.0, solved_locs[&dst_loc.0][&dst_loc.1])];
 
-            let default_hop_size = HopSize{width: 0., left: 20., right: 20., height: 10., top: 0., bottom: 0.};
-            let hop_size = &size_by_hop.get(&(src_loc.0, src_loc.1, src.clone(), dst.clone())).unwrap_or(&default_hop_size);
-            let label_width = match ew {
-                x if x == "actuates" => hop_size.left,
-                x if x == "senses" => hop_size.right,
-                _ => 20.,
-            };
-            // let label = vert_edge_labels.get(src).and_then(|dsts| dsts.get(dst)).and_then(|rels| rels.get(ew));
-            let label_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Label(GeomLabel{vl: src.clone(), wl: dst.clone(), rel: ew.clone()}));
-
             let hops = &hops_by_edge.get(&(src.clone(), dst.clone()));
             let hops = if hops.is_none() {
                 vec![src_loc, dst_loc]
@@ -4093,7 +4062,6 @@ pub mod geometry {
             };
             let mut prev_hop_ix = None;
             for hop in hops.iter() {
-                let hop_loc = (hop.0, solved_locs[&hop.0][&hop.1]);
                 let initial = hop == &src_loc;
                 let terminal = hop == &dst_loc;
                 let hop_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: src.clone(), wl: dst.clone(), lvl: hop.0, mhr: hop.1})));
@@ -4441,7 +4409,7 @@ pub mod geometry {
         v: &Vars<AnySol>,
         solutions: &Vec<(Var<AnySol>, Val)>,
         kind: AnySolKind,
-        name: Cow<str>,
+        _name: Cow<str>,
         extract_index: impl Fn(AnySol) -> Idx,
     ) -> BTreeMap<Idx, Val> {
         let mut vs = v.iter()
@@ -5238,8 +5206,6 @@ pub mod frontend {
                     let mut hn0 = vec![];
                     let mut estimated_size0 = None;
 
-                    let ndv = nesting_depths[vl] as f64;
-
                     let fs = container_depths.get(vl).copied().and_then(|d| d.checked_sub(1)).unwrap_or(0);
                     let hops = if fs == 0 {
                         hops.iter().collect::<Vec<_>>()
@@ -5264,7 +5230,6 @@ pub mod frontend {
                         let sposd = ss[&hnd];
                         let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
                         let hposd = (sposd + offset).round(); //  + 10. * lvl.0 as f64;
-                        let lvl_offset = container_depths.get(vl).copied().unwrap_or(0);
                         // eprintln!("HOP {vl} {wl} {n} {hop:?} {lvl} {} {}", ndv, lvl_offset);
                         let vpos = vs[n];
                         let mut vpos2 = vs[n+1];
@@ -5983,7 +5948,7 @@ mod tests {
         assert_eq!(paths_by_rank[&VerticalRank(2)][0], (Cow::from("Aa"), Cow::from("Ac")));
 
         let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg, &mut logs)?;
-        let LayoutProblem{hops_by_level, hops_by_edge, loc_to_node, node_to_loc, ..} = &layout_problem;
+        let LayoutProblem{hops_by_level, loc_to_node, node_to_loc, ..} = &layout_problem;
         let nAa = Obj::Node(ObjNode{ vl: Cow::from("Aa") });
         let nAb = Obj::Node(ObjNode{ vl: Cow::from("Ab") });
         let nAc = Obj::Node(ObjNode{ vl: Cow::from("Ac") });
