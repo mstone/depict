@@ -1063,7 +1063,7 @@ pub mod eval {
     mod tests {
         use super::*;
         use crate::parser::Item;
-        use pretty_assertions::{assert_eq, assert_ne};
+        use pretty_assertions::{assert_eq};
 
         const a: &'static str = "a";
         const b: &'static str = "b";
@@ -1597,10 +1597,9 @@ pub mod layout {
     //! The heart of the [layout](self) algorithm is to
     //!
     //! 1. form a [Vcg], witnessing a partial order on items as a "vertical constraint graph"
-    //! 2. [`condense()`] the [Vcg] to a [Cvcg], which is a simple graph, by merging parallel edges into single edges labeled with lists of Vcg edge labels.
-    //! 3. [`rank()`] the condensed VCG by finding longest-paths
-    //! 4. [`calculate_locs_and_hops()`] from the ranked paths of the CVCG to form a [LayoutProblem] by refining edge bundles (i.e., condensed edges) into hops
-    //! 5. [`minimize_edge_crossing()`] by direct enumeration, inspired by the integer program described in <cite>[Optimal Sankey Diagrams Via Integer Programming]</cite> ([author's copy])
+    //! 2. [`rank()`] the VCG by finding longest-paths
+    //! 3. [`calculate_locs_and_hops()`] from the ranked paths of the CVCG to form a [LayoutProblem] by refining edge bundles (i.e., condensed edges) into hops
+    //! 4. [`minimize_edge_crossing()`] by direct enumeration, inspired by the integer program described in <cite>[Optimal Sankey Diagrams Via Integer Programming]</cite> ([author's copy])
     //! resulting in a `ovr -> ohr -> shr` map.
     //!
     //! [Optimal Sankey Diagrams Via Integer Programming]: https://doi.org/10.1109/PacificVis.2018.00025
@@ -1635,12 +1634,6 @@ pub mod layout {
     use crate::graph_drawing::eval::{Val, self, Body};
     use crate::graph_drawing::frontend::log::{names, Name, Names};
 
-    #[derive(Clone, Debug, Default)]
-    pub struct Hcg<V: Graphic> {
-        pub constraints: HashSet<HorizontalConstraint<V>>,
-        pub labels: HashMap<(V, V), eval::Level<V>>,
-    }
-
     /// Require a to be left of b
     #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
     pub struct HorizontalConstraint<V: Graphic> {
@@ -1648,15 +1641,9 @@ pub mod layout {
         pub b: V,
     }
 
-    impl<V: Graphic> Hcg<V> {
-        fn iter(&self) -> impl Iterator<Item=&HorizontalConstraint<V>> {
-            self.constraints.iter()
-        }
-    }
-
-    fn calculate_hcg_chain<'s, 't>(
-        hcg: &'t mut Hcg<Cow<'s, str>>,
-        chain: &'t Val<Cow<'s, str>>,
+    fn calculate_hcg_chain<'s, 't, V: Graphic, E: Graphic>(
+        vcg: &'t mut Vcg<V, E>,
+        chain: &'t Val<V>,
     ) -> Result<(), Error> {
         if let Val::Chain{rel, path, labels, ..} = chain {
             if *rel == Rel::Horizontal {
@@ -1666,9 +1653,9 @@ pub mod layout {
                             let mut al = al;
                             let mut bl = bl;
                             // bug: needs to be transitive
-                            let has_prior_orientation = hcg.constraints.contains(&HorizontalConstraint{a: bl.clone(), b: al.clone()});
+                            let has_prior_orientation = vcg.horz_constraints.contains(&HorizontalConstraint{a: bl.clone(), b: al.clone()});
                             if !has_prior_orientation {
-                                hcg.constraints.insert(
+                                vcg.horz_constraints.insert(
                                     HorizontalConstraint{
                                         a: al.clone(),
                                         b: bl.clone()
@@ -1684,7 +1671,7 @@ pub mod layout {
                                 if has_prior_orientation {
                                     std::mem::swap(&mut forward, &mut reverse);
                                 }
-                                let hlvl = hcg.labels.entry((al.clone(), bl.clone()))
+                                let hlvl = vcg.horz_edge_labels.entry((al.clone(), bl.clone()))
                                     .or_insert(eval::Level{forward: None, reverse: None});
                                 // if hf.is_none() then forward else hf.map()
                                 match (&mut hlvl.forward, forward) {
@@ -1708,23 +1695,23 @@ pub mod layout {
         Ok(())
     }
 
-    fn calculate_hcg_helper<'s, 't>(
-        hcg: &'t mut Hcg<Cow<'s, str>>,
-        process: &'t Val<Cow<'s, str>>,
+    fn calculate_hcg<'s, 't, V: Graphic, E: Graphic>(
+        vcg: &'t mut Vcg<V, E>,
+        process: &'t Val<V>,
     ) -> Result<(), Error> {
         match process {
             Val::Chain{..} => {
-                calculate_hcg_chain(hcg, process)?;
+                calculate_hcg_chain(vcg, process)?;
             },
             Val::Process{body, ..} => {
                 for part in body.iter().flatten() {
                     match part {
                         Val::Chain{..} => {
-                            calculate_hcg_chain(hcg, part)?;
+                            calculate_hcg_chain(vcg, part)?;
                         }
                         Val::Process{body, ..} => {
                             for part in body.iter().flatten() {
-                                calculate_hcg_helper(hcg, part)?;
+                                calculate_hcg(vcg, part)?;
                             }
                         },
                     }
@@ -1734,66 +1721,8 @@ pub mod layout {
         Ok(())
     }
 
-    pub fn calculate_hcg<'s, 't>(process: &'t Val<Cow<'s, str>>) -> Result<Hcg<Cow<'s, str>>, Error> {
-        let mut hcg = Hcg::default();
-        calculate_hcg_helper(&mut hcg, process)?;
-        Ok(hcg)
-    }
-
-    /// Ensure that for all nodes N, if there's a horizontal constraint
-    /// between A and N or between N and A, then rank'(N) == rank'(A)
-    /// and rank'(N) >= rank(N) and rank'(A) >= rank(A).
-    pub fn fixup_hcg_rank<'s, 't>(hcg: &'t Hcg<Cow<'s, str>>, paths_by_rank: &'t mut BTreeMap<VerticalRank, SortedVec<(Cow<'s, str>, Cow<'s, str>)>>) {
-        let mut preliminary_rank = BTreeMap::new();
-        for (rank, paths) in paths_by_rank.iter() {
-            for (_, wl) in paths.iter() {
-                preliminary_rank.insert(wl.clone(), *rank);
-            }
-        }
-        // eprintln!("HCG PRELIMINARY RANK: {preliminary_rank:#?}");
-
-        let mut preliminary_rank_inv: BTreeMap<VerticalRank, BTreeSet<Cow<'s, str>>> = BTreeMap::new();
-        for (node, rank) in preliminary_rank.iter() {
-            preliminary_rank_inv.entry(*rank).or_default().insert(node.clone());
-        }
-
-        // XXX: this really should be a fully transitively closed relation?
-        // and we really should take max ranks on horiziontal-connected-components?
-        // and then we should really push everything in the vertical down-set down?
-        let mut index_constraints: BTreeMap<Cow<'s, str>, BTreeSet<Cow<'s, str>>> = BTreeMap::new();
-        for HorizontalConstraint{a, b} in hcg.constraints.iter() {
-            index_constraints.entry(a.clone()).or_default().insert(b.clone());
-            index_constraints.entry(b.clone()).or_default().insert(a.clone());
-        }
-
-        let mut modified_rank = HashMap::new();
-        let empty = BTreeSet::new();
-        for (rank, nodes) in preliminary_rank_inv.iter() {
-            for node in nodes.iter() {
-                let max_rank = index_constraints
-                    .get(node)
-                    .unwrap_or(&empty)
-                    .iter()
-                    .map(|a| modified_rank
-                            .get(a)
-                            .copied()
-                            .unwrap_or(preliminary_rank[a])
-                        )
-                    .max()
-                    .unwrap_or(*rank);
-                modified_rank.insert(node.clone(), max_rank);
-            }
-        }
-        // eprintln!("HCG MODIFIED RANK: {modified_rank:#?}");
-
-        for (node, rank) in modified_rank.iter() {
-            paths_by_rank.entry(*rank).or_default().insert(("root".into(), node.clone()));
-        }
-        // eprintln!("HCG MODIFIED PATHS_BY_RANK: {paths_by_rank:#?}");
-    }
-
     #[derive(Clone, Debug, Default)]
-    pub struct Vcg<V, E> {
+    pub struct Vcg<V: Graphic, E: Graphic> {
         /// vert is a vertical constraint graph.
         /// Edges (v, w) in vert indicate that v needs to be placed above w.
         /// Node weights must be unique.
@@ -1807,6 +1736,12 @@ pub mod layout {
 
         /// vert_edge_labels maps (v,w,rel) node weight pairs to display edge labels.
         pub vert_edge_labels: HashMap<V, HashMap<V, HashMap<V, Vec<E>>>>,
+
+        /// horz_constraints records directed horizontal constraint between pairs of nodes
+        pub horz_constraints: HashSet<HorizontalConstraint<V>>,
+
+        // horz_edge_labels maps (v,w) node weight pairs to label pairs
+        pub horz_edge_labels: HashMap<(V, V), eval::Level<V>>,
 
         /// containers identifies which nodes are parents of contained nodes
         pub containers: HashSet<V>,
@@ -1995,11 +1930,13 @@ pub mod layout {
         vcg.nodes_by_container.entry(parent.clone()).or_default().insert(node.clone());
     }
 
-    pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>, hcg: &'t Hcg<Cow<'s, str>>, logs: &mut log::Logger) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
+    pub fn calculate_vcg<'s, 't>(process: &'t Val<Cow<'s, str>>, logs: &mut log::Logger) -> Result<Vcg<Cow<'s, str>, Cow<'s, str>>, Error> {
         let vert = Graph::<Cow<str>, Cow<str>>::new();
         let vert_vxmap = HashMap::<Cow<str>, NodeIndex>::new();
         let vert_node_labels = HashMap::new();
         let vert_edge_labels = HashMap::new();
+        let horz_constraints = HashSet::new();
+        let horz_edge_labels = HashMap::new();
         let containers = HashSet::new();
         let nodes_by_container = HashMap::new();
         let nodes_by_container_transitive = HashMap::new();
@@ -2010,12 +1947,16 @@ pub mod layout {
             vert_vxmap,
             vert_node_labels,
             vert_edge_labels,
+            horz_constraints,
+            horz_edge_labels,
             containers,
             nodes_by_container,
             nodes_by_container_transitive,
             nesting_depths,
             container_depths,
         };
+
+        calculate_hcg(&mut vcg, process)?;
 
         let body = &Body::All(vec![process.clone()]);
 
@@ -2116,7 +2057,7 @@ pub mod layout {
 
         // to ensure that nodes in horizontal relationships have correct vertical positioning,
         // we add implied edges based on horizontal relationships and containment relationships.
-        let sorted_constraints = hcg.constraints.iter().collect::<BTreeSet<_>>();
+        let sorted_constraints = vcg.horz_constraints.iter().collect::<BTreeSet<_>>();
         // eprintln!("NODES_BY_CONTAINER: {:#?}", sorted_nodes_by_container);
         // eprintln!("PRELIMINARY VERT: {:#?}", vcg.vert);
         for HorizontalConstraint{a, b} in sorted_constraints.iter() {
@@ -2658,7 +2599,6 @@ pub mod layout {
         pub loc_to_node: HashMap<(VerticalRank, OriginalHorizontalRank), Obj<V>>,
         pub node_to_loc: HashMap<Obj<V>, (VerticalRank, OriginalHorizontalRank)>,
         pub container_borders: HashMap<V, Vec<(VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>>,
-        pub hcg: Hcg<V>,
     }
 
     #[derive(Clone, Debug, Default)]
@@ -2702,7 +2642,6 @@ pub mod layout {
         dag: &'s Graph<V, SortedVec<(V, V, E)>>,
         paths_by_rank: &'s RankedPaths<V>,
         vcg: &Vcg<V, V>,
-        hcg: Hcg<V>,
         logs: &mut log::Logger,
     ) -> Result<LayoutProblem<V>, Error>
             where
@@ -2873,7 +2812,7 @@ pub mod layout {
 
         // eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
 
-        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders, hcg})
+        Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders})
     }
 
     #[cfg(test)]
@@ -2901,33 +2840,6 @@ pub mod layout {
             let paths_by_rank = rank(&vert, |a, b, l| -1, &mut logs).unwrap();
             assert_eq!(paths_by_rank[&VerticalRank(0)], SortedVec::from_unsorted(vec![(a.clone(), a.clone())]));
             assert_eq!(paths_by_rank[&VerticalRank(1)], SortedVec::from_unsorted(vec![(a.clone(), b.clone())]));
-        }
-
-        #[test]
-        fn test_fixup_hcg_rank_is_deterministic() {
-            let mut hcg = Hcg{
-                constraints: HashSet::new(),
-                labels: HashMap::new(),
-            };
-            hcg.constraints.insert(HorizontalConstraint{a: "s".into(), b: "b".into()});
-            hcg.constraints.insert(HorizontalConstraint{a: "c".into(), b: "s".into()});
-
-            let mut pbr: BTreeMap<VerticalRank, SortedVec<(Cow<str>, Cow<str>)>> = BTreeMap::new();
-            pbr.insert(VerticalRank(0), SortedVec::from_unsorted(vec![("root".into(), "root".into())]));
-            pbr.insert(VerticalRank(1), SortedVec::from_unsorted(vec![
-                ("root".into(), "b".into()),
-                ("root".into(), "k".into()),
-                ("root".into(), "s".into()),
-            ]));
-            pbr.insert(VerticalRank(2), SortedVec::from_unsorted(vec![
-                ("root".into(), "c".into()),
-            ]));
-
-            let mut pbr1 = pbr.clone();
-            let mut pbr2 = pbr.clone();
-            fixup_hcg_rank(&hcg, &mut pbr1);
-            fixup_hcg_rank(&hcg, &mut pbr2);
-            assert_eq!(pbr1, pbr2);
         }
     }
 
@@ -3059,10 +2971,10 @@ pub mod layout {
             p: &mut [&mut [usize]]
         ) -> bool {
             let Vcg{nodes_by_container_transitive: nodes_by_container, ..} = vcg;
-            let LayoutProblem{node_to_loc, hcg, container_borders, ..} = layout_problem;
+            let LayoutProblem{node_to_loc, container_borders, ..} = layout_problem;
 
             // eprintln!("HCG: {:#?}", hcg.iter().collect::<Vec<_>>());
-            let hcg_satisfied = hcg.iter().all(|constraint| {
+            let hcg_satisfied = vcg.horz_constraints.iter().all(|constraint| {
                 let HorizontalConstraint{a, b} = constraint;
                 // let an = if let Some(an) = node_to_loc.get(&Obj::Node(ObjNode{vl: a.clone()})) { an } else { return true; };
                 // let bn = if let Some(bn) = node_to_loc.get(&Obj::Node(ObjNode{vl: b.clone()})) { bn } else { return true; };
@@ -4474,7 +4386,7 @@ pub mod frontend {
     use ordered_float::OrderedFloat;
     use self_cell::self_cell;
 
-    use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border, ObjNode, ObjBorder}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, Border, ObjNode, ObjBorder}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val, index::OriginalHorizontalRank};
 
@@ -4495,11 +4407,11 @@ pub mod frontend {
 
         let vert_node_labels = &vcg.vert_node_labels;
         let vert_edge_labels = &vcg.vert_edge_labels;
+        let horz_edge_labels = &vcg.horz_edge_labels;
         let size_by_loc = &mut geometry_problem.size_by_loc;
         let size_by_hop = &mut geometry_problem.size_by_hop;
         let hops_by_edge = &layout_problem.hops_by_edge;
         let loc_to_node = &layout_problem.loc_to_node;
-        let hcg = &layout_problem.hcg;
         let condensed = &cvcg.condensed;
         let condensed_vxmap = &cvcg.condensed_vxmap;
 
@@ -4517,7 +4429,7 @@ pub mod frontend {
                 // }
                 let mut left = 0;
                 let mut right = 0;
-                for (hc, lvl) in &hcg.labels {
+                for (hc, lvl) in horz_edge_labels.iter() {
                     if hc.0 == *vl {
                         right = std::cmp::max(right, lvl.forward.as_ref().and_then(|fs| fs.iter().map(|f| f.len()).max()).unwrap_or(0));
                     }
@@ -4666,8 +4578,7 @@ pub mod frontend {
             // eprintln!("SCOPES: {scopes:#?}");
             // eprintln!("RESOLVE: {val:#?}");
 
-            let hcg = calculate_hcg(&val)?;
-            let vcg = calculate_vcg(&val, &hcg, logs)?;
+            let vcg = calculate_vcg(&val, logs)?;
 
             // eprintln!("HCG {hcg:#?}");
 
@@ -4722,7 +4633,7 @@ pub mod frontend {
                     }
                 }
             };
-            let mut paths_by_rank = rank(condensed, distance, logs)?;
+            let paths_by_rank = rank(condensed, distance, logs)?;
 
             logs.with_map("paths_by_rank", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
                 l.with_map(format!("paths_by_rank[{rank}]"), "SortedVec<(V, V)>", paths.iter().map(|p| (&p.0, &p.1)), |from, to, l| {
@@ -4737,22 +4648,7 @@ pub mod frontend {
                 })
             })?;
 
-            fixup_hcg_rank(&hcg, &mut paths_by_rank);
-
-            logs.with_map("paths_by_rank + hcg fixups", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
-                l.with_map(format!("paths_by_rank[{rank}]"), "SortedVec<(V, V)>", paths.iter().map(|p| (&p.0, &p.1)), |from, to, l| {
-                    l.log_pair(
-                        "V",
-                        names![from],
-                        format!("{from}"),
-                        "V",
-                        names![to],
-                        format!("{to}"),
-                    )
-                })
-            })?;
-
-            let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, hcg, logs)?;
+            let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, logs)?;
 
             // ... adjust problem for horizontal edges
 
@@ -5054,8 +4950,8 @@ pub mod frontend {
             let node_to_loc = &depiction.layout_problem.node_to_loc;
             let vert_node_labels = &depiction.vcg.vert_node_labels;
             let vert_edge_labels = &depiction.vcg.vert_edge_labels;
+            let horz_edge_labels = &depiction.vcg.horz_edge_labels;
             let hops_by_edge = &depiction.layout_problem.hops_by_edge;
-            let hcg = &depiction.layout_problem.hcg;
             let size_by_loc = &depiction.geometry_problem.size_by_loc;
             let size_by_hop = &depiction.geometry_problem.size_by_hop;
             let crossing_number = depiction.layout_solution.crossing_number;
@@ -5316,7 +5212,7 @@ pub mod frontend {
             let forward_voffset = 6.;
             let reverse_voffset = 20.;
 
-            for (m, ((vl, wl), lvl)) in hcg.labels.iter().enumerate() {
+            for (m, ((vl, wl), lvl)) in horz_edge_labels.iter().enumerate() {
 
                 let z_index = std::cmp::max(nesting_depths[vl], nesting_depths[wl]) + 1;
 
@@ -5918,8 +5814,7 @@ mod tests {
 
         let val = eval::eval(&v[..]);
 
-        let hcg = calculate_hcg(&val)?;
-        let vcg = calculate_vcg(&val, &hcg, &mut logs)?;
+        let vcg = calculate_vcg(&val, &mut logs)?;
 
         let Vcg{vert, vert_vxmap, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
         let vx = vert_vxmap["Ab"];
@@ -5952,7 +5847,7 @@ mod tests {
         let paths_by_rank = rank(&condensed, distance, &mut logs)?;
         assert_eq!(paths_by_rank[&VerticalRank(2)][0], (Cow::from("Aa"), Cow::from("Ac")));
 
-        let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, hcg, &mut logs)?;
+        let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, &mut logs)?;
         let LayoutProblem{hops_by_level, loc_to_node, node_to_loc, ..} = &layout_problem;
         let nAa = Obj::Node(ObjNode{ vl: Cow::from("Aa") });
         let nAb = Obj::Node(ObjNode{ vl: Cow::from("Ab") });
