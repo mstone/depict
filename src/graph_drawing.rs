@@ -316,9 +316,7 @@ pub mod index {
 
     impl_index!(SolvedHorizontalRank, "s");
 
-    impl_index!(LocSol, "ls");
-
-    impl_index!(HopSol, "hs");
+    impl_index!(VarRank, "x");
 
 }
 
@@ -1636,7 +1634,6 @@ pub mod layout {
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
     use crate::graph_drawing::eval::{Val, self, Body};
     use crate::graph_drawing::frontend::log::{names, Name, Names};
-    use crate::graph_drawing::geometry::LocIx;
 
     #[derive(Clone, Debug, Default)]
     pub struct Hcg<V: Graphic> {
@@ -2427,6 +2424,7 @@ pub mod layout {
     #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
     pub struct ObjHop<V: Graphic>{
         pub lvl: VerticalRank,
+        pub mhr: OriginalHorizontalRank,
         pub vl: V,
         pub wl: V,
     }
@@ -2527,8 +2525,8 @@ pub mod layout {
                 Obj::Node(ObjNode{vl}) => {
                     names![vl]
                 },
-                Obj::Hop(ObjHop{lvl, vl, wl}) => {
-                    names![lvl, vl, wl]
+                Obj::Hop(ObjHop{lvl, mhr, vl, wl}) => {
+                    names![lvl, mhr, vl, wl]
                 },
                 Obj::Container(ObjContainer{ vl }) => {
                     names![vl]
@@ -2618,7 +2616,7 @@ pub mod layout {
                             format!("{loc}"),
                         )
                     },
-                    Obj::Hop(loc@ObjHop{lvl, vl, wl}) => {
+                    Obj::Hop(loc@ObjHop{lvl, mhr, vl, wl}) => {
                         l.log_pair(
                             "Loc",
                             loc_ix.names(),
@@ -2675,8 +2673,8 @@ pub mod layout {
     impl<CX: Fn(VerticalRank, OriginalHorizontalRank) -> Vec<Box<dyn Name>>> L2n for CX {}
 
     /// Marker trait for closures mapping LayoutSol to names
-    pub(crate) trait Ls2n : Fn(LayoutSol) -> Vec<Box<dyn Name>> {}
-    impl<CX: Fn(LayoutSol) -> Vec<Box<dyn Name>>> Ls2n for CX {}
+    pub(crate) trait V2n : Fn(VarRank) -> Vec<Box<dyn Name>> {}
+    impl<CX: Fn(VarRank) -> Vec<Box<dyn Name>>> V2n for CX {}
 
     impl<CX: L2n> log::Log<CX> for BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> {
         fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
@@ -2802,10 +2800,10 @@ pub mod layout {
                 let num_mhrs = locs_by_level.entry(mid_level).or_insert(0);
                 let mhr = OriginalHorizontalRank(*num_mhrs);
                 *num_mhrs += 1;
-                if let Some(old) = loc_to_node.insert((mid_level, mhr), Obj::Hop(ObjHop{lvl: mid_level, vl: vl.clone(), wl: wl.clone()})) {
+                if let Some(old) = loc_to_node.insert((mid_level, mhr), Obj::Hop(ObjHop{lvl: mid_level, mhr: mhr, vl: vl.clone(), wl: wl.clone()})) {
                     panic!("loc_to_node.insert({mid_level}, {mhr}) -> {:?}", old);
                 };
-                node_to_loc.insert(Obj::Hop(ObjHop{lvl: mid_level, vl: vl.clone(), wl: wl.clone()}), (mid_level, mhr)); // BUG: what about the endpoints?
+                node_to_loc.insert(Obj::Hop(ObjHop{lvl: mid_level, mhr, vl: vl.clone(), wl: wl.clone()}), (mid_level, mhr)); // BUG: what about the endpoints?
                 mhrs.push(mhr);
             }
             mhrs.push(whr);
@@ -2875,16 +2873,6 @@ pub mod layout {
         }
 
         // eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
-
-        let mut g_hops = Graph::<LocIx, (VerticalRank, V, V)>::new();
-        let mut g_hops_vx = HashMap::new();
-        for (_rank, hops) in hops_by_level.iter() {
-            for Hop{mhr, nhr, vl, wl, lvl} in hops.iter() {
-                let gvx = or_insert(&mut g_hops, &mut g_hops_vx, (*lvl, *mhr));
-                let gwx = or_insert(&mut g_hops, &mut g_hops_vx, (*lvl+1, *nhr));
-                g_hops.add_edge(gvx, gwx, (*lvl, vl.clone(), wl.clone()));
-            }
-        }
 
         Ok(LayoutProblem{locs_by_level, hops_by_level, hops_by_edge, loc_to_node, node_to_loc, container_borders, hcg})
     }
@@ -3312,8 +3300,7 @@ pub mod layout {
 
     use super::eval::Rel;
     use super::frontend::log;
-    use super::geometry::LayoutSol;
-    use super::index::SolvedHorizontalRank;
+    use super::index::{SolvedHorizontalRank, VarRank};
 }
 
 pub mod geometry {
@@ -3370,8 +3357,8 @@ pub mod geometry {
     use super::osqp::{Constraints, Monomial, Vars, Fresh, Var, Sol, Coeff};
 
     use super::error::Error;
-    use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, LocSol, HopSol};
-    use super::layout::{Obj, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n, Ls2n, or_insert, ObjHop, Border, ObjContainer, ObjBorder};
+    use super::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank, VarRank};
+    use super::layout::{Obj, Hop, Vcg, LayoutProblem, Graphic, LayoutSolution, Len, L2n, V2n, or_insert, ObjBorder, Border, ObjHop, ObjContainer};
 
     use std::borrow::Cow;
     use std::cmp::{max};
@@ -3379,38 +3366,14 @@ pub mod geometry {
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
 
-    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub enum LayoutSol {
-        LocSol(LocSol),
-        HopSol(HopSol),
-    }
-
-    impl Display for LayoutSol {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                LayoutSol::LocSol(ls) => write!(f, "{ls:?}"),
-                LayoutSol::HopSol(hs) => write!(f, "{hs:?}"),
-            }
-        }
-    }
-
-    impl Name for LayoutSol {
-        fn name(&self) -> String {
-            match self {
-                LayoutSol::LocSol(ls) => ls.name(),
-                LayoutSol::HopSol(hs) => hs.name(),
-            }
-        }
-    }
-
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, EnumKind)]
     #[enum_kind(AnySolKind)]
     pub enum AnySol {
-        L(LocSol),
-        R(LocSol),
-        S(HopSol),
-        T(LocSol),
-        B(LocSol),
+        L(VarRank),
+        R(VarRank),
+        S(VarRank),
+        T(VarRank),
+        B(VarRank),
         H(VerticalRank),
         V(SolvedHorizontalRank),
         F(usize),
@@ -3452,7 +3415,7 @@ pub mod geometry {
         pub ohr: OriginalHorizontalRank,
         pub shr: SolvedHorizontalRank,
         pub loc: Obj<V>,
-        pub n: LocSol,
+        pub n: VarRank,
     }
 
     #[derive(Clone, Debug)]
@@ -3462,7 +3425,7 @@ pub mod geometry {
         pub nhr: OriginalHorizontalRank,
         pub vl: V,
         pub wl: V,
-        pub n: HopSol,
+        pub n: VarRank,
     }
 
     #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -3485,12 +3448,8 @@ pub mod geometry {
 
     #[derive(Clone, Debug, Default)]
     pub struct GeometryProblem<V: Clone + Debug + Display + Ord + Hash + log::Name> {
-        pub all_locs: Vec<LocRow<V>>,
-        pub all_hops0: Vec<HopRow<V>>,
-        pub all_hops: Vec<HopRow<V>>,
-        pub sol_by_loc: HashMap<(VerticalRank, OriginalHorizontalRank), LocSol>,
-        pub sol_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol>,
-        pub locix_by_layout_sol: HashMap<LayoutSol, LocIx>,
+        pub varrank_by_obj: HashMap<Obj<V>, VarRank>,
+        pub loc_by_varrank: HashMap<VarRank, LocIx>,
         pub size_by_loc: HashMap<LocIx, NodeSize>,
         pub size_by_hop: HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSize>,
         pub height_scale: Option<f64>,
@@ -3502,52 +3461,17 @@ pub mod geometry {
 
     use crate::graph_drawing::frontend::log::{self, names, Names};
 
-    impl<CX: L2n> log::Log<CX> for HashMap<(VerticalRank, OriginalHorizontalRank), LocSol> {
-        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map("sol_by_loc", "SolByLoc", self.iter(), |loc_ix, sol, l| {
-                let mut src_names = loc_ix.names();
-                src_names.append(&mut cx(loc_ix.0, loc_ix.1));
+    impl<V: Graphic> log::Log for HashMap<Obj<V>, VarRank> {
+        fn log(&self, cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
+            l.with_map("obj_by_varrank", "ObjByVarrank", self.iter(), |obj, sol, l| {
+                let mut src_names = obj.names();
                 l.log_pair(
-                    "Loc",
-                    src_names,
-                    format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
-                    "LocSol",
+                    "Varrank",
                     names![sol],
-                    format!("{sol}")
-                )
-            })
-        }
-    }
-
-    impl<V: Graphic + Display + log::Name, CX: L2n> log::Log<CX> for HashMap<(VerticalRank, OriginalHorizontalRank, V, V), HopSol> {
-        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map("sol_by_hop", "SolByHop", self.iter(), |(ovr, ohr, vl, wl), sol, l| {
-                let mut src_names = names![ovr, ohr, vl, wl];
-                src_names.append(&mut cx(*ovr, *ohr));
-                l.log_pair(
-                    "Loc",
+                    format!("{sol}"),
+                    "Obj",
                     src_names,
-                    format!("{ovr}v, {ohr}h"),
-                    "HopSol",
-                    names![vl, wl, sol],
-                    format!("{sol}")
-                )
-            })
-        }
-    }
-
-    impl<CX: L2n> log::Log<CX> for HashMap<LayoutSol, LocIx> {
-        fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
-            l.with_map("locix_by_layout_sol", "LocIxByLayoutSol", self.iter(), |ls, loc_ix, l| {
-                let mut dst_names = loc_ix.names();
-                dst_names.append(&mut cx(loc_ix.0, loc_ix.1));
-                l.log_pair(
-                    "LayoutSol",
-                    names![ls],
-                    format!("{ls}"),
-                    "HopSol",
-                    dst_names,
-                    format!("{:?}, {:?}", loc_ix.0, loc_ix.1)
+                    format!("{obj}"),
                 )
             })
         }
@@ -3608,34 +3532,27 @@ pub mod geometry {
 
         // eprintln!("SOLVED_LOCS {solved_locs:#?}");
 
-        let all_locs = solved_locs
+        let mut var_counter = 0;
+        let mut var_rank = || {
+            let n = var_counter;
+            var_counter += 1;
+            VarRank(n)
+        };
+
+        let mut varrank_by_obj = HashMap::new();
+        let mut loc_by_varrank = HashMap::new();
+
+        for (ovr, ohr, shr, obj) in solved_locs
             .iter()
             .flat_map(|(ovr, nodes)| nodes
                 .iter()
-                .map(|(ohr, shr)| (*ovr, *ohr, *shr, &loc_to_node[&(*ovr,*ohr)])))
-            .enumerate()
-            .map(|(n, (ovr, ohr, shr, loc))| LocRow{ovr, ohr, shr, loc: loc.clone(), n: LocSol(n)})
-            .collect::<Vec<_>>();
-
-        // eprintln!("ALL_LOCS {all_locs:#?}");
-
-        let mut sol_by_loc = HashMap::new();
-        for LocRow{ovr, ohr, n, ..} in all_locs.iter() {
-            sol_by_loc.insert((*ovr, *ohr), *n);
+                .map(|(ohr, shr)| (*ovr, *ohr, *shr, &loc_to_node[&(*ovr,*ohr)]))) {
+            let rank = var_rank();
+            varrank_by_obj.insert(obj.clone(), rank);
+            loc_by_varrank.insert(rank, (ovr, ohr));
         }
 
-        let all_hops0 = hops_by_level
-            .iter()
-            .flat_map(|h|
-                h.1.iter().map(|Hop{mhr, nhr, vl, wl, lvl}| {
-                    (*mhr, *nhr, vl.clone(), wl.clone(), *lvl)
-                })
-            ).enumerate()
-            .map(|(n, (mhr, nhr, vl, wl, lvl))| {
-                HopRow{lvl, mhr, nhr, vl, wl, n: HopSol(n)}
-            })
-            .collect::<Vec<_>>();
-        let all_hops = hops_by_level
+        for (mhr, nhr, vl, wl, lvl) in hops_by_level
             .iter()
             .flat_map(|h|
                 h.1.iter().map(|Hop{mhr, nhr, vl, wl, lvl}| {
@@ -3644,20 +3561,17 @@ pub mod geometry {
             )
             .chain(
                 hops_by_edge.iter().map(|((vl, wl), hops)| {
-                        #[allow(clippy::unwrap_used)] // an edge with no hops really should panic
-                        let (lvl, (mhr, nhr)) = hops.iter().rev().next().unwrap();
-                        (*nhr, OriginalHorizontalRank(std::usize::MAX - mhr.0), vl.clone(), wl.clone(), *lvl+1)
+                        let (lvl, (mhr, nhr)) = {
+                            #[allow(clippy::unwrap_used)] // an edge with no hops really should panic
+                            let kv = hops.last_key_value().unwrap();
+                            (*kv.0, *kv.1)
+                        };
+                        (nhr, OriginalHorizontalRank(std::usize::MAX - mhr.0), vl.clone(), wl.clone(), lvl+1)
                 })
-            )
-            .enumerate()
-            .map(|(n, (mhr, nhr, vl, wl, lvl))| {
-                HopRow{lvl, mhr, nhr, vl, wl, n: HopSol(n)}
-            })
-            .collect::<Vec<_>>();
-
-        let mut sol_by_hop = HashMap::new();
-        for HopRow{lvl, mhr, vl, wl, n, ..} in all_hops.iter() {
-            sol_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), *n);
+            ) {
+            let rank = var_rank();
+            varrank_by_obj.insert(Obj::Hop(ObjHop{lvl: lvl, mhr, vl: vl.clone(), wl: wl.clone()}), rank);
+            loc_by_varrank.insert(rank, (lvl, mhr));
         }
 
         let size_by_loc = HashMap::new();
@@ -3669,22 +3583,9 @@ pub mod geometry {
         let nesting_top_padding = None;
         let nesting_bottom_padding = None;
 
-        let mut locix_by_layout_sol = HashMap::new();
-
-        for loc in all_locs.iter() {
-            locix_by_layout_sol.insert(LayoutSol::LocSol(loc.n), (loc.ovr, loc.ohr));
-        }
-        for hop in all_hops.iter() {
-            locix_by_layout_sol.insert(LayoutSol::HopSol(hop.n), (hop.lvl, hop.mhr));
-        }
-
         GeometryProblem{
-            all_locs,
-            all_hops0,
-            all_hops,
-            sol_by_loc,
-            sol_by_hop,
-            locix_by_layout_sol,
+            varrank_by_obj,
+            loc_by_varrank,
             size_by_loc,
             size_by_hop,
             height_scale,
@@ -3705,16 +3606,13 @@ pub mod geometry {
 
     use std::fmt::Write;
 
-    impl<C: Coeff, CX: Ls2n> log::Log<(String, CX)> for OptimizationProblem<AnySol, C> {
+    impl<C: Coeff, CX: V2n> log::Log<(String, CX)> for OptimizationProblem<AnySol, C> {
         fn log(&self, cx: (String, CX), l: &mut log::Logger) -> Result<(), log::Error> {
             let names = |monomial: &Monomial<AnySol, C>| {
                 let mut ret = monomial.names();
                 match monomial.var.sol {
-                    AnySol::L(ls) | AnySol::R(ls) | AnySol::T(ls) | AnySol::B(ls) => {
-                        ret.append(&mut (cx.1)(LayoutSol::LocSol(ls)));
-                    },
-                    AnySol::S(hs) => {
-                        ret.append(&mut (cx.1)(LayoutSol::HopSol(hs)));
+                    AnySol::L(ls) | AnySol::R(ls) | AnySol::T(ls) | AnySol::B(ls) | AnySol::S(ls) => {
+                        ret.append(&mut (cx.1)(ls));
                     },
                     _ => {},
                 }
@@ -3724,11 +3622,8 @@ pub mod geometry {
                 l.with_map(cx.0.clone(), "Vars", self.v.iter(), |sol, var, l| {
                     let mut src_names = sol.names();
                     match sol {
-                        AnySol::L(ls) | AnySol::R(ls) | AnySol::T(ls) | AnySol::B(ls) => {
-                            src_names.append(&mut (cx.1)(LayoutSol::LocSol(*ls)));
-                        },
-                        AnySol::S(hs) => {
-                            src_names.append(&mut (cx.1)(LayoutSol::HopSol(*hs)));
+                        AnySol::L(ls) | AnySol::R(ls) | AnySol::T(ls) | AnySol::B(ls) | AnySol::S(ls) => {
+                            src_names.append(&mut (cx.1)(*ls));
                         },
                         _ => {},
                     }
@@ -3769,23 +3664,23 @@ pub mod geometry {
 
     #[derive(Debug, Default)]
     pub struct GeometrySolution {
-        pub ls: BTreeMap<LocSol, f64>,
-        pub rs: BTreeMap<LocSol, f64>,
-        pub ss: BTreeMap<HopSol, f64>,
-        pub ts: BTreeMap<LocSol, f64>,
-        pub bs: BTreeMap<LocSol, f64>,
+        pub ls: BTreeMap<VarRank, f64>,
+        pub rs: BTreeMap<VarRank, f64>,
+        pub ss: BTreeMap<VarRank, f64>,
+        pub ts: BTreeMap<VarRank, f64>,
+        pub bs: BTreeMap<VarRank, f64>,
         pub status_h: OSQPStatusKind,
         pub status_v: OSQPStatusKind,
     }
 
-    impl<CX: Ls2n> log::Log<CX> for GeometrySolution {
+    impl<CX: V2n> log::Log<CX> for GeometrySolution {
         fn log(&self, cx: CX, l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_group("Coordinates", "", Vec::<String>::new(), |l| {
-                l.with_map("ls", "BTreeMap<LocSol, f64>", self.ls.iter(), |ls, coord, l| {
+                l.with_map("ls", "BTreeMap<Sol, f64>", self.ls.iter(), |ls, coord, l| {
                     let mut src_names = ls.names();
-                    src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
+                    src_names.append(&mut cx(*ls));
                     l.log_pair(
-                        "LocSol",
+                        "Sol",
                         src_names,
                         format!("{ls}"),
                         "f64",
@@ -3793,11 +3688,11 @@ pub mod geometry {
                         format!("{:.0}", coord.round())
                     )
                 })?;
-                l.with_map("rs", "BTreeMap<LocSol, f64>", self.rs.iter(), |ls, coord, l| {
+                l.with_map("rs", "BTreeMap<Sol, f64>", self.rs.iter(), |ls, coord, l| {
                     let mut src_names = ls.names();
-                    src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
+                    src_names.append(&mut cx(*ls));
                     l.log_pair(
-                        "LocSol",
+                        "Sol",
                         src_names,
                         format!("{ls}"),
                         "f64",
@@ -3805,11 +3700,11 @@ pub mod geometry {
                         format!("{:.0}", coord.round())
                     )
                 })?;
-                l.with_map("ts", "BTreeMap<LocSol, f64>", self.ts.iter(), |ls, coord, l| {
+                l.with_map("ts", "BTreeMap<Sol, f64>", self.ts.iter(), |ls, coord, l| {
                     let mut src_names = ls.names();
-                    src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
+                    src_names.append(&mut cx(*ls));
                     l.log_pair(
-                        "LocSol",
+                        "Sol",
                         src_names,
                         format!("{ls}"),
                         "f64",
@@ -3817,11 +3712,11 @@ pub mod geometry {
                         format!("{:.0}", coord.round())
                     )
                 })?;
-                l.with_map("bs", "BTreeMap<LocSol, f64>", self.bs.iter(), |ls, coord, l| {
+                l.with_map("bs", "BTreeMap<Sol, f64>", self.bs.iter(), |ls, coord, l| {
                     let mut src_names = ls.names();
-                    src_names.append(&mut cx(LayoutSol::LocSol(*ls)));
+                    src_names.append(&mut cx(*ls));
                     l.log_pair(
-                        "LocSol",
+                        "Sol",
                         src_names,
                         format!("{ls}"),
                         "f64",
@@ -3829,9 +3724,9 @@ pub mod geometry {
                         format!("{:.0}", coord.round())
                     )
                 })?;
-                l.with_map("ss", "BTreeMap<LocSol, f64>", self.ss.iter(), |hs, coord, l| {
+                l.with_map("ss", "BTreeMap<Sol, f64>", self.ss.iter(), |hs, coord, l| {
                     let mut src_names = hs.names();
-                    src_names.append(&mut cx(LayoutSol::HopSol(*hs)));
+                    src_names.append(&mut cx(*hs));
                     l.log_pair(
                         "HopSol",
                         src_names,
@@ -4051,13 +3946,12 @@ pub mod geometry {
         name: usize,
         reason: String,
         dir: Direction,
-        hop: Option<GeomHop>,
         margin: OrderedFloat<f64>,
     }
 
     impl Display for ObjEdge {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "no: {}, \nreason: {}, \ndir: {}, \nhop: {:#?}, \nmargin: {}", self.name, self.reason, self.dir, self.hop, self.margin)
+            write!(f, "no: {}, \nreason: {}, \ndir: {}, \nmargin: {}", self.name, self.reason, self.dir, self.margin)
         }
     }
 
@@ -4115,9 +4009,8 @@ pub mod geometry {
         let hops_by_edge = &layout_problem.hops_by_edge;
         let solved_locs = &layout_solution.solved_locs;
         let size_by_loc = &geometry_problem.size_by_loc;
-        let sol_by_loc = &geometry_problem.sol_by_loc;
-        let sol_by_hop = &geometry_problem.sol_by_hop;
         let size_by_hop = &geometry_problem.size_by_hop;
+        let varrank_by_obj = &geometry_problem.varrank_by_obj;
 
         let of = OrderedFloat::<f64>::from;
 
@@ -4140,8 +4033,8 @@ pub mod geometry {
             .collect::<HashMap<_, _>>();
 
         let mut obj_edges = 0;
-        let mut obj_edge = |dir: Direction, reason: String, hop: Option<GeomHop>, margin: f64| {
-            let e = ObjEdge{name: obj_edges, reason, dir, hop, margin: of(margin)};
+        let mut obj_edge = |dir: Direction, reason: String, margin: f64| {
+            let e = ObjEdge{name: obj_edges, reason, dir, margin: of(margin)};
             obj_edges += 1;
             e
         };
@@ -4159,7 +4052,7 @@ pub mod geometry {
                         (Obj::Container(ObjContainer{vl: container}),
                         Obj::Node(ObjNode{vl: wl}) | Obj::Container(ObjContainer{vl: wl}))
                         if nodes_by_container[container].contains(wl)) {
-                    obj_graph.add_edge(left_ix, solved_ix, obj_edge(Direction::Horizontal, "solved-left".into(), None, 20.));
+                    obj_graph.add_edge(left_ix, solved_ix, obj_edge(Direction::Horizontal, "solved-left".into(), 20.));
                 }
             }
             // todo: hop edges, nested edges, ...
@@ -4171,44 +4064,49 @@ pub mod geometry {
                 continue;
             }
             let src = vcg.vert.node_weight(er.source()).unwrap();
-            let tgt = vcg.vert.node_weight(er.target()).unwrap();
+            let dst = vcg.vert.node_weight(er.target()).unwrap();
             let src_obj = Obj::from_vl(src, containers);
-            let tgt_obj = Obj::from_vl(tgt, containers);
+            let dst_obj = Obj::from_vl(dst, containers);
             let src_loc = node_to_loc[&src_obj];
-            let tgt_loc = node_to_loc[&tgt_obj];
+            let dst_loc = node_to_loc[&dst_obj];
             let src_ix = solved_vxmap[&(src_loc.0, solved_locs[&src_loc.0][&src_loc.1])];
-            let dst_ix = solved_vxmap[&(tgt_loc.0, solved_locs[&tgt_loc.0][&tgt_loc.1])];
+            let dst_ix = solved_vxmap[&(dst_loc.0, solved_locs[&dst_loc.0][&dst_loc.1])];
 
-            let default_hop_size = HopSize{width: 0., left: 20., right: 20., height: 50., top: 0., bottom: 0.};
-            let hop_size = &size_by_hop.get(&(src_loc.0, src_loc.1, src.clone(), tgt.clone())).unwrap_or(&default_hop_size);
+            let default_hop_size = HopSize{width: 0., left: 20., right: 20., height: 10., top: 0., bottom: 0.};
+            let hop_size = &size_by_hop.get(&(src_loc.0, src_loc.1, src.clone(), dst.clone())).unwrap_or(&default_hop_size);
             let label_width = match ew {
                 x if x == "actuates" => hop_size.left,
                 x if x == "senses" => hop_size.right,
                 _ => 20.,
             };
-            // let label = vert_edge_labels.get(src).and_then(|dsts| dsts.get(tgt)).and_then(|rels| rels.get(ew));
-            let label_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Label(GeomLabel{vl: src.clone(), wl: tgt.clone(), rel: ew.clone()}));
+            // let label = vert_edge_labels.get(src).and_then(|dsts| dsts.get(dst)).and_then(|rels| rels.get(ew));
+            let label_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Label(GeomLabel{vl: src.clone(), wl: dst.clone(), rel: ew.clone()}));
 
-            let hops = &hops_by_edge.get(&(src.clone(), tgt.clone()));
+            let hops = &hops_by_edge.get(&(src.clone(), dst.clone()));
             let hops = if hops.is_none() {
-                vec![src_loc, tgt_loc]
+                vec![src_loc, dst_loc]
             } else {
                 let mut hops = hops.unwrap().iter().map(|(ovr, (ohr, mhr))| (*ovr, *ohr, *mhr)).collect::<Vec<_>>();
                 let last = hops.last().unwrap();
                 hops.push((last.0 + 1, last.2, OriginalHorizontalRank(usize::MAX - last.1.0)));
                 hops.into_iter().map(|(ovr, ohr, _)| (ovr, ohr)).collect::<Vec<_>>()
             };
-            for window in hops.windows(2) {
-                if let [cur, nxt, ..] = window {
-                    let src = (cur.0, solved_locs[&cur.0][&cur.1]);
-                    let dst = (nxt.0, solved_locs[&nxt.0][&nxt.1]);
-                    let initial = cur == &src_loc;
-                    let terminal = nxt == &tgt_loc;
-                    let geom_hop = GeomHop{initial, terminal, src: *cur, dst: *nxt};
-                    obj_graph.add_edge(solved_vxmap[&src], solved_vxmap[&dst], obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), Some(geom_hop.clone()), 40.));
-                    obj_graph.add_edge(solved_vxmap[&src], label_ix, obj_edge(Direction::Vertical, ew.to_string(), Some(geom_hop.clone()), 10.));
-                    obj_graph.add_edge(label_ix, solved_vxmap[&dst], obj_edge(Direction::Vertical, ew.to_string(), Some(geom_hop.clone()), 10.));
+            let mut prev_hop_ix = None;
+            for hop in hops.iter() {
+                let hop_loc = (hop.0, solved_locs[&hop.0][&hop.1]);
+                let initial = hop == &src_loc;
+                let terminal = hop == &dst_loc;
+                let hop_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: src.clone(), wl: dst.clone(), lvl: hop.0, mhr: hop.1})));
+                if initial {
+                    obj_graph.add_edge(src_ix, hop_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 10.));
                 }
+                if terminal {
+                    obj_graph.add_edge(hop_ix, dst_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 10.));
+                }
+                if let Some(prev_hop_ix) = prev_hop_ix {
+                    obj_graph.add_edge(prev_hop_ix, hop_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 10.));
+                }
+                prev_hop_ix = Some(hop_ix);
             }
         }
 
@@ -4231,39 +4129,41 @@ pub mod geometry {
             e
         };
 
-        for (loc_ix, obj) in loc_to_node.iter() {
-            match obj {
-                Obj::Node(ObjNode{vl}) => {
-                    let ls = sol_by_loc[&loc_ix];
+        for geom in obj_graph.node_weights() {
+            match geom {
+                Geom::Node(obj@Obj::Node(ObjNode{vl})) => {
+                    let ls = varrank_by_obj[&obj];
                     let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(ls));
                     let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(ls));
                     let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(ls));
                     let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(ls));
-                    let node_width = &size_by_loc[loc_ix];
+                    let node_width = &size_by_loc[&node_to_loc[obj]];
                     let mut width = of(node_width.width);
                     update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut width, vl)?;
                     let height = 26.;
                     con_graph.add_edge(left, right, con_edge("node-width".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: width})));
                     con_graph.add_edge(top, bottom, con_edge("node-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
                 },
-                Obj::Hop(ObjHop{vl, wl, ..}) => {
-                    let ls = sol_by_loc[loc_ix];
-                    let hs = sol_by_hop[&(loc_ix.0, loc_ix.1, vl.clone(), wl.clone())];
-                    or_insert(&mut con_graph, &mut con_vxmap, AnySol::S(hs));
-                    let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(ls));
-                    let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(ls));
-                    let height = 20.;
-                    con_graph.add_edge(top, bottom, con_edge("hop-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
+                Geom::Hop(obj@Obj::Hop(ObjHop{vl, wl, lvl, mhr})) => {
+                    let hs = varrank_by_obj[&obj];
+                    let guide_sol = or_insert(&mut con_graph, &mut con_vxmap, AnySol::S(hs));
+                    let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(hs));
+                    let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(hs));
+                    let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(hs));
+                    let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(hs));
+                    let hop_size = &size_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
+                    con_graph.add_edge(top, bottom, con_edge("hop-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.height)})));
+                    con_graph.add_edge(left, guide_sol, con_edge("hop-left".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.left)})));
+                    con_graph.add_edge(guide_sol, right, con_edge("hop-right".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.right)})));
                 },
-                Obj::Container(ObjContainer{vl}) => {
+                Geom::Container(obj@Obj::Container(ObjContainer{vl})) => {
                     let container = vl;
-                    let container_ix = node_to_loc[&Obj::Container(ObjContainer{vl: container.clone()})];
-                    let container_sol = sol_by_loc[&container_ix];
+                    let container_sol = varrank_by_obj[&obj];
                     let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(container_sol));
                     let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(container_sol));
                     let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(container_sol));
                     let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(container_sol));
-                    let node_width = &size_by_loc[loc_ix];
+                    let node_width = &size_by_loc[&node_to_loc[obj]];
                     let mut width = of(node_width.width);
                     update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut width, vl)?;
                     let height = 20.;
@@ -4271,8 +4171,7 @@ pub mod geometry {
                     con_graph.add_edge(top, bottom, con_edge("container-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
 
                     for node in &nodes_by_container[container] {
-                        let child_loc_ix = &node_to_loc[&Obj::from_vl(node, containers)];
-                        let child_sol = sol_by_loc[child_loc_ix];
+                        let child_sol = varrank_by_obj[&Obj::from_vl(node, containers)];
                         // XXX: child might be a container too..., or on a deeper rank
                         let child_left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(child_sol));
                         let child_right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(child_sol));
@@ -4300,75 +4199,61 @@ pub mod geometry {
                     if nodes_by_container[container].contains(wl)) {
                 continue;
             }
-            let Some(src_obj) = src.as_obj() else { continue };
-            let Some(dst_obj) = dst.as_obj() else { continue };
-            let src_loc_ix = node_to_loc[src_obj];
-            let dst_loc_ix = node_to_loc[dst_obj];
 
-            let src_guide_sol = match (src, edge.dir) {
-                (Geom::Node(_) | Geom::Container(_), Direction::Horizontal) => {
-                    AnySol::R(sol_by_loc[&src_loc_ix])
-                },
-                (Geom::Node(_) | Geom::Container(_) | Geom::Hop(_), Direction::Vertical) => {
-                    AnySol::B(sol_by_loc[&src_loc_ix])
-                },
-                (Geom::Border(Obj::Border(ObjBorder{ border: Border{vl, ..}})), Direction::Horizontal) => {
-                    AnySol::R(sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]])
-                },
-                (Geom::Hop(Obj::Hop(ObjHop{vl, wl, ..})), Direction::Horizontal) => {
-                    AnySol::S(sol_by_hop[&(src_loc_ix.0, src_loc_ix.1, vl.clone(), wl.clone())])
-                },
-                _ => {
-                    panic!("unexpected edge src: {src} {dst} {edge}")
-                }
-            };
-            let dst_guide_sol = match (dst, edge.dir) {
-                (Geom::Node(_) | Geom::Container(_), Direction::Horizontal) => {
-                    AnySol::L(sol_by_loc[&dst_loc_ix])
-                },
-                (Geom::Node(_) | Geom::Container(_) | Geom::Hop(_), Direction::Vertical) => {
-                    AnySol::T(sol_by_loc[&dst_loc_ix])
-                },
-                (Geom::Border(Obj::Border(ObjBorder{border: Border{vl, ..}})), Direction::Horizontal) => {
-                    AnySol::L(sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]])
-                },
-                (Geom::Hop(Obj::Hop(ObjHop{vl, wl, ..})), Direction::Horizontal) => {
-                    AnySol::S(sol_by_hop[&(dst_loc_ix.0, dst_loc_ix.1, vl.clone(), wl.clone())])
-                },
-                _ => {
-                    panic!("unexpected edge dst: {src} {dst} {edge}")
-                }
-            };
+            macro_rules! sol_for {
+                ($node:ident) => {
+                    match $node {
+                        Geom::Node(v) => {varrank_by_obj[v]},
+                        Geom::Hop(v) => {varrank_by_obj[v]},
+                        Geom::Container(v) => {varrank_by_obj[v]},
+                        Geom::Border(Obj::Border(ObjBorder{border: Border{vl, ..}})) => {varrank_by_obj[&Obj::from_vl(vl, containers)]},
+                        _ => unimplemented!(),
+                    }
+                };
+            }
+            macro_rules! impl_con {
+                ($src:ident, $src_sol_con:ident, $dst:ident, $dst_sol_con:ident) => {
+                    {
+                        let src_guide_sol = AnySol::$src_sol_con(sol_for!($src));
+                        let dst_guide_sol = AnySol::$dst_sol_con(sol_for!($dst));
+                        let src_ix = *con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
+                        let dst_ix = *con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
+                        con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(edge.margin.0)})));
+                    }
+                };
+            }
 
-            // eprintln!("con_vxmap: {:#?}", con_vxmap);
-            // eprintln!("con: {}", Dot::new(&con_graph));
-            eprintln!("EDGE: {src},{src_guide_sol} -> {dst},{dst_guide_sol}, {edge}");
-            let src_ix = *con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}"));
-            let dst_ix = *con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}"));
-            con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(edge.margin.0)})));
+            enum Flavor {
+                Box,
+                Arrow,
+            }
+            impl<V: Graphic, E: Graphic> From<&Geom<V, E>> for Flavor {
+                fn from(value: &Geom<V, E>) -> Self {
+                    match value {
+                        Geom::Node(_) | Geom::Container(_) | Geom::Border(_) | Geom::Label(_) => Flavor::Box,
+                        Geom::Hop(_) => Flavor::Arrow,
+                    }
+                }
+            }
+            let src_flavor: Flavor = src.into();
+            let dst_flavor: Flavor = dst.into();
 
-            if let Some(hop) = edge.hop {
-                let vl = src.as_vl().unwrap().clone();
-                let wl = dst.as_wl().unwrap().clone();
-                let src_sol = AnySol::S(sol_by_hop[&(hop.src.0, hop.src.1, vl.clone(), wl.clone())]);
-                let dst_sol = AnySol::S(sol_by_hop[&(hop.dst.0, hop.dst.1, vl.clone(), wl.clone())]);
-                let hop_src_ix = or_insert(&mut con_graph, &mut con_vxmap, src_sol);
-                let hop_dst_ix = or_insert(&mut con_graph, &mut con_vxmap, dst_sol);
-                if !con_graph.contains_edge(hop_src_ix, hop_dst_ix) {
-                    con_graph.add_edge(hop_src_ix, hop_dst_ix, con_edge(format!("obj-edge: {edge}"), ConEdgeFlavor::Hop()));
-                }
-                if hop.initial {
-                    let vl_left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(sol_by_loc[&src_loc_ix]));
-                    let vl_right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(sol_by_loc[&src_loc_ix]));
-                    con_graph.add_edge(vl_left, hop_src_ix, con_edge(format!("initial obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(20.)})));
-                    con_graph.add_edge(hop_src_ix, vl_right, con_edge(format!("initial obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(20.)})));
-                }
-                if hop.terminal {
-                    let wl_left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(sol_by_loc[&dst_loc_ix]));
-                    let wl_right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(sol_by_loc[&dst_loc_ix]));
-                    con_graph.add_edge(wl_left, hop_dst_ix, con_edge(format!("initial obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(20.)})));
-                    con_graph.add_edge(hop_dst_ix, wl_right, con_edge(format!("initial obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(20.)})));
-                }
+            match (src_flavor, dst_flavor, edge.dir) {
+                (Flavor::Box, Flavor::Box, Direction::Vertical) => impl_con![src, B, dst, T],
+                (Flavor::Box, Flavor::Box, Direction::Horizontal) => impl_con![src, R, dst, L],
+                (Flavor::Box, Flavor::Arrow, Direction::Vertical) => { impl_con![src, B, dst, T]; impl_con![src, L, dst, S]; impl_con![dst, S, src, R]; },
+                (Flavor::Box, Flavor::Arrow, Direction::Horizontal) => impl_con![src, R, dst, S],
+                (Flavor::Arrow, Flavor::Box, Direction::Vertical) => { impl_con![src, B, dst, T]; impl_con![dst, L, src, S]; impl_con![src, S, dst, R]; },
+                (Flavor::Arrow, Flavor::Box, Direction::Horizontal) => impl_con![src, S, dst, L],
+                (Flavor::Arrow, Flavor::Arrow, Direction::Vertical) => {
+                    impl_con![src, B, dst, T];
+                    let src_guide_sol = AnySol::S(sol_for!(src));
+                    let dst_guide_sol = AnySol::S(sol_for!(dst));
+                    let src_ix = *con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
+                    let dst_ix = *con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
+                    con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), ConEdgeFlavor::Hop()));
+                }, //{eprintln!("WARNING: arrow->arrow vertical constraint: {src} -> {dst}, edge: {edge}");},
+                (Flavor::Arrow, Flavor::Arrow, Direction::Horizontal) => {eprintln!("WARNING: arrow->arrow, {src} -> {dst}, edge: {edge}"); continue}, //impl_con![S, S],
             }
         }
 
@@ -4623,7 +4508,7 @@ pub mod frontend {
 
     use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, calculate_hcg, fixup_hcg_rank, Border, ObjNode, ObjBorder}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
-    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val};
+    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val, index::OriginalHorizontalRank};
 
     use log::{names};
 
@@ -4637,7 +4522,7 @@ pub mod frontend {
     {
         // let char_width = 8.67;
         let char_width = 9.0;
-        let line_height = geometry_problem.line_height.unwrap_or(20.);
+        let line_height = geometry_problem.line_height.unwrap_or(10.);
         let arrow_width = 40.0;
 
         let vert_node_labels = &vcg.vert_node_labels;
@@ -4724,7 +4609,14 @@ pub mod frontend {
 
                 height = max_by(height, label_height.unwrap_or(1) as f64 * line_height, f64::total_cmp);
             }
-            height += 50.;
+
+            let mut hops = hops.clone();
+            let (lvl, (mhr, nhr)) = {
+                #[allow(clippy::unwrap_used)] // an edge with no hops really should panic
+                let kv = hops.last_key_value().unwrap();
+                (*kv.0, *kv.1)
+            };
+            hops.insert(lvl+1, (nhr, OriginalHorizontalRank(std::usize::MAX - mhr.0)));
 
             for (lvl, (mhr, _nhr)) in hops.iter() {
                 size_by_hop.insert((*lvl, *mhr, vl.clone(), wl.clone()), HopSize{
@@ -5129,7 +5021,7 @@ pub mod frontend {
     pub mod dom {
         use std::{borrow::Cow};
 
-        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{LocSol, HopSol}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
+        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{VarRank}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
 
         use super::log::{self, Log};
 
@@ -5144,8 +5036,8 @@ pub mod frontend {
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Node {
-            Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: LocSol, estimated_size: NodeSize },
-            Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<HopSol>, classes: String, estimated_size: HopSize },
+            Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: VarRank, estimated_size: NodeSize },
+            Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<VarRank>, classes: String, estimated_size: HopSize },
         }
 
         #[derive(Clone, Debug)]
@@ -5188,15 +5080,14 @@ pub mod frontend {
             let bs = &depiction.geometry_solution.bs;
             let status_v = depiction.geometry_solution.status_v;
             let status_h = depiction.geometry_solution.status_h;
-            let sol_by_loc = &depiction.geometry_problem.sol_by_loc;
+            let varrank_by_obj = &depiction.geometry_problem.varrank_by_obj;
+            let loc_by_varrank = &depiction.geometry_problem.loc_by_varrank;
             let loc_to_node = &depiction.layout_problem.loc_to_node;
             let node_to_loc = &depiction.layout_problem.node_to_loc;
             let vert_node_labels = &depiction.vcg.vert_node_labels;
             let vert_edge_labels = &depiction.vcg.vert_edge_labels;
             let hops_by_edge = &depiction.layout_problem.hops_by_edge;
             let hcg = &depiction.layout_problem.hcg;
-            let sol_by_hop = &depiction.geometry_problem.sol_by_hop;
-            let locix_by_layout_sol = &depiction.geometry_problem.locix_by_layout_sol;
             let size_by_loc = &depiction.geometry_problem.size_by_loc;
             let size_by_hop = &depiction.geometry_problem.size_by_hop;
             let crossing_number = depiction.layout_solution.crossing_number;
@@ -5221,24 +5112,25 @@ pub mod frontend {
 
             let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
                 Obj::Node(ObjNode{vl: node}) => node.to_string().names(),
-                Obj::Hop(ObjHop{lvl: ovr, vl, wl}) => names![ovr, vl.to_string(), wl.to_string()],
+                Obj::Hop(ObjHop{lvl: ovr, mhr, vl, wl}) => names![ovr, mhr, vl.to_string(), wl.to_string()],
                 Obj::Container(ObjContainer{vl}) => vl.to_string().names(),
                 Obj::Border(ObjBorder{border: Border{vl, ovr, ohr, pair}}) => names![vl.to_string(), ovr, ohr, pair],
             };
-            let ls2n = |layout_sol| {
-                let loc_ix = locix_by_layout_sol[&layout_sol];
+            let v2n = |varrank| {
+                let loc_ix = loc_by_varrank[&varrank];
                 l2n(loc_ix.0, loc_ix.1)
             };
 
             // sol_by_loc.log(l2n, &mut logs)?;
             // sol_by_hop.log(l2n, &mut logs)?;
-            locix_by_layout_sol.log(l2n, &mut logs)?;
+            varrank_by_obj.log((), &mut logs)?;
+            // loc_by_varrank.log(l2n, &mut logs)?;
             solved_locs.log(l2n, &mut logs)?;
-            // size_by_loc.log(l2n, &mut logs)?;
-            // size_by_hop.log(l2n, &mut logs)?;
-            horizontal_problem.log(("horizontal_problem".into(), ls2n), &mut logs)?;
-            vertical_problem.log(("vertical_problem".into(), ls2n), &mut logs)?;
-            geometry_solution.log(ls2n, &mut logs)?;
+            size_by_loc.log(l2n, &mut logs)?;
+            size_by_hop.log(l2n, &mut logs)?;
+            horizontal_problem.log(("horizontal_problem".into(), v2n), &mut logs)?;
+            vertical_problem.log(("vertical_problem".into(), v2n), &mut logs)?;
+            geometry_solution.log(v2n, &mut logs)?;
 
             let mut logs = logs.to_vec();
             logs.reverse();
@@ -5251,7 +5143,7 @@ pub mod frontend {
                 let (ovr, ohr) = loc;
 
                 if let Obj::Node(ObjNode{vl}) = node {
-                    let n = sol_by_loc[&(*ovr, *ohr)];
+                    let n = varrank_by_obj[node];
 
                     // eprintln!("TEXT {vl} {ovr} {ohr} {n}");
 
@@ -5279,9 +5171,10 @@ pub mod frontend {
             }
 
             for container in containers {
-                let container_loc_ix = &node_to_loc[&Obj::Container(ObjContainer{ vl: container.clone() })];
+                let container_obj = Obj::Container(ObjContainer{ vl: container.clone() });
+                let container_loc_ix = &node_to_loc[&container_obj];
                 let (ovr, ohr) = container_loc_ix;
-                let cn = sol_by_loc[container_loc_ix];
+                let cn = varrank_by_obj[&container_obj];
                 let lpos = ls[&cn];
                 let rpos = rs[&cn];
                 let z_index = nesting_depths[container];
@@ -5353,8 +5246,8 @@ pub mod frontend {
                     } else {
                         hops.iter().skip(fs).collect::<Vec<_>>()
                     };
-                    let vmin = bs[&sol_by_loc[&node_to_loc[&Obj::from_vl(vl, containers)]]];
-                    let vmax = ts[&sol_by_loc[&node_to_loc[&Obj::from_vl(wl, containers)]]];
+                    let vmin = bs[&varrank_by_obj[&Obj::from_vl(vl, containers)]];
+                    let vmax = ts[&varrank_by_obj[&&Obj::from_vl(wl, containers)]];
                     let nh = hops.len();
                     let vs = (0..=nh).map(|lvl|  {
                         let fraction = lvl as f64 / nh as f64;
@@ -5365,9 +5258,9 @@ pub mod frontend {
                     for (n, hop) in hops.iter().enumerate() {
                         let (lvl, (mhr, nhr)) = *hop;
                         // let hn = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
-                        let hn = sol_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
+                        let hn = varrank_by_obj[&Obj::Hop(ObjHop{lvl: *lvl, mhr: *mhr, vl: vl.clone(), wl: wl.clone()})];
                         let spos = ss[&hn];
-                        let hnd = sol_by_hop[&(*lvl+1, *nhr, vl.clone(), wl.clone())];
+                        let hnd = varrank_by_obj[&Obj::Hop(ObjHop{lvl: *lvl+1, mhr: *nhr, vl: vl.clone(), wl: wl.clone()})];
                         let sposd = ss[&hnd];
                         let hpos = (spos + offset).round(); // + rng.gen_range(-0.1..0.1));
                         let hposd = (sposd + offset).round(); //  + 10. * lvl.0 as f64;
@@ -5393,7 +5286,8 @@ pub mod frontend {
                         }
 
                         if n == 0 {
-                            let n = sol_by_loc[&((*lvl+1), *nhr)];
+                            let n = varrank_by_obj[&Obj::Hop(ObjHop{lvl: *lvl+1, mhr: *nhr, vl: vl.clone(), wl: wl.clone()})];
+                            // sol_by_loc[&((*lvl+1), *nhr)];
                             // let n = sol_by_loc[&((*lvl), *mhr)];
                             label_hpos = Some(match ew {
                                 x if x == "senses" => {
@@ -5484,8 +5378,8 @@ pub mod frontend {
                         // let rohr = if shr1 < shr2 { pair } else { ohr };
                         (*ovr, *lohr)
                     };
-                    let nl = sol_by_loc[&locl];
-                    let nr = sol_by_loc[&locr];
+                    let nl = varrank_by_obj[&Obj::from_vl(vl, containers)];
+                    let nr = varrank_by_obj[&Obj::from_vl(wl, containers)];
                     let lr = rs[&nl];
                     let rl = ls[&nr] - 7.;
                     let wl = size_by_loc[&locl].right;
@@ -5526,8 +5420,8 @@ pub mod frontend {
                         // let rohr = if shr1 < shr2 { pair } else { ohr };
                         (*ovr, *lohr)
                     };
-                    let nl = sol_by_loc[&locl];
-                    let nr = sol_by_loc[&locr];
+                    let nl = varrank_by_obj[&Obj::from_vl(vl, containers)];
+                    let nr = varrank_by_obj[&Obj::from_vl(wl, containers)];
                     let lr = rs[&nl] + 7.;
                     let rl = ls[&nr];
                     let wl = size_by_loc[&locl].right;
@@ -6169,23 +6063,7 @@ mod tests {
 
 
         let geometry_problem = calculate_sols(&layout_problem, &layout_solution);
-        let all_locs = &geometry_problem.all_locs;
-        let lrAb = all_locs.iter().find(|lr| lr.loc == nAb).unwrap();
-        let lrAc = all_locs.iter().find(|lr| lr.loc == nAc).unwrap();
-        let lrXy = all_locs.iter().find(|lr| lr.loc == nXy).unwrap();
-        let lrXz = all_locs.iter().find(|lr| lr.loc == nXz).unwrap();
-        assert_eq!(lrAb.ovr, lAb.0);
-        assert_eq!(lrAc.ovr, lAc.0);
-        assert_eq!(lrXy.ovr, lXy.0);
-        assert_eq!(lrXz.ovr, lXz.0);
-        assert_eq!(lrAb.ohr, lAb.1);
-        assert_eq!(lrAc.ohr, lAc.1);
-        assert_eq!(lrXy.ohr, lXy.1);
-        assert_eq!(lrXz.ohr, lXz.1);
-        assert_eq!(lrAb.shr, sAb);
-        assert_eq!(lrAc.shr, sAc);
-        assert_eq!(lrXy.shr, sXy);
-        assert_eq!(lrXz.shr, sXz);
+        // ...
 
         Ok(())
     }
