@@ -5713,6 +5713,11 @@ pub mod frontend {
                                             class: "example",
                                             "person microwave food: open start stop / beep : heat"
                                         },
+                                        br {},
+                                        span {
+                                            class: "example",
+                                            "person food: eat"
+                                        },
                                     }
                                     p {
                                         span {

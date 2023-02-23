@@ -220,7 +220,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let status_v = drawing.get().status_v;
     let status_h = drawing.get().status_h;
 
-    let show_logs = use_state(&cx, || true);
+    let show_logs = use_state(&cx, || {
+        #[cfg(debug_assertions)]
+        return true;
+        #[cfg(not(debug_assertions))]
+        return false;
+    });
 
     model_sender.send(model.get().clone());
 
