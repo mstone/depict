@@ -3839,7 +3839,10 @@ pub mod geometry {
                     let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(hs));
                     let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(hs));
                     let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(hs));
-                    let hop_size = &size_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())];
+                    let hop_size = &size_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).unwrap_or_else(|| {
+                        eprintln!("WARNING: con_graph: no size for hop: {obj}");
+                        &HopSize{width: 10., left: 5., right: 5., height: 20., top: 0., bottom: 0.}
+                    });
                     con_graph.add_edge(top, bottom, con_edge("hop-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.height)})));
                     con_graph.add_edge(left, guide_sol, con_edge("hop-left".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.left)})));
                     con_graph.add_edge(guide_sol, right, con_edge("hop-right".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.right)})));
