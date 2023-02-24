@@ -3543,16 +3543,14 @@ pub mod geometry {
 
         let out_width: f64 = v_out_first_hops
             .iter()
-            .map(|idx| {
-                let sz = &size_by_hop[idx];
-                sz.left + sz.right
+            .filter_map(|idx| {
+                size_by_hop.get(idx).map(|sz| sz.left + sz.right)
             })
             .sum();
         let in_width: f64 = w_in_last_hops
             .iter()
-            .map(|idx| {
-                let sz = &size_by_hop[idx];
-                sz.left + sz.right
+            .filter_map(|idx| {
+                size_by_hop.get(idx).map(|sz| sz.left + sz.right)
             })
             .sum();
 
