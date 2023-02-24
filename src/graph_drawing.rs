@@ -1619,15 +1619,15 @@ pub mod layout {
     //! seems to serve us best.
 
     use std::borrow::{Cow};
-    use std::collections::{BTreeMap, HashSet, BTreeSet};
+    use std::collections::{BTreeMap, HashSet};
     use std::collections::{HashMap, hash_map::Entry};
     use std::fmt::{Debug, Display};
     use std::hash::Hash;
 
-    use petgraph::EdgeDirection::{Outgoing, Incoming};
+    use petgraph::EdgeDirection::{Incoming};
     use petgraph::algo::{floyd_warshall, dijkstra};
     use petgraph::graph::{Graph, NodeIndex, EdgeReference};
-    use petgraph::visit::{EdgeRef, IntoNodeReferences};
+    use petgraph::visit::{EdgeRef};
     use sorted_vec::SortedVec;
 
     use crate::graph_drawing::error::{Error, Kind, OrErrExt, RankingError};
@@ -1665,9 +1665,7 @@ pub mod layout {
                                 std::mem::swap(&mut al, &mut bl);
                             }
                             if let Some(level) = labels.get(n) {
-                                let eval::Level{forward, reverse} = level.clone();
-                                let mut forward = forward;
-                                let mut reverse = reverse;
+                                let eval::Level{mut forward, mut reverse} = level.clone();
                                 if has_prior_orientation {
                                     std::mem::swap(&mut forward, &mut reverse);
                                 }
@@ -1735,7 +1733,7 @@ pub mod layout {
         pub vert_node_labels: HashMap<V, String>,
 
         /// vert_edge_labels maps (v,w,rel) node weight pairs to display edge labels.
-        pub vert_edge_labels: HashMap<V, HashMap<V, HashMap<V, Vec<E>>>>,
+        pub vert_edge_labels: HashMap<(V, V), eval::Level<V>>,
 
         /// horz_constraints records directed horizontal constraint between pairs of nodes
         pub horz_constraints: HashSet<HorizontalConstraint<V>>,
@@ -1923,9 +1921,6 @@ pub mod layout {
 
         vcg.vert.add_edge(src_ix, dst_ix, "contains".into());
 
-        let rels = vcg.vert_edge_labels.entry(parent.clone()).or_default().entry(node.clone()).or_default();
-        rels.entry("contains".into()).or_default();
-
         vcg.containers.insert(parent.clone());
         vcg.nodes_by_container.entry(parent.clone()).or_default().insert(node.clone());
     }
@@ -1997,154 +1992,27 @@ pub mod layout {
                     std::mem::swap(&mut src, &mut dst);
                     std::mem::swap(&mut src_ix, &mut dst_ix);
                 }
+                vcg.vert.add_edge(src_ix, dst_ix, "vertical".into());
 
-                let empty = eval::Level{forward: None, reverse: None};
-                let labels = labels_by_level.get(n).unwrap_or(&empty);
-                let rels = vcg.vert_edge_labels.entry(src.clone()).or_default().entry(dst.clone()).or_default();
-                let mut maybe_needs_edge = true;
-                for label in labels.forward.iter().flatten() {
-                    let label = label.clone().trim();
-                    if !label.is_empty() {
-                        let rel = if has_prior_orientation { "senses" } else { "actuates"};
-                        vcg.vert.add_edge(src_ix, dst_ix, rel.into());
-                        rels.entry(rel.into()).or_default().push(label);
-                        maybe_needs_edge = false;
+                if let Some(level) = labels_by_level.get(n) {
+                    let eval::Level{mut forward, mut reverse} = level.clone();
+                    if has_prior_orientation {
+                        std::mem::swap(&mut forward, &mut reverse);
                     }
-                }
-                for label in labels.reverse.iter().flatten() {
-                    let label = label.clone().trim();
-                    if !label.is_empty() {
-                        let rel = if has_prior_orientation { "actuates" } else { "senses"};
-                        vcg.vert.add_edge(src_ix, dst_ix, rel.into());
-                        rels.entry(rel.into()).or_default().push(label);
-                        maybe_needs_edge = false;
-                    }
-                }
-                if maybe_needs_edge {
-                    if rels.is_empty() {
-                        vcg.vert.add_edge(src_ix, dst_ix, "fake".into());
-                        rels.entry("fake".into()).or_default().push("?".into());
-                    }
-                }
-            }
-        }
-
-        for (src, dsts) in vcg.vert_edge_labels.iter_mut() {
-            for (dst, rels) in dsts.iter_mut() {
-                if rels.is_empty() {
-                    let src_ix = vcg.vert_vxmap[src];
-                    let dst_ix = vcg.vert_vxmap[dst];
-                    vcg.vert.add_edge(src_ix, dst_ix, "fake".into());
-                    rels.entry("fake".into()).or_default().push("?".into());
-                }
-                if rels.contains_key("fake".into()) {
-                    if rels.contains_key("actuates".into()) || rels.contains_key("senses".into()) {
-                        let src_ix = vcg.vert_vxmap[src];
-                        let dst_ix = vcg.vert_vxmap[dst];
-                        rels.remove("fake".into());
-                        let mut edges = vcg.vert.neighbors_directed(src_ix, Outgoing).detach();
-                        while let Some(ex) = edges.next_edge(&vcg.vert) {
-                            if let Some((_esx, etx)) = vcg.vert.edge_endpoints(ex) {
-                                if dst_ix == etx && vcg.vert.edge_weight(ex).map(|w| w.as_ref()) == Some("fake") {
-                                    vcg.vert.remove_edge(ex);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // to ensure that nodes in horizontal relationships have correct vertical positioning,
-        // we add implied edges based on horizontal relationships and containment relationships.
-        let sorted_constraints = vcg.horz_constraints.iter().collect::<BTreeSet<_>>();
-        // eprintln!("NODES_BY_CONTAINER: {:#?}", sorted_nodes_by_container);
-        // eprintln!("PRELIMINARY VERT: {:#?}", vcg.vert);
-        for HorizontalConstraint{a, b} in sorted_constraints.iter() {
-            let ax = vcg.vert_vxmap[a];
-            let bx = vcg.vert_vxmap[b];
-            let mut a_incoming = vcg.vert.edges_directed(ax, Incoming)
-                .filter_map(|er| {
-                    let rel = er.weight().as_ref();
-                    if rel == "actuates" || rel == "senses" || rel == "fake" {
-                        let src_ix = er.source();
-                        let src = vcg.vert.node_weight(src_ix).unwrap().clone();
-                        Some((src, src_ix))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-            let mut b_incoming = vcg.vert.edges_directed(bx, Incoming)
-                .filter_map(|er| {
-                    let rel = er.weight().as_ref();
-                    if rel == "actuates" || rel == "senses" || rel == "fake" {
-                        let src_ix = er.source();
-                        let src = vcg.vert.node_weight(src_ix).unwrap().clone();
-                        Some((src, src_ix))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-            let mut a_incoming_plus_containers = vcg.containers.iter().filter_map(|c| {
-                if vcg.nodes_by_container_transitive[c].contains(a) {
-                    Some((c.clone(), vcg.vert_vxmap[c]))
-                } else {
-                    None
-                }
-            }).collect::<Vec<_>>();
-            let mut b_incoming_plus_containers = vcg.containers.iter().filter_map(|c| {
-                if vcg.nodes_by_container_transitive[c].contains(b) {
-                    Some((c.clone(), vcg.vert_vxmap[c]))
-                } else {
-                    None
-                }
-            }).collect::<Vec<_>>();
-            a_incoming_plus_containers.append(&mut a_incoming);
-            b_incoming_plus_containers.append(&mut b_incoming);
-            // eprintln!("IMPLIED {a} {b} {a_incoming_plus_containers:?} {b_incoming_plus_containers:?}");
-            for (src, src_ix) in a_incoming_plus_containers {
-                vcg.vert.add_edge(src_ix, bx, "implied_forward".into());
-                vcg.vert_edge_labels
-                    .entry(src.clone()).or_default()
-                    .entry(b.clone()).or_default()
-                    .entry("implied".into()).or_default();
-
-            }
-            for (src, src_ix) in b_incoming_plus_containers {
-                vcg.vert.add_edge(src_ix, ax, "implied_reverse".into());
-                vcg.vert_edge_labels
-                    .entry(src.clone()).or_default()
-                    .entry(a.clone()).or_default()
-                    .entry("implied".into()).or_default();
-            }
-        }
-
-        for container in vcg.containers.iter() {
-            let cx = vcg.vert_vxmap[container];
-            for node in vcg.nodes_by_container_transitive[container].iter() {
-                let nx = vcg.vert_vxmap[node];
-                let node_incoming = vcg.vert.edges_directed(nx, Incoming)
-                    .filter_map(|er| {
-                        let rel = er.weight().as_ref();
-                        if rel == "actuates" || rel == "senses" || rel == "fake" {
-                            let src_ix = er.source();
-                            let src = vcg.vert.node_weight(src_ix).unwrap().clone();
-                            Some((src, src_ix))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                for (src, src_ix) in node_incoming {
-                    if !vcg.nodes_by_container_transitive[container].contains(&src) {
-                        vcg.vert.add_edge(src_ix, cx, "implied_contains".into());
-                        vcg.vert_edge_labels
-                            .entry(src.clone()).or_default()
-                            .entry(node.clone()).or_default()
-                            .entry("implied".into()).or_default();
-                    }
+                    let vlvl = vcg.vert_edge_labels.entry((src.clone(), dst.clone()))
+                        .or_insert(eval::Level{forward: None, reverse: None});
+                    match (&mut vlvl.forward, forward) {
+                        (Some(f1), Some(mut f2)) => { f1.append(&mut f2); }
+                        (Some(_), None) => {},
+                        (None, Some(f2)) => { vlvl.forward.replace(f2); },
+                        _ => {},
+                    };
+                    match (&mut vlvl.reverse, reverse) {
+                        (Some(r1), Some(mut r2)) => { r1.append(&mut r2); }
+                        (Some(_), None) => {},
+                        (None, Some(r2)) => { vlvl.reverse.replace(r2); },
+                        _ => {},
+                    };
                 }
             }
         }
@@ -2219,37 +2087,6 @@ pub mod layout {
         // eprintln!("VCG DOT:\n{vcg_dot:?}");
 
         Ok(vcg)
-    }
-
-    /// A "condensed" VCG, in which all parallel edges in the original Vcg
-    /// have been "condensed" into a single compound edge in the Cvcg.
-    #[derive(Default)]
-    pub struct Cvcg<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord> {
-        pub condensed: Graph<V, SortedVec<(V, V, E)>>,
-        pub condensed_vxmap: HashMap::<V, NodeIndex>
-    }
-
-    /// Construct a cvcg from a vcg `vert`.
-    pub fn condense<V: Clone + Debug + Ord + Hash, E: Clone + Debug + Ord>(vert: &Graph<V, E>) -> Result<Cvcg<V,E>, Error> {
-        let mut condensed = Graph::<V, SortedVec<(V, V, E)>>::new();
-        let mut condensed_vxmap = HashMap::new();
-        for (vx, vl) in vert.node_references() {
-            let mut dsts = HashMap::new();
-            for er in vert.edges_directed(vx, Outgoing) {
-                let wx = er.target();
-                let wl = vert.node_weight(wx).or_err(Kind::IndexingError{})?;
-                dsts.entry(wl).or_insert_with(SortedVec::new).insert((vl.clone(), wl.clone(), (*er.weight()).clone()));
-            }
-
-            let cvx = or_insert(&mut condensed, &mut condensed_vxmap, vl.clone());
-            for (wl, exs) in dsts {
-                let cwx = or_insert(&mut condensed, &mut condensed_vxmap, wl.clone());
-                condensed.add_edge(cvx, cwx, exs);
-            }
-        }
-        // let dot = Dot::new(&condensed);
-        // eprintln!("CONDENSED:\n{dot:?}");
-        Ok(Cvcg{condensed, condensed_vxmap})
     }
 
     /// Rank a `dag`, starting from its roots, by finding longest paths
@@ -2339,9 +2176,9 @@ pub mod layout {
     use crate::graph_drawing::index::{OriginalHorizontalRank, VerticalRank};
 
     /// Methods for graph vertices and edges.
-    pub trait Graphic: Clone + Debug + Display + Eq + Hash + Ord + PartialEq + PartialOrd + log::Name {}
+    pub trait Graphic: Clone + Debug + Display + Eq + Hash + Ord + PartialEq + PartialOrd + log::Name + PartialEq<&'static str> {}
 
-    impl <T: Clone + Debug + Display + Eq + Hash + Ord + PartialEq + PartialOrd + log::Name> Graphic for T {}
+    impl <T: Clone + Debug + Display + Eq + Hash + Ord + PartialEq + PartialOrd + log::Name + PartialEq<&'static str>> Graphic for T {}
 
 
     #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
@@ -2637,18 +2474,14 @@ pub mod layout {
     pub type RankedPaths<V> = BTreeMap<VerticalRank, SortedVec<(V, V)>>;
 
     /// Set up a [LayoutProblem] problem
-    pub fn calculate_locs_and_hops<'s, V, E: AsRef<str>>(
+    pub fn calculate_locs_and_hops<'s, V: Graphic>(
         _model: &'s Val<V>,
-        dag: &'s Graph<V, SortedVec<(V, V, E)>>,
         paths_by_rank: &'s RankedPaths<V>,
         vcg: &Vcg<V, V>,
         logs: &mut log::Logger,
-    ) -> Result<LayoutProblem<V>, Error>
-            where
-        V: Display + Graphic + log::Name,
-        E: Graphic
-    {
-        let Vcg{containers, nodes_by_container_transitive, container_depths, ..} = vcg;
+    ) -> Result<LayoutProblem<V>, Error> {
+        let Vcg{vert, containers, container_depths, ..} = vcg;
+        let dag = vert;
 
         // Rank vertices by the length of the longest path reaching them.
         let mut vx_rank = BTreeMap::new();
@@ -2700,34 +2533,13 @@ pub mod layout {
             )
         })?;
 
-        let is_contains = |er: &EdgeReference<_>| {
-            let src = dag.node_weight(er.source()).unwrap();
-            let dst = dag.node_weight(er.target()).unwrap();
-            containers.contains(src) && nodes_by_container_transitive[src].contains(dst)
-        };
-        let sorted_condensed_edges = SortedVec::from_unsorted(
-            dag
-                .edge_references()
-                .filter(|x| !is_contains(x))
-                .filter_map(|er| {
-                    let (vx, wx) = (er.source(), er.target());
-                    let vl = dag.node_weight(vx).unwrap();
-                    let wl = dag.node_weight(wx).unwrap();
-                    let wgt = er.weight().iter().filter(|(_, _, rel)| !rel.as_ref().starts_with("implied")).collect::<Vec<_>>();
-                    let wgt = SortedVec::from_unsorted(wgt);
-                    if wgt.is_empty() {
-                        None
-                    } else {
-                        Some((vl.clone(), wl.clone(), wgt))
-                    }
-                })
-                .collect::<Vec<_>>()
-        );
-        // eprintln!("SORTED CONDENSED EDGES: {sorted_condensed_edges:#?}");
-
         let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
-        for (vl, wl, _) in sorted_condensed_edges.iter() {
+        for er in dag.edge_references() {
+            let vx = er.source();
+            let wx = er.target();
+            let vl = dag.node_weight(vx).unwrap();
+            let wl = dag.node_weight(wx).unwrap();
             let (vvr, vhr) = node_to_loc[&Obj::from_vl(vl, containers)].clone();
             let (wvr, whr) = node_to_loc[&Obj::from_vl(wl, containers)].clone();
             assert_ne!((vvr, vhr), (wvr, whr));
@@ -3321,7 +3133,7 @@ pub mod geometry {
     }
 
     #[derive(Clone, Debug)]
-    pub struct LocRow<V: Clone + Debug + Display + Ord + Hash + log::Name> {
+    pub struct LocRow<V: Graphic> {
         pub ovr: VerticalRank,
         pub ohr: OriginalHorizontalRank,
         pub shr: SolvedHorizontalRank,
@@ -3330,7 +3142,7 @@ pub mod geometry {
     }
 
     #[derive(Clone, Debug)]
-    pub struct HopRow<V: Clone + Debug + Display + Ord + Hash + log::Name> {
+    pub struct HopRow<V: Graphic> {
         pub lvl: VerticalRank,
         pub mhr: OriginalHorizontalRank,
         pub nhr: OriginalHorizontalRank,
@@ -3358,7 +3170,7 @@ pub mod geometry {
     }
 
     #[derive(Clone, Debug, Default)]
-    pub struct GeometryProblem<V: Clone + Debug + Display + Ord + Hash + log::Name> {
+    pub struct GeometryProblem<V: Graphic> {
         pub varrank_by_obj: HashMap<Obj<V>, VarRank>,
         pub loc_by_varrank: HashMap<VarRank, LocIx>,
         pub size_by_loc: HashMap<LocIx, NodeSize>,
@@ -3951,9 +3763,7 @@ pub mod geometry {
 
         for er in vcg.vert.edge_references() {
             let ew = er.weight();
-            if ew != "actuates" && ew != "senses" && ew != "fake" {
-                continue;
-            }
+            if ew != "vertical" { continue; }
             let src = vcg.vert.node_weight(er.source()).unwrap();
             let dst = vcg.vert.node_weight(er.target()).unwrap();
             let src_obj = Obj::from_vl(src, containers);
@@ -4380,31 +4190,31 @@ pub mod geometry {
 }
 
 pub mod frontend {
-    use std::{fmt::Display, borrow::Cow, collections::HashMap, cmp::max_by};
+    use std::{borrow::Cow, collections::HashMap, cmp::{max}};
 
     use logos::Logos;
     use ordered_float::OrderedFloat;
     use self_cell::self_cell;
 
-    use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, condense, rank, calculate_locs_and_hops, Border, ObjNode, ObjBorder}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, rank, calculate_locs_and_hops, Border, ObjNode, ObjBorder}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
-    use super::{layout::{Vcg, Cvcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val, index::OriginalHorizontalRank};
+    use super::{layout::{Vcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val, index::OriginalHorizontalRank};
 
     use log::{names};
 
-    pub fn estimate_widths<I>(
+    pub fn estimate_widths<I: Graphic>(
         vcg: &Vcg<I, I>,
-        cvcg: &Cvcg<I, I>,
         layout_problem: &LayoutProblem<I>,
         geometry_problem: &mut GeometryProblem<I>
     ) -> Result<(), Error> where
-        I: Graphic + Display + Len + PartialEq<&'static str> + log::Name,
+        I: Graphic + Len,
     {
         // let char_width = 8.67;
         let char_width = 9.0;
         let line_height = geometry_problem.line_height.unwrap_or(10.);
         let arrow_width = 40.0;
 
+        let vert = &vcg.vert;
         let vert_node_labels = &vcg.vert_node_labels;
         let vert_edge_labels = &vcg.vert_edge_labels;
         let horz_edge_labels = &vcg.horz_edge_labels;
@@ -4412,8 +4222,6 @@ pub mod frontend {
         let size_by_hop = &mut geometry_problem.size_by_hop;
         let hops_by_edge = &layout_problem.hops_by_edge;
         let loc_to_node = &layout_problem.loc_to_node;
-        let condensed = &cvcg.condensed;
-        let condensed_vxmap = &cvcg.condensed_vxmap;
 
         // eprintln!("LOC_TO_NODE WIDTHS: {loc_to_node:#?}");
 
@@ -4455,39 +4263,44 @@ pub mod frontend {
         for ((vl, wl), hops) in hops_by_edge.iter() {
             let mut action_width = 10.0;
             let mut percept_width = 10.0;
-            let mut height = 0.;
-            let cex = condensed.find_edge(condensed_vxmap[vl], condensed_vxmap[wl]).unwrap();
-            let cew = condensed.edge_weight(cex).unwrap();
-            for (vl, wl, ew) in cew.iter() {
-                let label_width = vert_edge_labels
-                    .get(vl)
-                    .and_then(|dsts| dsts
-                        .get(wl)
-                        .and_then(|rels| rels.get(ew)))
-                    .and_then(|labels| labels
+            let ex = vert.find_edge(vcg.vert_vxmap[vl], vcg.vert_vxmap[wl]).unwrap();
+            let ew = vert.edge_weight(ex).unwrap();
+            if *ew != "vertical" { continue };
+
+            let labels = vert_edge_labels.get(&(vl.clone(), wl.clone()));
+            let mut height = 10.;
+            if let Some(labels) = labels {
+                let forward_label_width = labels.forward
+                    .as_ref()
+                    .and_then(|forward| forward
                         .iter()
                         .map(|label| label.len())
                         .max()
                     );
 
-                match ew {
-                    x if *x == "senses" => {
-                        percept_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
-                    }
-                    x if *x == "actuates" => {
-                        action_width = label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.0);
-                    }
-                    _ => {}
-                }
+                let reverse_label_width = labels.reverse
+                    .as_ref()
+                    .and_then(|reverse| reverse
+                        .iter()
+                        .map(|label| label.len())
+                        .max()
+                    );
 
-                let label_height = vert_edge_labels
-                    .get(vl)
-                    .and_then(|dsts| dsts
-                        .get(wl)
-                        .and_then(|rels| rels.get(ew)))
-                    .map(|labels| labels.len());
+                let level_height = max(
+                    labels.forward
+                        .as_ref()
+                        .map(|f| f.len())
+                        .unwrap_or(0),
+                    labels.reverse
+                        .as_ref()
+                        .map(|r| r.len())
+                        .unwrap_or(0)
+                );
 
-                height = max_by(height, label_height.unwrap_or(1) as f64 * line_height, f64::total_cmp);
+                action_width = forward_label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.);
+                percept_width = reverse_label_width.map(|label_width| arrow_width + char_width * label_width as f64).unwrap_or(20.);
+
+                height = level_height as f64 * line_height;
             }
 
             let mut hops = hops.clone();
@@ -4529,7 +4342,6 @@ pub mod frontend {
         pub items: Vec<Item<'s>>,
         pub val: Val<Cow<'s, str>>,
         pub vcg: Vcg<Cow<'s, str>, Cow<'s, str>>,
-        pub cvcg: Cvcg<Cow<'s, str>, Cow<'s, str>>,
         pub paths_by_rank: RankedPaths<Cow<'s, str>>,
         pub layout_problem: LayoutProblem<Cow<'s, str>>,
         pub layout_solution: LayoutSolution,
@@ -4584,9 +4396,6 @@ pub mod frontend {
 
             let Vcg{vert, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
 
-            let cvcg = condense(vert)?;
-            let Cvcg{condensed, condensed_vxmap: _} = &cvcg;
-
             let distance = {
                 let containers = &containers;
                 let nodes_by_container = &nodes_by_container;
@@ -4633,7 +4442,7 @@ pub mod frontend {
                     }
                 }
             };
-            let paths_by_rank = rank(condensed, distance, logs)?;
+            let paths_by_rank = rank(vert, distance, logs)?;
 
             logs.with_map("paths_by_rank", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
                 l.with_map(format!("paths_by_rank[{rank}]"), "SortedVec<(V, V)>", paths.iter().map(|p| (&p.0, &p.1)), |from, to, l| {
@@ -4648,7 +4457,7 @@ pub mod frontend {
                 })
             })?;
 
-            let layout_problem = calculate_locs_and_hops(&val, condensed, &paths_by_rank, &vcg, logs)?;
+            let layout_problem = calculate_locs_and_hops(&val, &paths_by_rank, &vcg, logs)?;
 
             // ... adjust problem for horizontal edges
 
@@ -4656,7 +4465,7 @@ pub mod frontend {
 
             let mut geometry_problem = calculate_sols(&layout_problem, &layout_solution);
 
-            estimate_widths(&vcg, &cvcg, &layout_problem, &mut geometry_problem)?;
+            estimate_widths(&vcg, &layout_problem, &mut geometry_problem)?;
 
             let (horizontal_problem, vertical_problem) = position_sols(&vcg, &layout_problem, &layout_solution, &geometry_problem, logs)?;
 
@@ -4666,7 +4475,6 @@ pub mod frontend {
                 items,
                 val,
                 vcg,
-                cvcg,
                 paths_by_rank,
                 layout_problem,
                 layout_solution,
@@ -4885,6 +4693,8 @@ pub mod frontend {
     pub mod dom {
         use std::{borrow::Cow};
 
+        use petgraph::visit::EdgeRef;
+
         use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, Border, ObjContainer, ObjNode, ObjHop, ObjBorder}, index::{VarRank}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
 
         use super::log::{self, Log};
@@ -4901,7 +4711,7 @@ pub mod frontend {
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Node {
             Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: VarRank, estimated_size: NodeSize },
-            Svg { key: String, path: String, z_index: usize, rel: String, label: Option<Label>, hops: Vec<VarRank>, classes: String, estimated_size: HopSize },
+            Svg { key: String, path: String, z_index: usize, dir: String, rel: String, label: Option<Label>, hops: Vec<VarRank>, classes: String, estimated_size: HopSize },
         }
 
         #[derive(Clone, Debug)]
@@ -4948,6 +4758,7 @@ pub mod frontend {
             let loc_by_varrank = &depiction.geometry_problem.loc_by_varrank;
             let loc_to_node = &depiction.layout_problem.loc_to_node;
             let node_to_loc = &depiction.layout_problem.node_to_loc;
+            let vert = &depiction.vcg.vert;
             let vert_node_labels = &depiction.vcg.vert_node_labels;
             let vert_edge_labels = &depiction.vcg.vert_edge_labels;
             let horz_edge_labels = &depiction.vcg.horz_edge_labels;
@@ -4955,7 +4766,6 @@ pub mod frontend {
             let size_by_loc = &depiction.geometry_problem.size_by_loc;
             let size_by_hop = &depiction.geometry_problem.size_by_hop;
             let crossing_number = depiction.layout_solution.crossing_number;
-            let condensed = &depiction.cvcg.condensed;
             let containers = &depiction.vcg.containers;
             let container_borders = &depiction.layout_problem.container_borders;
             let container_depths = &depiction.vcg.container_depths;
@@ -5061,33 +4871,24 @@ pub mod frontend {
 
             let mut arrows = vec![];
 
-            for cer in condensed.edge_references() {
-                let mut prev_vwe = None;
-                for (m, (vl, wl, ew)) in cer.weight().iter().enumerate() {
-                    if ew.as_ref().starts_with("implied") { continue; }
+            for er in vert.edge_references() {
+                let vl = vert.node_weight(er.source()).unwrap();
+                let wl = vert.node_weight(er.target()).unwrap();
+                let ew = er.weight();
 
-                    if prev_vwe == Some((vl, wl, ew)) {
-                        continue
-                    } else {
-                        prev_vwe = Some((vl, wl, ew))
-                    }
+                let Some(level) = vert_edge_labels.get(&(vl.clone(), wl.clone())) else {continue};
 
-                    let label_text = vert_edge_labels
-                        .get(vl)
-                        .and_then(|dsts| dsts
-                            .get(wl)
-                            .and_then(|rels| rels.get(ew)))
-                        .map(|v| v.join("\n"));
-
+                for (dir, labels) in &[("forward", level.forward.as_ref()), ("reverse", level.reverse.as_ref())] {
+                    let label_text = labels.map(|labels| labels.join("\n"));
                     let hops = hops_by_edge.get(&(vl.clone(), wl.clone()));
                     let hops = if let Some(hops) = hops { hops } else { continue; };
                     // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
 
-                    let offset = match ew {
-                        x if x == "actuates" => -10.0,
-                        x if x == "actuator" => -10.0,
-                        x if x == "senses" => 10.0,
-                        x if x == "sensor" => 10.0,
+                    let offset = match *dir {
+                        x if x == "forward" => -10.0,
+                        x if x == "forward" => -10.0,
+                        x if x == "reverse" => 10.0,
+                        x if x == "reverse" => 10.0,
                         _ => 0.0,
                     };
 
@@ -5138,7 +4939,7 @@ pub mod frontend {
                         if n == 0 {
                             estimated_size0 = Some(size_by_hop[&(*lvl, *mhr, vl.clone(), wl.clone())].clone());
                             let mut vpos = vpos;
-                            if *ew == "senses" {
+                            if *dir == "reverse" {
                                 vpos += 7.0; // box height + arrow length
                             } else {
                                 // vpos += 26.0;
@@ -5150,29 +4951,29 @@ pub mod frontend {
                             let n = varrank_by_obj[&Obj::Hop(ObjHop{lvl: *lvl+1, mhr: *nhr, vl: vl.clone(), wl: wl.clone()})];
                             // sol_by_loc[&((*lvl+1), *nhr)];
                             // let n = sol_by_loc[&((*lvl), *mhr)];
-                            label_hpos = Some(match ew {
-                                x if x == "senses" => {
+                            label_hpos = Some(match *dir {
+                                x if x == "reverse" => {
                                     // ls[n]
                                     hposd
                                 },
-                                x if x == "actuates" => {
+                                x if x == "forward" => {
                                     // ls[n]
                                     hposd
                                 },
                                 _ => hposd + 9.
                             });
-                            label_width = Some(match ew {
-                                x if x == "senses" => {
+                            label_width = Some(match *dir {
+                                x if x == "reverse" => {
                                     // ls[n]
                                     rs[&n] - sposd
                                 },
-                                x if x == "actuates" => {
+                                x if x == "forward" => {
                                     // ls[n]
                                     sposd - ls[&n]
                                 },
                                 _ => rs[&n] - ls[&n]
                             });
-                            label_vpos = Some(match ew {
+                            label_vpos = Some(match *dir {
                                 x if x == "fake" => {
                                     if containers.contains(vl) {
                                         vpos - 1.
@@ -5188,7 +4989,7 @@ pub mod frontend {
                         //     vpos2 += 26.;
                         // }
 
-                        if n == hops.len() - 1 && *ew == "actuates" {
+                        if n == hops.len() - 1 && *dir == "forward" {
                             vpos2 -= 7.0; // arrowhead length
                         }
 
@@ -5196,7 +4997,7 @@ pub mod frontend {
 
                     }
 
-                    let key = format!("{vl}_{wl}_{ew}_{m}");
+                    let key = format!("{vl}_{wl}_{ew}_{dir}");
                     let path = path.join(" ");
 
                     let mut label = None;
@@ -5206,7 +5007,7 @@ pub mod frontend {
                     }
                     let classes = format!("arrow vertical {ew} {vl}_{wl} {vl}_{wl}_{ew}");
 
-                    arrows.push(Node::Svg{key, path, z_index, rel: ew.to_string(), label, hops: hn0, classes, estimated_size: estimated_size0.unwrap()});
+                    arrows.push(Node::Svg{key, path, z_index, dir: "vertical".into(), rel: dir.to_string(), label, hops: hn0, classes, estimated_size: estimated_size0.unwrap()});
                 }
             }
             let forward_voffset = 6.;
@@ -5256,7 +5057,7 @@ pub mod frontend {
                         None
                     };
                     let estimated_size = HopSize{ width: 0., left: wl, right: wr, height: 0., top: 0., bottom: 0. };
-                    arrows.push(Node::Svg{key, path, z_index, label, rel: "forward".into(), hops: vec![], classes, estimated_size });
+                    arrows.push(Node::Svg{key, path, z_index, label, dir: "horizontal".into(), rel: "forward".into(), hops: vec![], classes, estimated_size });
                 }
                 if let Some(reverse) = &lvl.reverse {
                     let key = format!("{vl}_{wl}_reverse_{m}");
@@ -5298,7 +5099,7 @@ pub mod frontend {
                         None
                     };
                     let estimated_size = HopSize{ width: 0., left: wl, right: wr, height: 0., top: 0., bottom: 0. };
-                    arrows.push(Node::Svg{key, path, z_index, label, rel: "reverse".into(), hops: vec![], classes, estimated_size });
+                    arrows.push(Node::Svg{key, path, z_index, label, dir: "horizontal".into(), rel: "reverse".into(), hops: vec![], classes, estimated_size });
                 }
             }
 
@@ -5392,7 +5193,7 @@ pub mod frontend {
                                     .add(Text::new(label)))
                             );
                     },
-                    Node::Svg{path, rel, label, classes, ..} => {
+                    Node::Svg{path, dir, rel, label, classes, ..} => {
 
                         let mut path_elt = Path::new()
                             .set("class", classes)
@@ -5400,23 +5201,23 @@ pub mod frontend {
                             .set("stroke", "black");
 
                         match rel.as_str() {
-                            "actuates" | "forward" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
-                            "senses" | "reverse" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
+                            "forward" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
+                            "reverse" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
                             _ => {},
                         };
 
                         if let Some(Label{text, hpos, width: _, vpos, ..}) = label {
                             for (lineno, line) in text.lines().enumerate() {
-                                let translate = match rel.as_ref() {
-                                    "actuates" => format!("translate({}, {})", hpos-12., vpos + 56. + (20. * lineno as f64)),
-                                    "senses" => format!("translate({}, {})", hpos+12., vpos + 56. + (20. * lineno as f64)),
-                                    "forward" => format!("translate({}, {})", hpos, vpos - 10. - 20. * lineno as f64),
-                                    "reverse" => format!("translate({}, {})", hpos, vpos + 20. + 20. * lineno as f64),
-                                    "fake" => format!("translate({}, {})", hpos, vpos + 20.),
+                                let translate = match (dir.as_ref(), rel.as_ref()) {
+                                    ("vertical", "forward") => format!("translate({}, {})", hpos-12., vpos + 56. + (20. * lineno as f64)),
+                                    ("vertical", "reverse") => format!("translate({}, {})", hpos+12., vpos + 56. + (20. * lineno as f64)),
+                                    ("horizontal", "forward") => format!("translate({}, {})", hpos, vpos - 10. - 20. * lineno as f64),
+                                    ("horizontal", "reverse") => format!("translate({}, {})", hpos, vpos + 20. + 20. * lineno as f64),
+                                    ("vertical", "fake") => format!("translate({}, {})", hpos, vpos + 20.),
                                     _ => format!("translate({}, {})", hpos, (vpos + 20. * lineno as f64)),
                                 };
                                 let anchor = match rel.as_ref() {
-                                    "actuates" | "forward" => "end",
+                                    "forward" => "end",
                                     _ => "start",
                                 };
                                 svg.append(Group::new()
@@ -5467,9 +5268,9 @@ pub mod frontend {
                             }
                         }));
                     },
-                    Node::Svg{key, path, z_index, rel, label, classes, ..} => {
-                        let marker_id = if rel == "actuates" || rel == "forward" { "arrowhead" } else { "arrowheadrev" };
-                        let marker_orient = if rel == "actuates" || rel == "forward" { "auto" } else { "auto-start-reverse" };
+                    Node::Svg{key, path, z_index, dir, rel, label, classes, ..} => {
+                        let marker_id = if rel == "forward" { "arrowhead" } else { "arrowheadrev" };
+                        let marker_orient = if rel == "forward" { "auto" } else { "auto-start-reverse" };
                         // let stroke_dasharray = if rel == "fake" { "5 5" } else { "none" };
                         // let stroke_color = if rel == "fake" { "hsl(0, 0%, 50%)" } else { "currentColor" };
                         children.push(cx.render(rsx!{
@@ -5501,13 +5302,13 @@ pub mod frontend {
                                     }
                                     {
                                         match rel.as_str() {
-                                            "actuates" | "forward" => {
+                                            "forward" => {
                                                 rsx!(path {
                                                     d: "{path}",
                                                     marker_end: "url(#arrowhead)",
                                                 })
                                             },
-                                            "senses" | "reverse" => {
+                                            "reverse" => {
                                                 rsx!(path {
                                                     d: "{path}",
                                                     "marker-start": "url(#arrowheadrev)",
@@ -5525,16 +5326,16 @@ pub mod frontend {
                                 }
                                 {match label {
                                     Some(Label{text, hpos, width: _, vpos}) => {
-                                        let translate = match &rel[..] {
-                                            "actuates" => "translate(calc(-100% - 1.5ex))",
-                                            "forward" => "translate(calc(-100% - 1.5ex), calc(-100% + 20px))",
-                                            "senses" | "reverse" => "translate(1.5ex)",
+                                        let translate = match (dir.as_ref(), rel.as_ref()) {
+                                            ("vertical", "forward") => "translate(calc(-100% - 1.5ex))",
+                                            ("horizontal", "forward") => "translate(calc(-100% - 1.5ex), calc(-100% + 20px))",
+                                            (_, "reverse") => "translate(1.5ex)",
                                             _ => "translate(0px, 0px)",
                                         };
-                                        let offset = match &rel[..] {
-                                            "actuates" | "senses" => "40px",
-                                            "forward" => "-24px",
-                                            "reverse" => "4px",
+                                        let offset = match (dir.as_ref(), rel.as_ref()) {
+                                            ("vertical", _) => "40px",
+                                            ("horizontal", "forward") => "-24px",
+                                            ("horizontal", "reverse") => "4px",
                                             _ => "0px",
                                         };
                                         // let border = match rel.as_str() {
@@ -5822,12 +5623,6 @@ mod tests {
         assert_eq!(vert.node_weight(vx), Some(&Cow::from("Ab")));
         assert_eq!(vert.node_weight(wx), Some(&Cow::from("Ac")));
 
-        let Cvcg{condensed, condensed_vxmap} = condense(&vert)?;
-        let cvx = condensed_vxmap["Ab"];
-        let cwx = condensed_vxmap["Ac"];
-        assert_eq!(condensed.node_weight(cvx), Some(&Cow::from("Ab")));
-        assert_eq!(condensed.node_weight(cwx), Some(&Cow::from("Ac")));
-
         let distance = {
             let containers = &containers;
             let nodes_by_container = &nodes_by_container;
@@ -5844,10 +5639,10 @@ mod tests {
                 }
             }
         };
-        let paths_by_rank = rank(&condensed, distance, &mut logs)?;
+        let paths_by_rank = rank(&vcg.vert, distance, &mut logs)?;
         assert_eq!(paths_by_rank[&VerticalRank(2)][0], (Cow::from("Aa"), Cow::from("Ac")));
 
-        let layout_problem = calculate_locs_and_hops(&val, &condensed, &paths_by_rank, &vcg, &mut logs)?;
+        let layout_problem = calculate_locs_and_hops(&val, &paths_by_rank, &vcg, &mut logs)?;
         let LayoutProblem{hops_by_level, loc_to_node, node_to_loc, ..} = &layout_problem;
         let nAa = Obj::Node(ObjNode{ vl: Cow::from("Aa") });
         let nAb = Obj::Node(ObjNode{ vl: Cow::from("Ab") });
