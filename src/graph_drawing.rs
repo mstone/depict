@@ -4211,7 +4211,7 @@ pub mod frontend {
     {
         // let char_width = 8.67;
         let char_width = 9.0;
-        let line_height = geometry_problem.line_height.unwrap_or(10.);
+        let line_height = geometry_problem.line_height.unwrap_or(20.);
         let arrow_width = 40.0;
 
         let vert = &vcg.vert;
@@ -4946,6 +4946,7 @@ pub mod frontend {
                             let mut vpos = vpos;
                             if *dir == "reverse" {
                                 vpos += 7.0; // box height + arrow length
+                                label_vpos = Some(vpos);
                             } else {
                                 // vpos += 26.0;
                             }
@@ -4958,36 +4959,26 @@ pub mod frontend {
                             // sol_by_loc[&((*lvl+1), *nhr)];
                             // let n = sol_by_loc[&((*lvl), *mhr)];
                             label_hpos = Some(match *dir {
-                                x if x == "reverse" => {
+                                "reverse" => {
                                     // ls[n]
                                     hposd
                                 },
-                                x if x == "forward" => {
+                                "forward" => {
                                     // ls[n]
                                     hposd
                                 },
                                 _ => hposd + 9.
                             });
                             label_width = Some(match *dir {
-                                x if x == "reverse" => {
+                                "reverse" => {
                                     // ls[n]
                                     rs[&n] - sposd
                                 },
-                                x if x == "forward" => {
+                                "forward" => {
                                     // ls[n]
                                     sposd - ls[&n]
                                 },
                                 _ => rs[&n] - ls[&n]
-                            });
-                            label_vpos = Some(match *dir {
-                                x if x == "fake" => {
-                                    if containers.contains(vl) {
-                                        vpos - 1.
-                                    } else {
-                                        vpos + 14.
-                                    }
-                                },
-                                _ => vpos - 20.,
                             });
                         }
 
@@ -4997,6 +4988,9 @@ pub mod frontend {
 
                         if n == hops.len() - 1 && *dir == "forward" {
                             vpos2 -= 7.0; // arrowhead length
+                            if *dir == "forward" {
+                                label_vpos = Some(vpos2 - estimated_size0.as_ref().unwrap().height);
+                            }
                         }
 
                         path.push(format!("L {hposd} {vpos2}"));
@@ -5341,7 +5335,6 @@ pub mod frontend {
                                             _ => "translate(0px, 0px)",
                                         };
                                         let offset = match (dir.as_ref(), rel.as_ref()) {
-                                            ("vertical", _) => "40px",
                                             ("horizontal", "forward") => "-24px",
                                             ("horizontal", "reverse") => "4px",
                                             _ => "0px",
@@ -5624,12 +5617,16 @@ pub mod frontend {
                             Node::Svg { key, path, z_index, dir, rel, label, hops, classes, estimated_size, control_points } => {
                                 let mut res = vec![];
                                 if let Some(Label{text, hpos, width, vpos}) = label {
-                                    res.push(Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + estimated_size.height });
+                                    if rel == "forward" {
+                                        res.push(Rect { id: key.clone(), l: *hpos - width, r: *hpos, t: *vpos, b: vpos + estimated_size.height });
+                                    } else {
+                                        res.push(Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + estimated_size.height });
+                                    }
                                 }
-                                for window in control_points.windows(2) {
+                                for (n, window) in control_points.windows(2).enumerate() {
                                     let [cur, nxt, ..] = window else { continue };
                                     res.push(Rect {
-                                        id: key.clone(),
+                                        id: format!("{key},{n}"),
                                         l: f64::min(cur.0, nxt.0),
                                         r: f64::max(cur.0, nxt.0),
                                         t: f64::min(cur.1, nxt.1),
