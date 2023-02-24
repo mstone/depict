@@ -5709,6 +5709,19 @@ pub mod frontend {
         pub fn test_container_vertical_hop() {
             check("a [ b c ]", vec![]);
         }
+
+        #[test]
+        pub fn test_objc() {
+            check(r#"
+                devs status-type: add property,
+                devs services: add service, plumb data
+                services status-type: read property, check protocol conformance, check selector responsiveness
+                "#,
+                vec![
+                    // &NoCollisions{}
+                ]
+            );
+        }
     }
 }
 
