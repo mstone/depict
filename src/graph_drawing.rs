@@ -3902,13 +3902,13 @@ pub mod geometry {
                 };
             }
             macro_rules! impl_con {
-                ($src:ident, $src_sol_con:ident, $dst:ident, $dst_sol_con:ident) => {
+                ($src:ident, $src_sol_con:ident, $dst:ident, $dst_sol_con:ident, $edge:ident) => {
                     {
                         let src_guide_sol = AnySol::$src_sol_con(sol_for!($src));
                         let dst_guide_sol = AnySol::$dst_sol_con(sol_for!($dst));
                         let src_ix = *con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
                         let dst_ix = *con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
-                        con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(edge.margin.0)})));
+                        con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), $edge.clone()));
                     }
                 };
             }
@@ -3928,22 +3928,43 @@ pub mod geometry {
             let src_flavor: Flavor = src.into();
             let dst_flavor: Flavor = dst.into();
 
+            let margin = ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(edge.margin.0)});
+            let symmetrize = ConEdgeFlavor::Hop();
             match (src_flavor, dst_flavor, edge.dir) {
-                (Flavor::Box, Flavor::Box, Direction::Vertical) => impl_con![src, B, dst, T],
-                (Flavor::Box, Flavor::Box, Direction::Horizontal) => impl_con![src, R, dst, L],
-                (Flavor::Box, Flavor::Arrow, Direction::Vertical) => { impl_con![src, B, dst, T]; impl_con![src, L, dst, S]; impl_con![dst, S, src, R]; },
-                (Flavor::Box, Flavor::Arrow, Direction::Horizontal) => impl_con![src, R, dst, S],
-                (Flavor::Arrow, Flavor::Box, Direction::Vertical) => { impl_con![src, B, dst, T]; impl_con![dst, L, src, S]; impl_con![src, S, dst, R]; },
-                (Flavor::Arrow, Flavor::Box, Direction::Horizontal) => impl_con![src, S, dst, L],
+                (Flavor::Box, Flavor::Box, Direction::Vertical) => {
+                    impl_con![src, B, dst, T, margin];
+                },
+                (Flavor::Box, Flavor::Box, Direction::Horizontal) => {
+                    impl_con![src, R, dst, L, margin];
+                },
+                (Flavor::Box, Flavor::Arrow, Direction::Vertical) => {
+                    impl_con![src, B, dst, T, margin];
+                    impl_con![src, L, dst, L, margin];
+                    impl_con![dst, L, dst, S, margin];
+                    impl_con![dst, S, dst, R, margin];
+                    impl_con![dst, R, src, R, margin];
+                },
+                (Flavor::Box, Flavor::Arrow, Direction::Horizontal) => {
+                    impl_con![src, R, dst, S, margin];
+                },
+                (Flavor::Arrow, Flavor::Box, Direction::Vertical) => {
+                    impl_con![src, B, dst, T, margin];
+                    impl_con![dst, L, src, L, margin];
+                    impl_con![src, L, src, S, margin];
+                    impl_con![src, S, dst, R, margin];
+                    impl_con![src, R, dst, R, margin];
+                },
+                (Flavor::Arrow, Flavor::Box, Direction::Horizontal) => {
+                    impl_con![src, S, dst, L, margin];
+                },
                 (Flavor::Arrow, Flavor::Arrow, Direction::Vertical) => {
-                    impl_con![src, B, dst, T];
-                    let src_guide_sol = AnySol::S(sol_for!(src));
-                    let dst_guide_sol = AnySol::S(sol_for!(dst));
-                    let src_ix = *con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
-                    let dst_ix = *con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
-                    con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), ConEdgeFlavor::Hop()));
+                    impl_con![src, B, dst, T, margin];
+                    impl_con![src, S, dst, S, symmetrize];
                 }, //{eprintln!("WARNING: arrow->arrow vertical constraint: {src} -> {dst}, edge: {edge}");},
-                (Flavor::Arrow, Flavor::Arrow, Direction::Horizontal) => {eprintln!("WARNING: arrow->arrow, {src} -> {dst}, edge: {edge}"); continue}, //impl_con![S, S],
+                (Flavor::Arrow, Flavor::Arrow, Direction::Horizontal) => {
+                    eprintln!("WARNING: arrow->arrow, {src} -> {dst}, edge: {edge}");
+                    continue
+                }, //impl_con![S, S],
             }
         }
 
