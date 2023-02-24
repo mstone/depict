@@ -5698,6 +5698,16 @@ pub mod frontend {
                 vec![] //vec![&NoCollisions{}]
             );
         }
+
+        #[test]
+        pub fn test_simple_containment() {
+            check("a [ b ]", vec![]);
+        }
+
+        #[test]
+        pub fn test_container_vertical_hop() {
+            check("a [ b c ]", vec![]);
+        }
     }
 }
 
