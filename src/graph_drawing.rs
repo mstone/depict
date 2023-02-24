@@ -3755,7 +3755,7 @@ pub mod geometry {
                         (Obj::Container(ObjContainer{vl: container}),
                         Obj::Node(ObjNode{vl: wl}) | Obj::Container(ObjContainer{vl: wl}))
                         if nodes_by_container[container].contains(wl)) {
-                    obj_graph.add_edge(left_ix, solved_ix, obj_edge(Direction::Horizontal, "solved-left".into(), 20.));
+                    obj_graph.add_edge(left_ix, solved_ix, obj_edge(Direction::Horizontal, "solved-left".into(), 40.));
                 }
             }
             // todo: hop edges, nested edges, ...
@@ -3788,13 +3788,13 @@ pub mod geometry {
                 let terminal = hop == &dst_loc;
                 let hop_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: src.clone(), wl: dst.clone(), lvl: hop.0, mhr: hop.1})));
                 if initial {
-                    obj_graph.add_edge(src_ix, hop_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 10.));
+                    obj_graph.add_edge(src_ix, hop_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 0.));
                 }
                 if terminal {
-                    obj_graph.add_edge(hop_ix, dst_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 10.));
+                    obj_graph.add_edge(hop_ix, dst_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 0.));
                 }
                 if let Some(prev_hop_ix) = prev_hop_ix {
-                    obj_graph.add_edge(prev_hop_ix, hop_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 10.));
+                    obj_graph.add_edge(prev_hop_ix, hop_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 26.));
                 }
                 prev_hop_ix = Some(hop_ix);
             }
@@ -4780,9 +4780,9 @@ pub mod frontend {
 
             // Log the resolved value
             // logs.log_string("VAL", val);
-            val.log("VAL".into(), &mut logs)?;
-
-            loc_to_node.log((), &mut logs)?;
+            logs.with_group("Eval", "", Vec::<String>::new(), |mut logs| {
+                val.log("VAL".into(), &mut logs)
+            })?;
 
             let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
                 Obj::Node(ObjNode{vl: node}) => node.to_string().names(),
@@ -4795,13 +4795,17 @@ pub mod frontend {
                 l2n(loc_ix.0, loc_ix.1)
             };
 
-            // sol_by_loc.log(l2n, &mut logs)?;
-            // sol_by_hop.log(l2n, &mut logs)?;
-            varrank_by_obj.log((), &mut logs)?;
-            // loc_by_varrank.log(l2n, &mut logs)?;
-            solved_locs.log(l2n, &mut logs)?;
-            size_by_loc.log(l2n, &mut logs)?;
-            size_by_hop.log(l2n, &mut logs)?;
+
+            logs.with_group("Layout", "", Vec::<String>::new(), |mut logs| {
+                loc_to_node.log((), &mut logs)?;
+                // sol_by_loc.log(l2n, &mut logs)?;
+                // sol_by_hop.log(l2n, &mut logs)?;
+                varrank_by_obj.log((), &mut logs)?;
+                // loc_by_varrank.log(l2n, &mut logs)?;
+                solved_locs.log(l2n, &mut logs)?;
+                size_by_loc.log(l2n, &mut logs)?;
+                size_by_hop.log(l2n, &mut logs)
+            })?;
             horizontal_problem.log(("horizontal_problem".into(), v2n), &mut logs)?;
             vertical_problem.log(("vertical_problem".into(), v2n), &mut logs)?;
             geometry_solution.log(v2n, &mut logs)?;
@@ -5578,6 +5582,8 @@ pub mod frontend {
 
     #[cfg(test)]
     mod tests {
+        use std::fmt::Display;
+
         use crate::graph_drawing::{error::Error, frontend::dom::{Node, Label}};
 
         use super::dom::Drawing;
@@ -5591,6 +5597,12 @@ pub mod frontend {
 
         #[derive(Debug)]
         struct Rect { id: String, l: f64, r: f64, t: f64, b: f64 }
+
+        impl Display for Rect {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "Rect {{ l: {:7.2}, r: {:7.2}, t: {:7.2}, b: {:7.2}, id: {:?} }}", self.l, self.r, self.t, self.b, self.id)
+            }
+        }
 
         fn collides(a: &Rect, b: &Rect) -> bool {
             a.r > b.l &&
@@ -5636,7 +5648,7 @@ pub mod frontend {
                         let rj = &rects[j];
                         let collides = collides(ri, rj);
                         if collides {
-                            eprintln!("COLLISION: {i}, {j}, \n{ri:?}, \n{rj:?}");
+                            eprintln!("COLLISION: {i}, {j}, \n{ri}, \n{rj}\n");
                         }
                         collisions |= collides;
                     }
@@ -5655,6 +5667,11 @@ pub mod frontend {
         #[test]
         pub fn test_long_hop() {
             check("a b c; a c", vec![&NoCollisions{}]);
+        }
+
+        #[test]
+        pub fn test_simple_labels() {
+            check("a b: c / d", vec![&NoCollisions{}]);
         }
 
         #[test]
