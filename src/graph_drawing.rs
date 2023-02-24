@@ -4011,7 +4011,7 @@ pub mod geometry {
                     vertical_problem.c.leqc(&mut vertical_problem.v, *src, *tgt, *margin);
                 },
                 (_, ConEdgeFlavor::Hop()) => {
-                    horizontal_problem.c.sym(&mut horizontal_problem.v, &mut horizontal_problem.pd, *src, *tgt, 1.);
+                    horizontal_problem.c.sym(&mut horizontal_problem.v, &mut horizontal_problem.pd, *src, *tgt, 10.);
                 }
                 _ => {},
             }
