@@ -4711,7 +4711,7 @@ pub mod frontend {
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Node {
             Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: VarRank, estimated_size: NodeSize },
-            Svg { key: String, path: String, z_index: usize, dir: String, rel: String, label: Option<Label>, hops: Vec<VarRank>, classes: String, estimated_size: HopSize },
+            Svg { key: String, path: String, z_index: usize, dir: String, rel: String, label: Option<Label>, hops: Vec<VarRank>, classes: String, estimated_size: HopSize, control_points: Vec<(f64, f64)> },
         }
 
         #[derive(Clone, Debug)]
@@ -4895,6 +4895,7 @@ pub mod frontend {
                     let z_index = std::cmp::max(nesting_depths[vl], nesting_depths[wl]) + 1;
 
                     let mut path = vec![];
+                    let mut control_points = vec![];
                     let mut label_hpos = None;
                     let mut label_width = None;
                     let mut label_vpos = None;
@@ -4945,6 +4946,7 @@ pub mod frontend {
                                 // vpos += 26.0;
                             }
                             path.push(format!("M {hpos} {vpos}"));
+                            control_points.push((hpos, vpos));
                         }
 
                         if n == 0 {
@@ -4994,7 +4996,7 @@ pub mod frontend {
                         }
 
                         path.push(format!("L {hposd} {vpos2}"));
-
+                        control_points.push((hpos, vpos2));
                     }
 
                     let key = format!("{vl}_{wl}_{ew}_{dir}");
@@ -5007,7 +5009,7 @@ pub mod frontend {
                     }
                     let classes = format!("arrow vertical {ew} {vl}_{wl} {vl}_{wl}_{ew}");
 
-                    arrows.push(Node::Svg{key, path, z_index, dir: "vertical".into(), rel: dir.to_string(), label, hops: hn0, classes, estimated_size: estimated_size0.unwrap()});
+                    arrows.push(Node::Svg{key, path, z_index, dir: "vertical".into(), rel: dir.to_string(), label, hops: hn0, classes, estimated_size: estimated_size0.unwrap(), control_points});
                 }
             }
             let forward_voffset = 6.;
@@ -5049,6 +5051,7 @@ pub mod frontend {
                     let vposl = ts[&nl] + forward_voffset;
                     let vposr = ts[&nr] + forward_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
+                    let control_points = vec![(lr, vposl), (rl, vposr)];
                     let label_text = forward.join("\n");
                     let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
                     let label = if !forward.is_empty() {
@@ -5057,7 +5060,7 @@ pub mod frontend {
                         None
                     };
                     let estimated_size = HopSize{ width: 0., left: wl, right: wr, height: 0., top: 0., bottom: 0. };
-                    arrows.push(Node::Svg{key, path, z_index, label, dir: "horizontal".into(), rel: "forward".into(), hops: vec![], classes, estimated_size });
+                    arrows.push(Node::Svg{key, path, z_index, label, dir: "horizontal".into(), rel: "forward".into(), hops: vec![], classes, estimated_size, control_points });
                 }
                 if let Some(reverse) = &lvl.reverse {
                     let key = format!("{vl}_{wl}_reverse_{m}");
@@ -5091,6 +5094,7 @@ pub mod frontend {
                     let vposl = ts[&nl] + reverse_voffset;
                     let vposr = ts[&nr] + reverse_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
+                    let control_points = vec![(lr, vposl), (rl, vposr)];
                     let label_text = reverse.join("\n");
                     let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
                     let label = if !reverse.is_empty() {
@@ -5099,7 +5103,7 @@ pub mod frontend {
                         None
                     };
                     let estimated_size = HopSize{ width: 0., left: wl, right: wr, height: 0., top: 0., bottom: 0. };
-                    arrows.push(Node::Svg{key, path, z_index, label, dir: "horizontal".into(), rel: "reverse".into(), hops: vec![], classes, estimated_size });
+                    arrows.push(Node::Svg{key, path, z_index, label, dir: "horizontal".into(), rel: "reverse".into(), hops: vec![], classes, estimated_size, control_points });
                 }
             }
 
@@ -5574,13 +5578,90 @@ pub mod frontend {
 
     #[cfg(test)]
     mod tests {
-        fn check(model: &str) {
-            super::dom::draw(model.into());
+        use crate::graph_drawing::{error::Error, frontend::dom::{Node, Label}};
+
+        use super::dom::Drawing;
+
+        trait Check {
+            fn check(&self, drawing: &Result<Drawing, Error>);
+        }
+
+        struct NoCollisions {}
+
+
+        #[derive(Debug)]
+        struct Rect { id: String, l: f64, r: f64, t: f64, b: f64 }
+
+        fn collides(a: &Rect, b: &Rect) -> bool {
+            a.r > b.l &&
+            a.l < b.r &&
+            a.b > b.t &&
+            a.t < b.b
+        }
+
+        impl Check for NoCollisions {
+            fn check(&self, drawing: &Result<Drawing, Error>) {
+                let Drawing{nodes, ..} = drawing.as_ref().unwrap();
+                let rects = nodes
+                    .iter()
+                    .flat_map(|n| {
+                        match n {
+                            Node::Div { key, label, hpos, vpos, width, height, z_index, loc, estimated_size } => {
+                                vec![Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + height }]
+                            },
+                            Node::Svg { key, path, z_index, dir, rel, label, hops, classes, estimated_size, control_points } => {
+                                let mut res = vec![];
+                                if let Some(Label{text, hpos, width, vpos}) = label {
+                                    res.push(Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + estimated_size.height });
+                                }
+                                for window in control_points.windows(2) {
+                                    let [cur, nxt, ..] = window else { continue };
+                                    res.push(Rect {
+                                        id: key.clone(),
+                                        l: f64::min(cur.0, nxt.0),
+                                        r: f64::max(cur.0, nxt.0),
+                                        t: f64::min(cur.1, nxt.1),
+                                        b: f64::max(cur.1, nxt.1),
+                                    })
+                                }
+                                res
+                            },
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let mut collisions = false;
+                for i in 0..rects.len() {
+                    for j in i+1..rects.len() {
+                        let ri = &rects[i];
+                        let rj = &rects[j];
+                        let collides = collides(ri, rj);
+                        if collides {
+                            eprintln!("COLLISION: {i}, {j}, \n{ri:?}, \n{rj:?}");
+                        }
+                        collisions |= collides;
+                    }
+                }
+                assert!(!collisions);
+            }
+        }
+
+        fn check(model: &str, checks: Vec<&dyn Check>) {
+            let drawing = super::dom::draw(model.into());
+            for check in checks {
+                check.check(&drawing);
+            }
         }
 
         #[test]
         pub fn test_long_hop() {
-            check("a b c; a c");
+            check("a b c; a c", vec![&NoCollisions{}]);
+        }
+
+        #[test]
+        pub fn test_microwave() {
+            check("person microwave food: open start stop / beep : heat; person food: eat",
+                vec![] //vec![&NoCollisions{}]
+            );
         }
     }
 }
