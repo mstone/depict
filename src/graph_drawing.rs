@@ -4066,8 +4066,8 @@ pub mod geometry {
             // .check_termination(Some(200))
             // .adaptive_rho_fraction(1.0) // https://github.com/osqp/osqp/issues/378
             // .adaptive_rho_interval(Some(25))
-            // .eps_abs(1e-4)
-            // .eps_rel(1e-4)
+            .eps_abs(1.)
+            .eps_rel(1e-2)
             // .max_iter(128_000)
             // .max_iter(400)
             // .polish(true)
