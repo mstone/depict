@@ -5019,7 +5019,8 @@ pub mod frontend {
                         control_points.push((hpos, vpos2));
                     }
 
-                    let key = format!("{vl}_{wl}_{ew}_{dir}");
+                    let key = format!("{vl}_{wl}_{ew}_{dir}_{:?}", er.id());
+                    // let key = format!("{vl}_{wl}_{ew}_{dir}");
                     let path = path.join(" ");
 
                     let mut label = None;
@@ -5676,6 +5677,23 @@ pub mod frontend {
             }
         }
 
+        struct AllKeysUnique {}
+
+        impl Check for AllKeysUnique {
+            fn check(&self, drawing: &Result<Drawing, Error>) {
+                let Drawing{nodes, ..} = drawing.as_ref().unwrap();
+                let mut keys = nodes.iter().map(|n| match n {
+                    Node::Div { key, .. } => key,
+                    Node::Svg { key, .. } => key,
+                }).collect::<Vec<_>>();
+                keys.sort();
+                let num_keys = keys.len();
+                keys.dedup();
+                let num_keys_post = keys.len();
+                assert_eq!(num_keys, num_keys_post);
+            }
+        }
+
         fn check(model: &str, checks: Vec<&dyn Check>) {
             let drawing = super::dom::draw(model.into());
             for check in checks {
@@ -5708,6 +5726,22 @@ pub mod frontend {
         #[test]
         pub fn test_container_vertical_hop() {
             check("a [ b c ]", vec![]);
+        }
+
+        #[test]
+        pub fn test_vhc() {
+            // to_fix: collides(l, a)
+            check( "a [ b c d ]; l b -", vec![]);
+        }
+
+        #[test]
+        pub fn test_m_labels() {
+            check(r#"
+            a b c: p / q
+            a b d
+            a c: r / s
+            a d: t / u
+            "#, vec![&AllKeysUnique{}]);
         }
 
         #[test]
