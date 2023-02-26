@@ -4905,6 +4905,7 @@ pub mod frontend {
                 let Some(level) = vert_edge_labels.get(&(vl.clone(), wl.clone())) else {continue};
 
                 for (dir, labels) in &[("forward", level.forward.as_ref()), ("reverse", level.reverse.as_ref())] {
+                    if labels.is_none() { continue; }
                     let label_text = labels.map(|labels| labels.join("\n"));
                     let hops = hops_by_edge.get(&(vl.clone(), wl.clone()));
                     let hops = if let Some(hops) = hops { hops } else { continue; };
@@ -5694,6 +5695,16 @@ pub mod frontend {
             }
         }
 
+        struct NumEdges(usize);
+
+        impl Check for NumEdges {
+            fn check(&self, drawing: &Result<Drawing, Error>) {
+                let Drawing{nodes, ..} = drawing.as_ref().unwrap();
+                let num_edges = nodes.iter().filter(|n| matches!(n, Node::Svg{..})).count();
+                assert_eq!(self.0, num_edges);
+            }
+        }
+
         fn check(model: &str, checks: Vec<&dyn Check>) {
             let drawing = super::dom::draw(model.into());
             for check in checks {
@@ -5742,6 +5753,13 @@ pub mod frontend {
             a c: r / s
             a d: t / u
             "#, vec![&AllKeysUnique{}]);
+        }
+
+        #[test]
+        pub fn test_one_edge() {
+            check("a b: c",
+                vec![&NumEdges(1)]
+            );
         }
 
         #[test]
