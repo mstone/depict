@@ -3559,7 +3559,7 @@ pub mod geometry {
         let out_width = of(out_width);
         let in_width = of(in_width);
 
-        let orig_width = max(max(of(4.), *min_width), of(9. * vl.len() as f64));
+        let orig_width = max(max(of(20.), *min_width), of(9. * vl.len() as f64));
         // min_width += max_by(out_width, in_width, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Greater));
         *min_width = max(orig_width, max(in_width, out_width));
         // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
@@ -3796,6 +3796,34 @@ pub mod geometry {
                 }
                 prev_hop_ix = Some(hop_ix);
             }
+        }
+
+        for ((src, dst), labels) in vcg.horz_edge_labels.iter() {
+            let src_obj = Obj::from_vl(src, containers);
+            let dst_obj = Obj::from_vl(dst, containers);
+            let src_loc = node_to_loc[&src_obj];
+            let dst_loc = node_to_loc[&dst_obj];
+            let src_ix = solved_vxmap[&(src_loc.0, solved_locs[&src_loc.0][&src_loc.1])];
+            let dst_ix = solved_vxmap[&(dst_loc.0, solved_locs[&dst_loc.0][&dst_loc.1])];
+            let forward_label_width = labels.forward
+                .as_ref()
+                .and_then(|forward| forward
+                    .iter()
+                    .map(|label| label.len())
+                    .max()
+                );
+            let reverse_label_width = labels.reverse
+                .as_ref()
+                .and_then(|reverse| reverse
+                    .iter()
+                    .map(|label| label.len())
+                    .max()
+                );
+            let char_width = 9.;
+            let forward_width = forward_label_width.map(|label_width| char_width * label_width as f64).unwrap_or(20.);
+            let reverse_width = reverse_label_width.map(|label_width| char_width * label_width as f64).unwrap_or(20.);
+            let margin = 1.2 * f64::max(forward_width, reverse_width) + 50.;
+            obj_graph.add_edge(src_ix, dst_ix, obj_edge(Direction::Horizontal, format!("horz-edge: {:?}", labels), margin));
         }
 
         // eprintln!("obj graph: {}", Dot::new(&obj_graph));
