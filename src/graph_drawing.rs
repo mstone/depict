@@ -3643,17 +3643,26 @@ pub mod geometry {
         }
     }
 
+
+    #[derive(Clone, Debug)]
+    enum ObjEdgeReason {
+        SolvedLeft,
+        VerticalEdge(String),
+        HorizontalEdge(String),
+    }
+
+
     #[derive(Clone, Debug)]
     struct ObjEdge {
         name: usize,
-        reason: String,
+        reason: ObjEdgeReason,
         dir: Direction,
         margin: OrderedFloat<f64>,
     }
 
     impl Display for ObjEdge {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "no: {}, \nreason: {}, \ndir: {}, \nmargin: {}", self.name, self.reason, self.dir, self.margin)
+            write!(f, "no: {}, \nreason: {:?}, \ndir: {}, \nmargin: {}", self.name, self.reason, self.dir, self.margin)
         }
     }
 
@@ -3666,14 +3675,14 @@ pub mod geometry {
     #[derive(Clone, Debug)]
     enum ConEdgeFlavor {
         Margin(ConEdgeMargin),
-        Hop(),
+        Symmetrize(),
     }
 
     impl Display for ConEdgeFlavor {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
                 ConEdgeFlavor::Margin(ConEdgeMargin{margin}) => write!(f, "margin: {}", margin.0),
-                ConEdgeFlavor::Hop() => write!(f, "hop"),
+                ConEdgeFlavor::Symmetrize() => write!(f, "symmetrize"),
             }
         }
     }
@@ -3682,12 +3691,13 @@ pub mod geometry {
     struct ConEdge {
         name: usize,
         reason: String,
+        dir: Direction,
         flavor: ConEdgeFlavor,
     }
 
     impl Display for ConEdge {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "no: {}, \nreason: {}, {}", self.name, self.reason, self.flavor)
+            write!(f, "no: {}, \nreason: {}, {}, {}", self.name, self.reason, self.dir, self.flavor)
         }
     }
 
@@ -3734,7 +3744,7 @@ pub mod geometry {
             .collect::<HashMap<_, _>>();
 
         let mut obj_edges = 0;
-        let mut obj_edge = |dir: Direction, reason: String, margin: f64| {
+        let mut obj_edge = |dir: Direction, reason: ObjEdgeReason, margin: f64| {
             let e = ObjEdge{name: obj_edges, reason, dir, margin: of(margin)};
             obj_edges += 1;
             e
@@ -3753,7 +3763,7 @@ pub mod geometry {
                         (Obj::Container(ObjContainer{vl: container}),
                         Obj::Node(ObjNode{vl: wl}) | Obj::Container(ObjContainer{vl: wl}))
                         if nodes_by_container[container].contains(wl)) {
-                    obj_graph.add_edge(left_ix, solved_ix, obj_edge(Direction::Horizontal, "solved-left".into(), 40.));
+                    obj_graph.add_edge(left_ix, solved_ix, obj_edge(Direction::Horizontal, ObjEdgeReason::SolvedLeft, 40.));
                 }
             }
             // todo: hop edges, nested edges, ...
@@ -3786,13 +3796,13 @@ pub mod geometry {
                 let terminal = hop == &dst_loc;
                 let hop_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: src.clone(), wl: dst.clone(), lvl: hop.0, mhr: hop.1})));
                 if initial {
-                    obj_graph.add_edge(src_ix, hop_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 0.));
+                    obj_graph.add_edge(src_ix, hop_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 0.));
                 }
                 if terminal {
-                    obj_graph.add_edge(hop_ix, dst_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 0.));
+                    obj_graph.add_edge(hop_ix, dst_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 0.));
                 }
                 if let Some(prev_hop_ix) = prev_hop_ix {
-                    obj_graph.add_edge(prev_hop_ix, hop_ix, obj_edge(Direction::Vertical, format!("vert-edge: {}", ew), 26.));
+                    obj_graph.add_edge(prev_hop_ix, hop_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 26.));
                 }
                 prev_hop_ix = Some(hop_ix);
             }
@@ -3823,7 +3833,7 @@ pub mod geometry {
             let forward_width = forward_label_width.map(|label_width| char_width * label_width as f64).unwrap_or(20.);
             let reverse_width = reverse_label_width.map(|label_width| char_width * label_width as f64).unwrap_or(20.);
             let margin = 1.2 * f64::max(forward_width, reverse_width) + 50.;
-            obj_graph.add_edge(src_ix, dst_ix, obj_edge(Direction::Horizontal, format!("horz-edge: {:?}", labels), margin));
+            obj_graph.add_edge(src_ix, dst_ix, obj_edge(Direction::Horizontal, ObjEdgeReason::HorizontalEdge(format!("{labels:?}")), margin));
         }
 
         // eprintln!("obj graph: {}", Dot::new(&obj_graph));
@@ -3839,8 +3849,8 @@ pub mod geometry {
         let mut con_vxmap = HashMap::new();
 
         let mut con_edges = 0;
-        let mut con_edge = |reason: String, flavor: ConEdgeFlavor| {
-            let e = ConEdge{name: con_edges, reason, flavor};
+        let mut con_edge = |reason: String, dir: Direction, flavor: ConEdgeFlavor| {
+            let e = ConEdge{name: con_edges, reason, dir, flavor};
             con_edges += 1;
             e
         };
@@ -3857,8 +3867,8 @@ pub mod geometry {
                     let mut width = of(node_width.width);
                     update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut width, vl)?;
                     let height = 26.;
-                    con_graph.add_edge(left, right, con_edge("node-width".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: width})));
-                    con_graph.add_edge(top, bottom, con_edge("node-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
+                    con_graph.add_edge(left, right, con_edge("node-width".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: width})));
+                    con_graph.add_edge(top, bottom, con_edge("node-height".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
                 },
                 Geom::Hop(obj@Obj::Hop(ObjHop{vl, wl, lvl, mhr})) => {
                     let hs = varrank_by_obj[&obj];
@@ -3871,9 +3881,9 @@ pub mod geometry {
                         eprintln!("WARNING: con_graph: no size for hop: {obj}");
                         &HopSize{width: 10., left: 5., right: 5., height: 20., top: 0., bottom: 0.}
                     });
-                    con_graph.add_edge(top, bottom, con_edge("hop-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.height)})));
-                    con_graph.add_edge(left, guide_sol, con_edge("hop-left".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.left)})));
-                    con_graph.add_edge(guide_sol, right, con_edge("hop-right".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.right)})));
+                    con_graph.add_edge(top, bottom, con_edge("hop-height".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.height)})));
+                    con_graph.add_edge(left, guide_sol, con_edge("hop-left".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.left)})));
+                    con_graph.add_edge(guide_sol, right, con_edge("hop-right".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.right)})));
                 },
                 Geom::Container(obj@Obj::Container(ObjContainer{vl})) => {
                     let container = vl;
@@ -3886,8 +3896,8 @@ pub mod geometry {
                     let mut width = of(node_width.width);
                     update_min_width(vcg, layout_problem, layout_solution, geometry_problem, &mut width, vl)?;
                     let height = 20.;
-                    con_graph.add_edge(left, right, con_edge("container-width".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: width})));
-                    con_graph.add_edge(top, bottom, con_edge("container-height".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
+                    con_graph.add_edge(left, right, con_edge("container-width".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: width})));
+                    con_graph.add_edge(top, bottom, con_edge("container-height".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(height)})));
 
                     for node in &nodes_by_container[container] {
                         let child_sol = varrank_by_obj[&Obj::from_vl(node, containers)];
@@ -3897,10 +3907,10 @@ pub mod geometry {
                         let child_top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(child_sol));
                         let child_bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(child_sol));
                         let padding = 10.;
-                        con_graph.add_edge(left, child_left, con_edge("child-padding-left".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
-                        con_graph.add_edge(child_right, right, con_edge("child-padding-right".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
-                        con_graph.add_edge(top, child_top, con_edge("child-padding-top".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(2.*padding + 6.)})));
-                        con_graph.add_edge(child_bottom, bottom, con_edge("child-padding-bottom".into(), ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
+                        con_graph.add_edge(left, child_left, con_edge("child-padding-left".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
+                        con_graph.add_edge(child_right, right, con_edge("child-padding-right".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
+                        con_graph.add_edge(top, child_top, con_edge("child-padding-top".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(2.*padding + 6.)})));
+                        con_graph.add_edge(child_bottom, bottom, con_edge("child-padding-bottom".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
                     }
                 },
                 _ => {}
@@ -3931,13 +3941,13 @@ pub mod geometry {
                 };
             }
             macro_rules! impl_con {
-                ($src:ident, $src_sol_con:ident, $dst:ident, $dst_sol_con:ident, $edge:ident) => {
+                ($src:ident, $src_sol_con:ident, $dst:ident, $dst_sol_con:ident, $dir: ident, $edge:ident) => {
                     {
                         let src_guide_sol = AnySol::$src_sol_con(sol_for!($src));
                         let dst_guide_sol = AnySol::$dst_sol_con(sol_for!($dst));
                         let src_ix = *con_vxmap.get(&src_guide_sol).expect(&format!("no entry for src key: {src_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
                         let dst_ix = *con_vxmap.get(&dst_guide_sol).expect(&format!("no entry for dst key: {dst_guide_sol}, src: ({src}) -> dst: ({dst}), edge: {edge}, in\n{varrank_by_obj:#?}\ncon_vxmap: {con_vxmap:#?}\n"));
-                        con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), $edge.clone()));
+                        con_graph.add_edge(src_ix, dst_ix, con_edge(format!("obj-edge: {edge}"), $dir, $edge.clone()));
                     }
                 };
             }
@@ -3958,39 +3968,46 @@ pub mod geometry {
             let dst_flavor: Flavor = dst.into();
 
             let margin = ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(edge.margin.0)});
-            let symmetrize = ConEdgeFlavor::Hop();
-            match (src_flavor, dst_flavor, edge.dir) {
-                (Flavor::Box, Flavor::Box, Direction::Vertical) => {
-                    impl_con![src, B, dst, T, margin];
+            let symmetrize = ConEdgeFlavor::Symmetrize();
+            let horizontal = Direction::Horizontal;
+            let vertical = Direction::Vertical;
+            match (src_flavor, dst_flavor, &edge.reason, edge.dir) {
+                (Flavor::Box, Flavor::Box, _, Direction::Vertical) => {
+                    impl_con![src, B, dst, T, vertical, margin];
                 },
-                (Flavor::Box, Flavor::Box, Direction::Horizontal) => {
-                    impl_con![src, R, dst, L, margin];
+                (Flavor::Box, Flavor::Box, ObjEdgeReason::HorizontalEdge(_), Direction::Horizontal) => {
+                    impl_con![src, R, dst, L, horizontal, margin];
+                    impl_con![src, T, dst, T, vertical, symmetrize];
+                    impl_con![src, B, dst, B, vertical, symmetrize];
                 },
-                (Flavor::Box, Flavor::Arrow, Direction::Vertical) => {
-                    impl_con![src, B, dst, T, margin];
-                    impl_con![src, L, dst, L, margin];
-                    impl_con![dst, L, dst, S, margin];
-                    impl_con![dst, S, dst, R, margin];
-                    impl_con![dst, R, src, R, margin];
+                (Flavor::Box, Flavor::Box, _, Direction::Horizontal) => {
+                    impl_con![src, R, dst, L, horizontal, margin];
                 },
-                (Flavor::Box, Flavor::Arrow, Direction::Horizontal) => {
-                    impl_con![src, R, dst, S, margin];
+                (Flavor::Box, Flavor::Arrow, _, Direction::Vertical) => {
+                    impl_con![src, B, dst, T, vertical, margin];
+                    impl_con![src, L, dst, L, horizontal, margin];
+                    impl_con![dst, L, dst, S, horizontal, margin];
+                    impl_con![dst, S, dst, R, horizontal, margin];
+                    impl_con![dst, R, src, R, horizontal, margin];
                 },
-                (Flavor::Arrow, Flavor::Box, Direction::Vertical) => {
-                    impl_con![src, B, dst, T, margin];
-                    impl_con![dst, L, src, L, margin];
-                    impl_con![src, L, src, S, margin];
-                    impl_con![src, S, dst, R, margin];
-                    impl_con![src, R, dst, R, margin];
+                (Flavor::Box, Flavor::Arrow, _, Direction::Horizontal) => {
+                    impl_con![src, R, dst, S, horizontal, margin];
                 },
-                (Flavor::Arrow, Flavor::Box, Direction::Horizontal) => {
-                    impl_con![src, S, dst, L, margin];
+                (Flavor::Arrow, Flavor::Box, _, Direction::Vertical) => {
+                    impl_con![src, B, dst, T, vertical, margin];
+                    impl_con![dst, L, src, L, horizontal, margin];
+                    impl_con![src, L, src, S, horizontal, margin];
+                    impl_con![src, S, dst, R, horizontal, margin];
+                    impl_con![src, R, dst, R, horizontal, margin];
                 },
-                (Flavor::Arrow, Flavor::Arrow, Direction::Vertical) => {
-                    impl_con![src, B, dst, T, margin];
-                    impl_con![src, S, dst, S, symmetrize];
+                (Flavor::Arrow, Flavor::Box, _, Direction::Horizontal) => {
+                    impl_con![src, S, dst, L, horizontal, margin];
+                },
+                (Flavor::Arrow, Flavor::Arrow, _, Direction::Vertical) => {
+                    impl_con![src, B, dst, T, vertical, margin];
+                    impl_con![src, S, dst, S, horizontal, symmetrize];
                 }, //{eprintln!("WARNING: arrow->arrow vertical constraint: {src} -> {dst}, edge: {edge}");},
-                (Flavor::Arrow, Flavor::Arrow, Direction::Horizontal) => {
+                (Flavor::Arrow, Flavor::Arrow, _, Direction::Horizontal) => {
                     eprintln!("WARNING: arrow->arrow, {src} -> {dst}, edge: {edge}");
                     continue
                 }, //impl_con![S, S],
@@ -4031,17 +4048,19 @@ pub mod geometry {
             let src = con_graph.node_weight(er.source()).unwrap();
             let tgt = con_graph.node_weight(er.target()).unwrap();
             let wgt = er.weight();
-            match (src, &wgt.flavor) {
-                (AnySol::L(_) | AnySol::R(_) | AnySol::S(_) | AnySol::V(_), ConEdgeFlavor::Margin(ConEdgeMargin{margin})) => {
+            match (wgt.dir, &wgt.flavor) {
+                (Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin})) => {
                     horizontal_problem.c.leqc(&mut horizontal_problem.v, *src, *tgt, *margin);
                 },
-                (AnySol::T(_) | AnySol::B(_) | AnySol::H(_), ConEdgeFlavor::Margin(ConEdgeMargin{margin})) => {
+                (Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin})) => {
                     vertical_problem.c.leqc(&mut vertical_problem.v, *src, *tgt, *margin);
                 },
-                (_, ConEdgeFlavor::Hop()) => {
+                (Direction::Horizontal, ConEdgeFlavor::Symmetrize()) => {
                     horizontal_problem.c.sym(&mut horizontal_problem.v, &mut horizontal_problem.pd, *src, *tgt, 10.);
                 }
-                _ => {},
+                (Direction::Vertical, ConEdgeFlavor::Symmetrize()) => {
+                    vertical_problem.c.sym(&mut vertical_problem.v, &mut vertical_problem.pd, *src, *tgt, 10.);
+                }
             }
         }
 
