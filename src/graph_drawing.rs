@@ -3472,74 +3472,9 @@ pub mod geometry {
         min_width: &mut OrderedFloat<f64>,
         vl: &V
     ) -> Result<(), Error> {
-        let Vcg{vert: dag, vert_vxmap: dag_map, containers, ..} = vcg;
-        let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
-        let LayoutSolution{solved_locs, ..} = layout_solution;
         let GeometryProblem{size_by_hop, ..} = geometry_problem;
-        let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
-        let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
-        let mut v_dsts = v_ers
-            .iter()
-            .map(|er| {
-                dag
-                    .node_weight(er.target())
-                    .map(Clone::clone)
-                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.into())
-            })
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut w_srcs = w_ers
-            .iter()
-            .map(|er| {
-                dag
-                    .node_weight(er.source())
-                    .map(Clone::clone)
-                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.into())
-            })
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
 
-        v_dsts.sort(); v_dsts.dedup();
-        v_dsts.sort_by_key(|dst| {
-            let (ovr, ohr) = node_to_loc[&Obj::from_vl(dst, containers)];
-            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-            (shr, -(svr.0 as i32))
-        });
-        let v_outs = v_dsts
-            .iter()
-            .map(|dst| { (vl.clone(), dst.clone()) })
-            .collect::<Vec<_>>();
-
-        w_srcs.sort(); w_srcs.dedup();
-        w_srcs.sort_by_key(|src| {
-            let (ovr, ohr) = node_to_loc[&Obj::from_vl(src, containers)];
-            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-            (shr, -(svr.0 as i32))
-        });
-        let w_ins = w_srcs
-            .iter()
-            .map(|src| { (src.clone(), vl.clone()) })
-            .collect::<Vec<_>>();
-
-        let v_out_first_hops = v_outs
-            .iter()
-            .filter_map(|(vl, wl)| {
-                hops_by_edge.get(&(vl.clone(), wl.clone()))
-                    .and_then(|hops| hops.iter().next())
-                    .and_then(|(lvl, (mhr, _nhr))|
-                        Some((*lvl, *mhr, vl.clone(), wl.clone())))
-            })
-            .collect::<Vec<_>>();
-        let w_in_last_hops = w_ins
-            .iter()
-            .filter_map(|(vl, wl)| {
-                hops_by_edge.get(&(vl.clone(), wl.clone()))
-                    .and_then(|hops| hops.iter().rev().next())
-                    .and_then(|(lvl, (mhr, _nhr))|
-                        Some((*lvl, *mhr, vl.clone(), wl.clone()))
-                    )
-            })
-            .collect::<Vec<_>>();
+        let (v_out_first_hops, w_in_last_hops) = order_adjacent_vertical_edges(vcg, layout_problem, layout_solution, vl)?;
 
         let out_width: f64 = v_out_first_hops
             .iter()
@@ -3564,6 +3499,81 @@ pub mod geometry {
         *min_width = max(orig_width, max(in_width, out_width));
         // eprintln!("lvl: {}, vl: {}, wl: {}, hops: {:?}", lvl, vl, wl, hops);
         Ok(())
+    }
+
+    fn order_adjacent_vertical_edges<V: Graphic, E: Graphic>(
+        vcg: &Vcg<V, E>,
+        layout_problem: &LayoutProblem<V>,
+        layout_solution: &LayoutSolution,
+        vl: &V
+    ) -> Result<(Vec<(VerticalRank, OriginalHorizontalRank, V, V)>, Vec<(VerticalRank, OriginalHorizontalRank, V, V)>), Error> {
+        let Vcg{vert: dag, vert_vxmap: dag_map, containers, ..} = vcg;
+        let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
+        let LayoutSolution{solved_locs, ..} = layout_solution;
+        let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
+        let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
+        let mut v_dsts = v_ers
+            .iter()
+            .map(|er| {
+                dag
+                    .node_weight(er.target())
+                    .map(Clone::clone)
+                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.into())
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut w_srcs = w_ers
+            .iter()
+            .map(|er| {
+                dag
+                    .node_weight(er.source())
+                    .map(Clone::clone)
+                    .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.into())
+            })
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        v_dsts.sort();
+        v_dsts.dedup();
+        v_dsts.sort_by_key(|dst| {
+            let (ovr, ohr) = node_to_loc[&Obj::from_vl(dst, containers)];
+            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+            (shr, svr)
+        });
+        let v_outs = v_dsts
+            .iter()
+            .map(|dst| { (vl.clone(), dst.clone()) })
+            .collect::<Vec<_>>();
+        w_srcs.sort();
+        w_srcs.dedup();
+        w_srcs.sort_by_key(|src| {
+            let (ovr, ohr) = node_to_loc[&Obj::from_vl(src, containers)];
+            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
+            (shr, -(svr.0 as i32))
+        });
+        let w_ins = w_srcs
+            .iter()
+            .map(|src| { (src.clone(), vl.clone()) })
+            .collect::<Vec<_>>();
+        let v_out_first_hops = v_outs
+            .iter()
+            .filter_map(|(vl, wl)| {
+                hops_by_edge.get(&(vl.clone(), wl.clone()))
+                    .and_then(|hops| hops.iter().next())
+                    .and_then(|(lvl, (mhr, _nhr))|
+                        Some((*lvl, *mhr, vl.clone(), wl.clone())))
+            })
+            .collect::<Vec<_>>();
+        let w_in_last_hops = w_ins
+            .iter()
+            .filter_map(|(vl, wl)| {
+                hops_by_edge.get(&(vl.clone(), wl.clone()))
+                    .and_then(|hops| hops.iter().rev().next())
+                    .and_then(|(lvl, (mhr, _nhr))|
+                        Some((*lvl, *mhr, vl.clone(), wl.clone()))
+                    )
+            })
+            .collect::<Vec<_>>();
+        Ok((v_out_first_hops, w_in_last_hops))
     }
 
     fn left(sloc: (VerticalRank, SolvedHorizontalRank)) -> Option<(VerticalRank, SolvedHorizontalRank)> {
@@ -3649,6 +3659,7 @@ pub mod geometry {
         SolvedLeft,
         VerticalEdge(String),
         HorizontalEdge(String),
+        AdjacentHop,
     }
 
 
@@ -3790,6 +3801,10 @@ pub mod geometry {
                 hops.push((last.0 + 1, last.2, OriginalHorizontalRank(usize::MAX - last.1.0)));
                 hops.into_iter().map(|(ovr, ohr, _)| (ovr, ohr)).collect::<Vec<_>>()
             };
+
+            let (src_out_first_hops, _src_in_last_hops) = order_adjacent_vertical_edges(vcg, layout_problem, layout_solution, src)?;
+            let (_dst_out_first_hops, dst_in_last_hops) = order_adjacent_vertical_edges(vcg, layout_problem, layout_solution, dst)?;
+
             let mut prev_hop_ix = None;
             for hop in hops.iter() {
                 let initial = hop == &src_loc;
@@ -3797,9 +3812,21 @@ pub mod geometry {
                 let hop_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: src.clone(), wl: dst.clone(), lvl: hop.0, mhr: hop.1})));
                 if initial {
                     obj_graph.add_edge(src_ix, hop_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 0.));
+                    let hop_pos = src_out_first_hops.iter().position(|h| (&h.2, &h.3) == (src, dst)).unwrap();
+                    let hop_left = hop_pos.checked_sub(1).and_then(|hop_left_pos| src_out_first_hops.get(hop_left_pos));
+                    if let Some(hop_left) = hop_left {
+                        let hop_left_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: hop_left.2.clone(), wl: hop_left.3.clone(), lvl: hop_left.0, mhr: hop_left.1})));
+                        obj_graph.add_edge(hop_left_ix, hop_ix, obj_edge(Direction::Horizontal, ObjEdgeReason::AdjacentHop, 20.));
+                    }
                 }
                 if terminal {
                     obj_graph.add_edge(hop_ix, dst_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 0.));
+                    let hop_pos = dst_in_last_hops.iter().position(|h| (&h.2, &h.3) == (src, dst)).unwrap();
+                    let hop_left = hop_pos.checked_sub(1).and_then(|hop_left_pos| dst_in_last_hops.get(hop_left_pos));
+                    if let Some(hop_left) = hop_left {
+                        let hop_left_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: hop_left.2.clone(), wl: hop_left.3.clone(), lvl: hop_left.0, mhr: hop_left.1})));
+                        obj_graph.add_edge(hop_left_ix, hop_ix, obj_edge(Direction::Horizontal, ObjEdgeReason::AdjacentHop, 20.));
+                    }
                 }
                 if let Some(prev_hop_ix) = prev_hop_ix {
                     obj_graph.add_edge(prev_hop_ix, hop_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 26.));
@@ -4008,8 +4035,7 @@ pub mod geometry {
                     impl_con![src, S, dst, S, horizontal, symmetrize];
                 }, //{eprintln!("WARNING: arrow->arrow vertical constraint: {src} -> {dst}, edge: {edge}");},
                 (Flavor::Arrow, Flavor::Arrow, _, Direction::Horizontal) => {
-                    eprintln!("WARNING: arrow->arrow, {src} -> {dst}, edge: {edge}");
-                    continue
+                    impl_con![src, R, dst, L, horizontal, margin];
                 }, //impl_con![S, S],
             }
         }
