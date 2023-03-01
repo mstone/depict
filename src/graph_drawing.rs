@@ -3811,7 +3811,7 @@ pub mod geometry {
                 let terminal = hop == &dst_loc;
                 let hop_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: src.clone(), wl: dst.clone(), lvl: hop.0, mhr: hop.1})));
                 if initial {
-                    obj_graph.add_edge(src_ix, hop_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 0.));
+                    obj_graph.add_edge(src_ix, hop_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 10.));
                     let hop_pos = src_out_first_hops.iter().position(|h| (&h.2, &h.3) == (src, dst)).unwrap();
                     let hop_left = hop_pos.checked_sub(1).and_then(|hop_left_pos| src_out_first_hops.get(hop_left_pos));
                     if let Some(hop_left) = hop_left {
@@ -3820,7 +3820,7 @@ pub mod geometry {
                     }
                 }
                 if terminal {
-                    obj_graph.add_edge(hop_ix, dst_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 0.));
+                    obj_graph.add_edge(hop_ix, dst_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 10.));
                     let hop_pos = dst_in_last_hops.iter().position(|h| (&h.2, &h.3) == (src, dst)).unwrap();
                     let hop_left = hop_pos.checked_sub(1).and_then(|hop_left_pos| dst_in_last_hops.get(hop_left_pos));
                     if let Some(hop_left) = hop_left {
@@ -3829,7 +3829,7 @@ pub mod geometry {
                     }
                 }
                 if let Some(prev_hop_ix) = prev_hop_ix {
-                    obj_graph.add_edge(prev_hop_ix, hop_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 26.));
+                    obj_graph.add_edge(prev_hop_ix, hop_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 10.));
                 }
                 prev_hop_ix = Some(hop_ix);
             }
@@ -3899,14 +3899,19 @@ pub mod geometry {
                 },
                 Geom::Hop(obj@Obj::Hop(ObjHop{vl, wl, lvl, mhr})) => {
                     let hs = varrank_by_obj[&obj];
+                    let hops = &hops_by_edge[&(vl.clone(), wl.clone())];
+                    let top_hop = hops.first_key_value().unwrap();
+                    let bottom_hop = hops.last_key_value().unwrap();
+                    let hst = varrank_by_obj[&Obj::Hop(ObjHop{vl: vl.clone(), wl: wl.clone(), lvl: *top_hop.0, mhr: top_hop.1.0})];
+                    let hsb = varrank_by_obj[&Obj::Hop(ObjHop{vl: vl.clone(), wl: wl.clone(), lvl: VerticalRank(bottom_hop.0.0+1), mhr: bottom_hop.1.1})];
                     let guide_sol = or_insert(&mut con_graph, &mut con_vxmap, AnySol::S(hs));
-                    let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(hs));
-                    let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(hs));
+                    let top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(hst));
+                    let bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(hsb));
                     let left = or_insert(&mut con_graph, &mut con_vxmap, AnySol::L(hs));
                     let right = or_insert(&mut con_graph, &mut con_vxmap, AnySol::R(hs));
                     let hop_size = &size_by_hop.get(&(*lvl, *mhr, vl.clone(), wl.clone())).unwrap_or_else(|| {
                         eprintln!("WARNING: con_graph: no size for hop: {obj}");
-                        &HopSize{width: 10., left: 5., right: 5., height: 20., top: 0., bottom: 0.}
+                        &HopSize{width: 10., left: 5., right: 5., height: 0., top: 0., bottom: 0.}
                     });
                     con_graph.add_edge(top, bottom, con_edge("hop-height".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.height)})));
                     con_graph.add_edge(left, guide_sol, con_edge("hop-left".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(hop_size.left)})));
@@ -4031,12 +4036,11 @@ pub mod geometry {
                     impl_con![src, S, dst, L, horizontal, margin];
                 },
                 (Flavor::Arrow, Flavor::Arrow, _, Direction::Vertical) => {
-                    impl_con![src, B, dst, T, vertical, margin];
                     impl_con![src, S, dst, S, horizontal, symmetrize];
-                }, //{eprintln!("WARNING: arrow->arrow vertical constraint: {src} -> {dst}, edge: {edge}");},
+                },
                 (Flavor::Arrow, Flavor::Arrow, _, Direction::Horizontal) => {
                     impl_con![src, R, dst, L, horizontal, margin];
-                }, //impl_con![S, S],
+                },
             }
         }
 
