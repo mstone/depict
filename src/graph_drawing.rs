@@ -3464,7 +3464,7 @@ pub mod geometry {
         }
     }
 
-    fn update_min_width<V: Graphic + Display + Len + log::Name, E: Graphic>(
+    fn update_min_width<V: Graphic + Len, E: Graphic + PartialEq<str>>(
         vcg: &Vcg<V, E>,
         layout_problem: &LayoutProblem<V>,
         layout_solution: &LayoutSolution,
@@ -3501,7 +3501,7 @@ pub mod geometry {
         Ok(())
     }
 
-    fn order_adjacent_vertical_edges<V: Graphic, E: Graphic>(
+    fn order_adjacent_vertical_edges<V: Graphic, E: Graphic + PartialEq<str>>(
         vcg: &Vcg<V, E>,
         layout_problem: &LayoutProblem<V>,
         layout_solution: &LayoutSolution,
@@ -3511,8 +3511,8 @@ pub mod geometry {
         let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = layout_solution;
         let loc_ix = node_to_loc[&Obj::from_vl(vl, containers)];
-        let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
-        let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
+        let v_ers = dag.edges_directed(dag_map[vl], Outgoing).filter(|er| er.weight() == "vertical").into_iter().collect::<Vec<_>>();
+        let w_ers = dag.edges_directed(dag_map[vl], Incoming).filter(|er| er.weight() == "vertical").into_iter().collect::<Vec<_>>();
         let mut v_dsts = v_ers
             .iter()
             .map(|er| {
