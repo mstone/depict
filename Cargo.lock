@@ -386,6 +386,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
+name = "colorous"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2875caafcad10de47ec09ead140f27a276a25b0b2f553cec9b2152194b96bf5d"
+
+[[package]]
 name = "combine"
 version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -600,6 +606,7 @@ name = "depict"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "colorous",
  "derive_more",
  "dioxus",
  "enum-kinds",
@@ -627,6 +634,7 @@ name = "depict-desktop"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "colorous",
  "depict",
  "dioxus",
  "dioxus-desktop",

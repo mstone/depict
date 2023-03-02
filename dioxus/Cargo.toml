@@ -10,6 +10,7 @@ repository = "https://github.com/mstone/depict"
 
 [dependencies]
 anyhow = "*"
+colorous = "*"
 depict = { path = "..", version = "0.2", default-features = false, features = [ "desktop", "dioxus", "osqp" ] }
 dioxus = { git = "https://github.com/DioxusLabs/dioxus" }
 dioxus-desktop = { git = "https://github.com/DioxusLabs/dioxus" }

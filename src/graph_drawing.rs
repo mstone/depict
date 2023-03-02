@@ -3510,6 +3510,7 @@ pub mod geometry {
         let Vcg{vert: dag, vert_vxmap: dag_map, containers, ..} = vcg;
         let LayoutProblem{node_to_loc, hops_by_edge, ..} = layout_problem;
         let LayoutSolution{solved_locs, ..} = layout_solution;
+        let loc_ix = node_to_loc[&Obj::from_vl(vl, containers)];
         let v_ers = dag.edges_directed(dag_map[vl], Outgoing).into_iter().collect::<Vec<_>>();
         let w_ers = dag.edges_directed(dag_map[vl], Incoming).into_iter().collect::<Vec<_>>();
         let mut v_dsts = v_ers
@@ -3517,7 +3518,7 @@ pub mod geometry {
             .map(|er| {
                 dag
                     .node_weight(er.target())
-                    .map(Clone::clone)
+                    .cloned()
                     .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.into())
             })
             .into_iter()
@@ -3527,7 +3528,7 @@ pub mod geometry {
             .map(|er| {
                 dag
                     .node_weight(er.source())
-                    .map(Clone::clone)
+                    .cloned()
                     .ok_or_else::<Error, _>(|| LayoutError::OsqpError{error: "missing node weight".into()}.into())
             })
             .into_iter()
@@ -3535,9 +3536,11 @@ pub mod geometry {
         v_dsts.sort();
         v_dsts.dedup();
         v_dsts.sort_by_key(|dst| {
-            let (ovr, ohr) = node_to_loc[&Obj::from_vl(dst, containers)];
-            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-            (shr, svr)
+            let hops = hops_by_edge.get(&(vl.clone(), dst.clone()));
+            let nhr = hops.map(|hops| hops.values().next().unwrap().1).unwrap_or_else(|| {
+                node_to_loc[&Obj::from_vl(dst, containers)].1
+            });
+            solved_locs[&(loc_ix.0 + 1)][&nhr]
         });
         let v_outs = v_dsts
             .iter()
@@ -3546,9 +3549,11 @@ pub mod geometry {
         w_srcs.sort();
         w_srcs.dedup();
         w_srcs.sort_by_key(|src| {
-            let (ovr, ohr) = node_to_loc[&Obj::from_vl(src, containers)];
-            let (svr, shr) = (ovr, solved_locs[&ovr][&ohr]);
-            (shr, -(svr.0 as i32))
+            let hops = hops_by_edge.get(&(src.clone(), vl.clone()));
+            let mhr = hops.map(|hops| hops.values().rev().next().unwrap().0).unwrap_or_else(|| {
+                node_to_loc[&Obj::from_vl(src, containers)].1
+            });
+            solved_locs[&(VerticalRank(loc_ix.0.0 - 1))][&mhr]
         });
         let w_ins = w_srcs
             .iter()
@@ -4790,7 +4795,7 @@ pub mod frontend {
     }
 
     pub mod dom {
-        use std::{borrow::Cow};
+        use std::{borrow::Cow, fmt::Display};
 
         use petgraph::visit::EdgeRef;
 
@@ -4813,6 +4818,76 @@ pub mod frontend {
             Svg { key: String, path: String, z_index: usize, dir: String, rel: String, label: Option<Label>, hops: Vec<VarRank>, classes: String, estimated_size: HopSize, control_points: Vec<(f64, f64)> },
         }
 
+        pub type Collision = (Rect, Rect);
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct Rect {
+            pub id: String,
+            pub l: f64,
+            pub r: f64,
+            pub t: f64,
+            pub b: f64 }
+
+        impl Display for Rect {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "Rect {{ l: {:7.2}, r: {:7.2}, t: {:7.2}, b: {:7.2}, id: {:?} }}", self.l, self.r, self.t, self.b, self.id)
+            }
+        }
+
+        pub fn collides(a: &Rect, b: &Rect) -> bool {
+            a.r > b.l &&
+            a.l < b.r &&
+            a.b > b.t &&
+            a.t < b.b
+        }
+
+        pub fn find_collisions(nodes: &Vec<Node>) -> Vec<Collision> {
+            let char_width = 9.;
+            let rects = nodes
+                .iter()
+                .flat_map(|n| {
+                    match n {
+                        Node::Div { key, label, hpos, vpos, width, height, z_index, loc, estimated_size } => {
+                            vec![Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + height }]
+                        },
+                        Node::Svg { key, path, z_index, dir, rel, label, hops, classes, estimated_size, control_points } => {
+                            let mut res = vec![];
+                            if let Some(Label{text, hpos, width, vpos}) = label {
+                                if rel == "forward" {
+                                    res.push(Rect { id: format!("{key}_fwd"), l: *hpos - width, r: *hpos - 1.5 * char_width, t: *vpos, b: vpos + estimated_size.height });
+                                } else {
+                                    res.push(Rect { id: format!("{key}_rev"), l: *hpos + 1.5 * char_width, r: hpos + width, t: *vpos, b: vpos + estimated_size.height });
+                                }
+                            }
+                            for (n, window) in control_points.windows(2).enumerate() {
+                                let [cur, nxt, ..] = window else { continue };
+                                res.push(Rect {
+                                    id: format!("{key},wnd{n}"),
+                                    l: f64::min(cur.0, nxt.0),
+                                    r: f64::max(cur.0, nxt.0),
+                                    t: f64::min(cur.1, nxt.1),
+                                    b: f64::max(cur.1, nxt.1),
+                                })
+                            }
+                            res
+                        },
+                    }
+                })
+                .collect::<Vec<_>>();
+            let mut collisions = vec![];
+            for i in 0..rects.len() {
+                for j in i+1..rects.len() {
+                    let ri = &rects[i];
+                    let rj = &rects[j];
+                    if collides(ri, rj) {
+                        collisions.push((ri.clone(), rj.clone()))
+                    }
+                }
+            }
+            return collisions;
+        }
+
+
         #[derive(Clone, Debug)]
         pub struct Drawing {
             pub crossing_number: Option<usize>,
@@ -4821,6 +4896,7 @@ pub mod frontend {
             pub viewbox_width: f64,
             pub viewbox_height: f64,
             pub nodes: Vec<Node>,
+            pub collisions: Vec<Collision>,
             pub logs: Vec<log::Record>,
         }
 
@@ -4833,6 +4909,7 @@ pub mod frontend {
                     viewbox_width: 1024.0,
                     viewbox_height: 400.0,
                     nodes: Default::default(),
+                    collisions: Default::default(),
                     logs: vec![],
                 }
             }
@@ -4908,9 +4985,6 @@ pub mod frontend {
             horizontal_problem.log(("horizontal_problem".into(), v2n), &mut logs)?;
             vertical_problem.log(("vertical_problem".into(), v2n), &mut logs)?;
             geometry_solution.log(v2n, &mut logs)?;
-
-            let mut logs = logs.to_vec();
-            logs.reverse();
 
             // Render Nodes
             let viewbox_width = (rs.values().copied().map(ordered_float::OrderedFloat).max().unwrap_or_default() - ls.values().copied().map(ordered_float::OrderedFloat).min().unwrap_or_default()).0;
@@ -5015,7 +5089,7 @@ pub mod frontend {
                         hops.iter().skip(fs).collect::<Vec<_>>()
                     };
                     let vmin = bs[&varrank_by_obj[&Obj::from_vl(vl, containers)]];
-                    let vmax = ts[&varrank_by_obj[&&Obj::from_vl(wl, containers)]];
+                    let vmax = ts[&varrank_by_obj[&Obj::from_vl(wl, containers)]];
                     let nh = hops.len();
                     let vs = (0..=nh).map(|lvl|  {
                         let fraction = lvl as f64 / nh as f64;
@@ -5055,7 +5129,8 @@ pub mod frontend {
                         }
 
                         if n == 0 {
-                            let n = varrank_by_obj[&Obj::Hop(ObjHop{lvl: *lvl+1, mhr: *nhr, vl: vl.clone(), wl: wl.clone()})];
+                            // let n = varrank_by_obj[&Obj::Hop(ObjHop{lvl: *lvl+1, mhr: *nhr, vl: vl.clone(), wl: wl.clone()})];
+                            let n = varrank_by_obj[&Obj::Hop(ObjHop{lvl: *lvl, mhr: *mhr, vl: vl.clone(), wl: wl.clone()})];
                             // sol_by_loc[&((*lvl+1), *nhr)];
                             // let n = sol_by_loc[&((*lvl), *mhr)];
                             label_hpos = Some(match *dir {
@@ -5216,6 +5291,22 @@ pub mod frontend {
                 Node::Svg{z_index, ..} => *z_index,
             });
 
+            let collisions = find_collisions(&nodes);
+            let mut colliding_rects = collisions.iter().flat_map(|(ri, rj)| vec![ri, rj]).collect::<Vec<_>>();
+            colliding_rects.sort_by_key(|r| &r.id);
+            colliding_rects.dedup();
+
+            logs.with_group("Visual Elements", "", Vec::<String>::new(), |logs| {
+                logs.with_set("Nodes", "", &nodes, |node, logs| {
+                    logs.log_element("Node", Vec::<String>::new(), format!("{node:#?}"))
+                })?;
+                logs.with_set("Collisions", "", &colliding_rects, |r, logs| {
+                    logs.log_element("Rect", Vec::<String>::new(), r.to_string())
+                })
+            });
+            let mut logs = logs.to_vec();
+            logs.reverse();
+
             // eprintln!("NODES: {nodes:#?}");
 
             Ok(Drawing{
@@ -5225,6 +5316,7 @@ pub mod frontend {
                 viewbox_width,
                 viewbox_height,
                 nodes,
+                collisions,
                 logs,
             })
         }
@@ -5676,9 +5768,7 @@ pub mod frontend {
 
     #[cfg(test)]
     mod tests {
-        use std::fmt::Display;
-
-        use crate::graph_drawing::{error::Error, frontend::dom::{Node, Label}};
+        use crate::graph_drawing::{error::Error, frontend::dom::{Node, find_collisions}};
 
         use super::dom::Drawing;
 
@@ -5688,70 +5778,11 @@ pub mod frontend {
 
         struct NoCollisions {}
 
-
-        #[derive(Debug)]
-        struct Rect { id: String, l: f64, r: f64, t: f64, b: f64 }
-
-        impl Display for Rect {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "Rect {{ l: {:7.2}, r: {:7.2}, t: {:7.2}, b: {:7.2}, id: {:?} }}", self.l, self.r, self.t, self.b, self.id)
-            }
-        }
-
-        fn collides(a: &Rect, b: &Rect) -> bool {
-            a.r > b.l &&
-            a.l < b.r &&
-            a.b > b.t &&
-            a.t < b.b
-        }
-
         impl Check for NoCollisions {
             fn check(&self, drawing: &Result<Drawing, Error>) {
                 let Drawing{nodes, ..} = drawing.as_ref().unwrap();
-                let rects = nodes
-                    .iter()
-                    .flat_map(|n| {
-                        match n {
-                            Node::Div { key, label, hpos, vpos, width, height, z_index, loc, estimated_size } => {
-                                vec![Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + height }]
-                            },
-                            Node::Svg { key, path, z_index, dir, rel, label, hops, classes, estimated_size, control_points } => {
-                                let mut res = vec![];
-                                if let Some(Label{text, hpos, width, vpos}) = label {
-                                    if rel == "forward" {
-                                        res.push(Rect { id: key.clone(), l: *hpos - width, r: *hpos, t: *vpos, b: vpos + estimated_size.height });
-                                    } else {
-                                        res.push(Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + estimated_size.height });
-                                    }
-                                }
-                                for (n, window) in control_points.windows(2).enumerate() {
-                                    let [cur, nxt, ..] = window else { continue };
-                                    res.push(Rect {
-                                        id: format!("{key},{n}"),
-                                        l: f64::min(cur.0, nxt.0),
-                                        r: f64::max(cur.0, nxt.0),
-                                        t: f64::min(cur.1, nxt.1),
-                                        b: f64::max(cur.1, nxt.1),
-                                    })
-                                }
-                                res
-                            },
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let mut collisions = false;
-                for i in 0..rects.len() {
-                    for j in i+1..rects.len() {
-                        let ri = &rects[i];
-                        let rj = &rects[j];
-                        let collides = collides(ri, rj);
-                        if collides {
-                            eprintln!("COLLISION: {i}, {j}, \n{ri}, \n{rj}\n");
-                        }
-                        collisions |= collides;
-                    }
-                }
-                assert!(!collisions);
+                let collisions = find_collisions(nodes);
+                assert!(collisions.is_empty());
             }
         }
 
@@ -5850,6 +5881,22 @@ pub mod frontend {
                     // &NoCollisions{}
                 ]
             );
+        }
+
+        #[test]
+        pub fn test_edge_ordering() {
+            check(r#"
+                a b: r
+                a c: s
+                c b: t
+            "#, vec![&NoCollisions{}])
+        }
+
+        #[test]
+        pub fn test_unordered_contents() {
+            check(r#"
+                a [ b; c ]
+            "#, vec![]);
         }
     }
 }

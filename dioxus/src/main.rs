@@ -20,7 +20,9 @@ use tao::dpi::LogicalSize;
 use indoc::indoc;
 
 const PLACEHOLDER: &str = indoc!("
-a b: c / d
+a b: r
+a c: s
+c b: t
 ");
 
 pub struct AppProps {
@@ -219,6 +221,8 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let status_v = drawing.get().status_v;
     let status_h = drawing.get().status_h;
+    let collisions = &drawing.get().collisions;
+    let status_c = collisions.len();
 
     let show_logs = use_state(&cx, || {
         #[cfg(debug_assertions)]
@@ -312,6 +316,23 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             cx.render(rsx!{()})
         }
     };
+
+    let mut colliding_rects = collisions.iter().flat_map(|(ri, rj)| vec![ri, rj]).collect::<Vec<_>>();
+    colliding_rects.sort_by_key(|r| &r.id);
+    colliding_rects.dedup();
+
+    let num_rects = colliding_rects.len();
+    let collision_nodes = colliding_rects.iter().enumerate().filter_map(|(n, r)| {
+        let color = colorous::COOL.eval_rational(n, num_rects);
+        let w = r.r - r.l;
+        let h = r.b - r.t;
+        cx.render(rsx!{
+            div {
+                key: "{r.id}_col",
+                style: "position: absolute; display: border-box; left: {r.l}px; top: {r.t}px; width: {w}px; height: {h}px; z-index: 100; border: 1px solid rgba({color.r}, {color.g}, {color.b}, 0.9); background: rgba({color.r}, {color.b}, {color.g}, 0.5);",
+            }
+        })
+    }).into_iter().collect::<Vec<_>>().into_iter();
 
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
@@ -463,7 +484,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         }
                         span {
                             style: "font-style: italic;",
-                            "v: {status_v:?} h: {status_h:?}"
+                            "v: {status_v:?} h: {status_h:?} c: {status_c:?}"
                         }
                     }
                 })
@@ -474,6 +495,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             div {
                 style: "position: relative; width: {viewbox_width}px; height: {viewbox_height}px; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000; margin-bottom: 40px;",
                 nodes
+                collision_nodes
             }
         }
         // LOGS

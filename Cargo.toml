@@ -22,6 +22,7 @@ proptest = "1"
 
 [dependencies]
 anyhow = { version = "*" }
+colorous = { version = "*" }
 derive_more = "0.99"
 dioxus = { git = "https://github.com/DioxusLabs/dioxus", optional = true }
 enum-kinds = "0.5.1"
