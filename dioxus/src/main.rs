@@ -229,6 +229,13 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         return false;
     });
 
+    let show_collisions = use_state(&cx, ||{
+        #[cfg(debug_assertions)]
+        return true;
+        #[cfg(not(debug_assertions))]
+        return false;
+    });
+
     model_sender.send(model.get().clone());
 
     let viewbox_width = drawing.get().viewbox_width;
@@ -459,6 +466,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                                     "Show debug logs"
                                 }
                             }
+                            div {
+                                button {
+                                    onclick: move |_| show_collisions.modify(|v| !v),
+                                    "Show colliding boxes"
+                                }
+                            }
                         }
                     }
                 }
@@ -493,7 +506,9 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             div {
                 style: "position: relative; width: {viewbox_width}px; height: {viewbox_height}px; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000; margin-bottom: 40px;",
                 nodes
-                collision_nodes
+                show_collisions.then(|| rsx!{
+                    collision_nodes
+                })
             }
         }
         // LOGS
