@@ -4854,19 +4854,19 @@ pub mod frontend {
                             let mut res = vec![];
                             if let Some(Label{text, hpos, width, vpos}) = label {
                                 if rel == "forward" {
-                                    res.push(Rect { id: format!("{key}_fwd"), l: *hpos - width, r: *hpos - 1.5 * char_width, t: *vpos, b: vpos + estimated_size.height });
+                                    res.push(Rect { id: format!("{key}_fwd"), l: (*hpos - width + 1.).trunc(), r: (*hpos - 1.5 * char_width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
                                 } else {
-                                    res.push(Rect { id: format!("{key}_rev"), l: *hpos + 1.5 * char_width, r: hpos + width, t: *vpos, b: vpos + estimated_size.height });
+                                    res.push(Rect { id: format!("{key}_rev"), l: (*hpos + 1.5 * char_width + 1.).trunc(), r: (hpos + width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
                                 }
                             }
                             for (n, window) in control_points.windows(2).enumerate() {
                                 let [cur, nxt, ..] = window else { continue };
                                 res.push(Rect {
                                     id: format!("{key},wnd{n}"),
-                                    l: f64::min(cur.0, nxt.0),
-                                    r: f64::max(cur.0, nxt.0),
-                                    t: f64::min(cur.1, nxt.1),
-                                    b: f64::max(cur.1, nxt.1),
+                                    l: (f64::min(cur.0, nxt.0) + 1.).trunc(),
+                                    r: (f64::max(cur.0, nxt.0)).trunc(),
+                                    t: (f64::min(cur.1, nxt.1) + 1.).trunc(),
+                                    b: (f64::max(cur.1, nxt.1)).trunc(),
                                 })
                             }
                             res
