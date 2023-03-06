@@ -1998,7 +1998,9 @@ pub mod layout {
                     std::mem::swap(&mut src, &mut dst);
                     std::mem::swap(&mut src_ix, &mut dst_ix);
                 }
-                vcg.vert.add_edge(src_ix, dst_ix, "vertical".into());
+                if !vcg.vert.contains_edge(src_ix, dst_ix) {
+                    vcg.vert.add_edge(src_ix, dst_ix, "vertical".into());
+                }
 
                 if let Some(level) = labels_by_level.get(n) {
                     let eval::Level{mut forward, mut reverse} = level.clone();
@@ -2130,7 +2132,11 @@ pub mod layout {
             while let Some(vlc) = &vcg.container_by_node[&vl] {
                 eprintln!("implied edge1: {vlc}->{wl}");
                 if vcg.nodes_by_container_transitive[vlc].contains(&wl) { eprintln!("done"); break; }
-                vcg.vert.add_edge(vcg.vert_vxmap[vlc], vcg.vert_vxmap[&wl], "vertical".into());
+                let vcx = vcg.vert_vxmap[vlc];
+                let wx = vcg.vert_vxmap[&wl];
+                if !vcg.vert.contains_edge(vcx, wx) {
+                    vcg.vert.add_edge(vcx, wx, "vertical".into());
+                }
                 vl = vlc.clone();
             }
             let vl = vcg.vert.node_weight(vx).unwrap().clone();
@@ -2139,7 +2145,11 @@ pub mod layout {
             while let Some(wlc) = &vcg.container_by_node[&wl] {
                 eprintln!("implied edge2: {vl}->{wlc}");
                 if vcg.nodes_by_container_transitive[wlc].contains(&vl) { eprintln!("done"); break; }
-                vcg.vert.add_edge(vcg.vert_vxmap[&vl], vcg.vert_vxmap[wlc], "vertical".into());
+                let vx = vcg.vert_vxmap[&vl];
+                let wcx = vcg.vert_vxmap[wlc];
+                if !vcg.vert.contains_edge(vx, wcx) {
+                    vcg.vert.add_edge(vx, wcx, "vertical".into());
+                }
                 wl = wlc.clone();
             }
         }
@@ -2873,6 +2883,7 @@ pub mod layout {
             let mut l2n = loc_to_node.iter().collect::<Vec<_>>();
             l2n.sort();
             eprintln!("LOC_TO_NODE: {l2n:#?}");
+            eprintln!("HOPS_BY_EDGE: {hops_by_edge:#?}");
 
             let mut bubbles = HashMap::<(VerticalRank, Option<V>), Vec<Obj<V>>>::new();
             let mut bubble_by_loc = HashMap::<LocIx, Option<V>>::new();
@@ -6071,6 +6082,7 @@ pub mod frontend {
                 ("a c b", vec![&Above("a", "c"), &Above("c", "b")]),
                 ("a [ b [ c ] ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Contains("b", "c")]),
                 ("a e; d b e; c [ e ]", vec![&Above("a", "e"), &Above("d", "b"), &Above("b", "e"), &Contains("c", "e"), &Above("b", "c")]),
+                ("a c; a b; b c; a c", vec![&Above("a", "c"), &Above("a", "b"), &Above("b", "c")]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
