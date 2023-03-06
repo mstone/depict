@@ -2455,7 +2455,7 @@ pub mod layout {
     pub type RankedPaths<V> = BTreeMap<VerticalRank, SortedVec<(V, V)>>;
 
     /// Set up a [LayoutProblem] problem
-    pub fn calculate_locs_and_hops<'s, V: Graphic>(
+    pub fn calculate_locs_and_hops<'s, V: Graphic + PartialEq<str>>(
         _model: &'s Val<V>,
         paths_by_rank: &'s RankedPaths<V>,
         vcg: &Vcg<V, V>,
@@ -2517,6 +2517,7 @@ pub mod layout {
         let mut hops_by_edge = BTreeMap::new();
         let mut hops_by_level = BTreeMap::new();
         for er in dag.edge_references() {
+            if er.weight() != "vertical" { continue; }
             let vx = er.source();
             let wx = er.target();
             let vl = dag.node_weight(vx).unwrap();
@@ -3036,7 +3037,8 @@ pub mod layout {
                             let cd = container_depths[vl];
                             for i in 0..cd {
                                 let last_offset = queue[n+i].back().map(|(_, last_offset)| last_offset).copied().unwrap_or(0);
-                                queue[n+i].push_back(((VerticalRank(n + i), vl.clone()), offset + last_offset));
+                                let first_row_offset = if i == 0 { 1 } else { 0 };
+                                queue[n+i].push_back(((VerticalRank(n + i), vl.clone()), offset + last_offset + first_row_offset));
                             }
                             // for vr in loc.0.0..loc.0.0+cd {
                             //     queue[vr].push_front(((VerticalRank(vr), vl.clone()), offset));
@@ -3047,6 +3049,15 @@ pub mod layout {
             }
 
             eprintln!("SOLVED_LOCS: {solved_locs:#?}");
+
+            // check that solved_locs is 1-1
+            let mut solved_locs_inv = HashMap::new();
+            for (vr, shrs) in solved_locs.iter() {
+                for (ohr, shr) in shrs {
+                    assert!(solved_locs_inv.insert((vr, shr), (vr, ohr)).is_none())
+                }
+            }
+
 
             Ok(LayoutSolution{crossing_number, solved_locs})
         }
@@ -3156,6 +3167,7 @@ pub mod geometry {
     use petgraph::EdgeDirection::{Outgoing, Incoming};
     use petgraph::Graph;
     use petgraph::algo::is_cyclic_directed;
+    use petgraph::dot::Dot;
     use petgraph::visit::{EdgeRef};
 
     use crate::graph_drawing::layout::ObjNode;
@@ -3870,6 +3882,10 @@ pub mod geometry {
             // todo: hop edges, nested edges, ...
         }
 
+        if let Some(svg) = as_svg(&vcg.vert) {
+            logs.log_svg(Some("lang_graph"), None::<String>, Vec::<String>::new(), svg);
+        }
+
         for er in vcg.vert.edge_references() {
             let ew = er.weight();
             if ew != "vertical" { continue; }
@@ -3882,6 +3898,10 @@ pub mod geometry {
             let src_ix = solved_vxmap[&(src_loc.0, solved_locs[&src_loc.0][&src_loc.1])];
             let dst_ix = solved_vxmap[&(dst_loc.0, solved_locs[&dst_loc.0][&dst_loc.1])];
 
+            eprintln!("OBJ_GRAPH VERT EDGE: {src_obj:?}, {dst_obj:?}");
+            eprintln!("SOLVED_VXMAP: {solved_vxmap:?}");
+            eprintln!("SOLVED_LOCS: {solved_locs:?}");
+            eprintln!("NODE_TO_LOC: {node_to_loc:?}");
             let hops = &hops_by_edge.get(&(src.clone(), dst.clone()));
             let hops = if hops.is_none() {
                 vec![src_loc, dst_loc]
@@ -3924,6 +3944,7 @@ pub mod geometry {
                 prev_hop_ix = Some(hop_ix);
             }
         }
+        eprintln!("OBJ_GRAPH: {:?}", Dot::new(&obj_graph));
 
         for ((src, dst), labels) in vcg.horz_edge_labels.iter() {
             let src_obj = Obj::from_vl(src, containers);
