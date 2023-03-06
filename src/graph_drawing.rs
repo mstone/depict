@@ -2733,6 +2733,9 @@ pub mod layout {
             layout_problem: &LayoutProblem<V>,
             locs_by_level2: &Vec<Vec<&Obj<V>>>,
             nodes_by_container2: &HashMap<V, Vec<(VerticalRank, OriginalHorizontalRank)>>,
+            bubble_by_loc: &HashMap<LocIx, V>,
+            slvl_by_bubble: &HashMap<(VerticalRank, V), usize>,
+            bhr_by_loc: &HashMap<LocIx, usize>,
             p: &mut [&mut [usize]]
         ) -> bool {
             let Vcg{nodes_by_container_transitive: nodes_by_container, ..} = vcg;
@@ -2751,8 +2754,14 @@ pub mod layout {
                 let aohr = aloc.1.0;
                 let bovr = bloc.0.0;
                 let bohr = bloc.1.0;
-                let ashr = p[aovr][aohr];
-                let bshr = p[bovr][bohr];
+                let abub = bubble_by_loc[&aloc].clone();
+                let bbub = bubble_by_loc[&bloc].clone();
+                let pa = &p[slvl_by_bubble[&(aloc.0, abub)]];
+                let pb = &p[slvl_by_bubble[&(bloc.0, bbub)]];
+                let abhr = bhr_by_loc[&aloc];
+                let bbhr = bhr_by_loc[&bloc];
+                let ashr = pa[abhr];
+                let bshr = pb[bbhr];
                 // let ret = (aovr == bovr && ashr < bshr) || ashr <= bshr;
                 // eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
                 // imperfect without rank-spanning constraint edges but maybe a place to start?
@@ -2969,7 +2978,7 @@ pub mod layout {
                 }
                 // eprintln!("CN: {cn}");
                 if cn < crossing_number {
-                    if conforms(vcg, &layout_problem, &locs_by_level2, &nodes_by_container2, p) {
+                    if conforms(vcg, &layout_problem, &locs_by_level2, &nodes_by_container2, &bubble_by_loc, &slvl_by_bubble, &bhr_by_loc, p) {
                         crossing_number = cn;
                         solution = Some(p.iter().map(|q| q.to_vec()).collect());
                         if crossing_number == 0 {
@@ -5950,6 +5959,8 @@ pub mod frontend {
                 ("a [ b ]; c b -", vec![&Contains("a", "b"), &Left("c", "b")]),
                 ("a [ b ]; b c -", vec![&Contains("a", "b"), &Left("b", "c")]),
                 ("a [ b ]; b c", vec![&Contains("a", "b"), &Above("b", "c")]),
+                ("a b c", vec![&Above("a", "b"), &Above("b", "c")]),
+                ("a c b", vec![&Above("a", "c"), &Above("c", "b")]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
