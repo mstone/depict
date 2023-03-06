@@ -178,6 +178,7 @@
                 cargo-expand
                 cargo-include-licenses.legacyPackages.${final.system}.defaultPackage
                 cargo-license
+                cargo-nextest
                 cargo-outdated
                 cargo-udeps
                 rustfmt
