@@ -3025,7 +3025,10 @@ pub mod layout {
                         }
                         if let Obj::Container(_) = obj {
                             let cd = container_depths[vl];
-                            queue[n].push_front(((VerticalRank(n), vl.clone()), offset));
+                            for i in 0..cd {
+                                let last_offset = queue[n+i].back().map(|(_, last_offset)| last_offset).copied().unwrap_or(0);
+                                queue[n+i].push_back(((VerticalRank(n + i), vl.clone()), offset + last_offset));
+                            }
                             // for vr in loc.0.0..loc.0.0+cd {
                             //     queue[vr].push_front(((VerticalRank(vr), vl.clone()), offset));
                             // }
@@ -4888,6 +4891,15 @@ pub mod frontend {
             Svg { key: String, path: String, z_index: usize, dir: String, rel: String, label: Option<Label>, hops: Vec<VarRank>, classes: String, estimated_size: HopSize, control_points: Vec<(f64, f64)> },
         }
 
+        impl Node {
+            pub fn key(&self) -> &String {
+                match self {
+                    Node::Div { key, .. } => key,
+                    Node::Svg { key, .. } => key,
+                }
+            }
+        }
+
         pub type Collision = (Rect, Rect);
 
         #[derive(Clone, Debug, PartialEq)]
@@ -4904,6 +4916,38 @@ pub mod frontend {
             }
         }
 
+        impl From<&Node> for Vec<Rect> {
+            fn from(node: &Node) -> Self {
+                let char_width = 9.;
+                match node {
+                    Node::Div { key, label, hpos, vpos, width, height, z_index, loc, estimated_size } => {
+                        vec![Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + height }]
+                    },
+                    Node::Svg { key, path, z_index, dir, rel, label, hops, classes, estimated_size, control_points } => {
+                        let mut res = vec![];
+                        if let Some(Label{text, hpos, width, vpos}) = label {
+                            if rel == "forward" {
+                                res.push(Rect { id: format!("{key}_fwd"), l: (*hpos - width + 1.).trunc(), r: (*hpos - 1.5 * char_width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
+                            } else {
+                                res.push(Rect { id: format!("{key}_rev"), l: (*hpos + 1.5 * char_width + 1.).trunc(), r: (hpos + width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
+                            }
+                        }
+                        for (n, window) in control_points.windows(2).enumerate() {
+                            let [cur, nxt, ..] = window else { continue };
+                            res.push(Rect {
+                                id: format!("{key},wnd{n}"),
+                                l: (f64::min(cur.0, nxt.0) + 1.).trunc(),
+                                r: (f64::max(cur.0, nxt.0)).trunc(),
+                                t: (f64::min(cur.1, nxt.1) + 1.).trunc(),
+                                b: (f64::max(cur.1, nxt.1)).trunc(),
+                            })
+                        }
+                        res
+                    },
+                }
+            }
+        }
+
         pub fn collides(a: &Rect, b: &Rect) -> bool {
             a.r > b.l &&
             a.l < b.r &&
@@ -4912,37 +4956,9 @@ pub mod frontend {
         }
 
         pub fn find_collisions(nodes: &Vec<Node>) -> Vec<Collision> {
-            let char_width = 9.;
             let rects = nodes
                 .iter()
-                .flat_map(|n| {
-                    match n {
-                        Node::Div { key, label, hpos, vpos, width, height, z_index, loc, estimated_size } => {
-                            vec![Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + height }]
-                        },
-                        Node::Svg { key, path, z_index, dir, rel, label, hops, classes, estimated_size, control_points } => {
-                            let mut res = vec![];
-                            if let Some(Label{text, hpos, width, vpos}) = label {
-                                if rel == "forward" {
-                                    res.push(Rect { id: format!("{key}_fwd"), l: (*hpos - width + 1.).trunc(), r: (*hpos - 1.5 * char_width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
-                                } else {
-                                    res.push(Rect { id: format!("{key}_rev"), l: (*hpos + 1.5 * char_width + 1.).trunc(), r: (hpos + width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
-                                }
-                            }
-                            for (n, window) in control_points.windows(2).enumerate() {
-                                let [cur, nxt, ..] = window else { continue };
-                                res.push(Rect {
-                                    id: format!("{key},wnd{n}"),
-                                    l: (f64::min(cur.0, nxt.0) + 1.).trunc(),
-                                    r: (f64::max(cur.0, nxt.0)).trunc(),
-                                    t: (f64::min(cur.1, nxt.1) + 1.).trunc(),
-                                    b: (f64::max(cur.1, nxt.1)).trunc(),
-                                })
-                            }
-                            res
-                        },
-                    }
-                })
+                .flat_map(Into::<Vec<Rect>>::into)
                 .collect::<Vec<_>>();
             let mut collisions = vec![];
             for i in 0..rects.len() {
@@ -5803,12 +5819,15 @@ pub mod frontend {
         use pretty_assertions::{assert_eq};
         use crate::graph_drawing::{error::Error, frontend::dom::{Node, find_collisions}};
 
-        use super::dom::Drawing;
+        use super::dom::{Drawing, Rect};
 
-        trait Check {
+        use std::fmt::Debug;
+
+        trait Check: Debug {
             fn check(&self, drawing: &Result<Drawing, Error>);
         }
 
+        #[derive(Debug)]
         struct NoCollisions {}
 
         impl Check for NoCollisions {
@@ -5819,6 +5838,7 @@ pub mod frontend {
             }
         }
 
+        #[derive(Debug)]
         struct OnlyCollisions(Vec<(String, String)>);
 
         impl Check for OnlyCollisions {
@@ -5835,15 +5855,13 @@ pub mod frontend {
             }
         }
 
+        #[derive(Debug)]
         struct AllKeysUnique {}
 
         impl Check for AllKeysUnique {
             fn check(&self, drawing: &Result<Drawing, Error>) {
                 let Drawing{nodes, ..} = drawing.as_ref().unwrap();
-                let mut keys = nodes.iter().map(|n| match n {
-                    Node::Div { key, .. } => key,
-                    Node::Svg { key, .. } => key,
-                }).collect::<Vec<_>>();
+                let mut keys = nodes.iter().map(Node::key).collect::<Vec<_>>();
                 keys.sort();
                 let num_keys = keys.len();
                 keys.dedup();
@@ -5852,6 +5870,7 @@ pub mod frontend {
             }
         }
 
+        #[derive(Debug)]
         struct NumEdges(usize);
 
         impl Check for NumEdges {
@@ -5862,10 +5881,79 @@ pub mod frontend {
             }
         }
 
+        fn rect(nodes: &Vec<Node>, key: &str) -> Rect {
+            let node = nodes.iter().find(|n| n.key() == key).unwrap();
+            <&Node as Into<Vec<Rect>>>::into(node).first().unwrap().clone()
+        }
+
+        #[derive(Debug)]
+        struct Left<'a>(&'a str, &'a str);
+
+        impl<'a> Check for Left<'a> {
+            fn check(&self, drawing: &Result<Drawing, Error>) {
+                let Drawing{nodes, ..} = drawing.as_ref().unwrap();
+                let a = rect(nodes, self.0);
+                let b = rect(nodes, self.1);
+                assert!(a.r < b.l);
+            }
+        }
+
+        #[derive(Debug)]
+        struct Above<'a>(&'a str, &'a str);
+
+        impl<'a> Check for Above<'a> {
+            fn check(&self, drawing: &Result<Drawing, Error>) {
+                let Drawing{nodes, ..} = drawing.as_ref().unwrap();
+                let a = rect(nodes, self.0);
+                let b = rect(nodes, self.1);
+                assert!(a.b < b.t);
+            }
+        }
+
+        #[derive(Debug)]
+        struct Contains<'a>(&'a str, &'a str);
+
+        impl<'a> Check for Contains<'a> {
+            fn check(&self, drawing: &Result<Drawing, Error>) {
+                let Drawing{nodes, ..} = drawing.as_ref().unwrap();
+                let a = rect(nodes, self.0);
+                let b = rect(nodes, self.1);
+                assert!(a.l < b.l && a.r > b.r && a.t < b.t && a.b > b.b);
+            }
+        }
+
         fn check(model: &str, checks: Vec<&dyn Check>) {
             let drawing = super::dom::draw(model.into());
             for check in checks {
                 check.check(&drawing);
+            }
+        }
+
+        #[test]
+        pub fn test_small_diagrams() {
+            let tests: Vec<(&str, Vec<&dyn Check>)> = vec![
+                ("a b", vec![&Above("a", "b")]),
+                ("b a", vec![&Above("b", "a")]),
+                ("a ; b", vec![]),
+                ("b ; a", vec![]),
+                ("a [ b ]", vec![&Contains("a", "b")]),
+                ("b [ a ]", vec![&Contains("b", "a")]),
+                ("a b -", vec![&Left("a", "b")]),
+                ("b a -", vec![&Left("b", "a")]),
+                ("a [ b c ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Above("b", "c")]),
+                ("a [ c b ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Above("c", "b")]),
+                ("a [ b; c ]", vec![&Contains("a", "b"), &Contains("a", "c")]),
+                ("a [ c ; b ]", vec![&Contains("a", "b"), &Contains("a", "c")]),
+                ("a [ b c - ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Left("b", "c")]),
+                ("a [ c b - ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Left("c", "b")]),
+                ("a [ b ]; c b", vec![&Contains("a", "b"), &Above("c", "b")]),
+                ("a [ b ]; c b -", vec![&Contains("a", "b"), &Left("c", "b")]),
+                ("a [ b ]; b c -", vec![&Contains("a", "b"), &Left("b", "c")]),
+                ("a [ b ]; b c", vec![&Contains("a", "b"), &Above("b", "c")]),
+            ];
+            for (prompt, checks) in tests {
+                eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
+                check(prompt, checks);
             }
         }
 
