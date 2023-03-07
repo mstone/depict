@@ -1,6 +1,6 @@
 [package]
 name = "depict-server"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "API server for Depict"
@@ -10,7 +10,7 @@ repository = "https://github.com/mstone/depict"
 
 [dependencies]
 axum = "0.4"
-depict = { path = "..", version = "0.2", default-features = false, features = [ "server", "osqp" ] }
+depict = { path = "..", version = "0.3", default-features = false, features = [ "server", "osqp" ] }
 hyper = "0.14"
 Inflector = "0.11"
 logos = "0.12"

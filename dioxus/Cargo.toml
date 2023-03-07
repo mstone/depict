@@ -1,6 +1,6 @@
 [package]
 name = "depict-desktop"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Desktop port of Depict"
@@ -11,9 +11,9 @@ repository = "https://github.com/mstone/depict"
 [dependencies]
 anyhow = "*"
 colorous = "*"
-depict = { path = "..", version = "0.2", default-features = false, features = [ "desktop", "dioxus", "osqp" ] }
-dioxus = { git = "https://github.com/DioxusLabs/dioxus" }
-dioxus-desktop = { git = "https://github.com/DioxusLabs/dioxus" }
+depict = { path = "..", version = "0.3", default-features = false, features = [ "desktop", "dioxus", "osqp" ] }
+dioxus = { version = "0.3" }
+dioxus-desktop = { version = "0.3" }
 futures = "0.3"
 indoc = "1.0"
 logos = "0.12"

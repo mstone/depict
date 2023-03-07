@@ -1,6 +1,6 @@
 [package]
 name = "depict-parse"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "standalone parser for Depict"
@@ -12,7 +12,7 @@ repository = "https://github.com/mstone/depict"
 
 [dependencies]
 clap = { version = "3.1.18", features = ["derive"] }
-depict = { path = "..", version = "0.2", default-features = false, features = ["osqp"] }
+depict = { path = "..", version = "0.3", default-features = false, features = ["osqp"] }
 logos = "0.12"
 miette = { version = "4", features = [ "fancy" ] }
 thiserror = "1.0"

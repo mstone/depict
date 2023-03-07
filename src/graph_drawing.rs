@@ -5676,10 +5676,10 @@ pub mod frontend {
                                     height: "{viewbox_height}px",
                                     marker {
                                         id: "{marker_id}",
-                                        markerWidth: "7",
-                                        markerHeight: "10",
-                                        refX: "0",
-                                        refY: "5",
+                                        marker_width: "7",
+                                        marker_height: "10",
+                                        ref_x: "0",
+                                        ref_y: "5",
                                         orient: "{marker_orient}",
                                         view_box: "0 0 10 10",
                                         path {

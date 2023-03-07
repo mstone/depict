@@ -1,6 +1,6 @@
 [package]
 name = "depict"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Picture systems, tell stories"
@@ -24,7 +24,7 @@ proptest = "1"
 anyhow = { version = "*" }
 colorous = { version = "*" }
 derive_more = "0.99"
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", optional = true }
+dioxus = { version = "0.3", optional = true }
 enum-kinds = "0.5.1"
 include_dir = "0.7"
 itertools = "0.10"
