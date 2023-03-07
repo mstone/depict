@@ -64,8 +64,9 @@ pub fn render_one<P>(cx: Scope<P>, record: Record) -> Option<VNode> {
                     }),
                     div {
                         style: "white-space: pre; margin-left: 10px;",
-                        img {
-                            src: "{val}",
+                        div {
+                            class: "svg",
+                            dangerous_inner_html: "{val}",
                         }
                     }
                 }
@@ -344,11 +345,11 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let style_default = "
         svg { stroke: currentColor; stroke-width: 1; }
-        .fake svg { stroke: hsl(0, 0%, 50%); }
         path { stroke-dasharray: none; }
-        .arrow.fake path { stroke-dasharray: 5; }
         .keyword { font-weight: bold; color: rgb(207, 34, 46); }
         .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
+        .svg text { stroke: none; fill: black; }
+
     ";
     cx.render(rsx!{
         head {

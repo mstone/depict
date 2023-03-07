@@ -4336,7 +4336,8 @@ pub mod geometry {
         });
         let output = child.wait_with_output().expect("Failed to read stdout");
         let svg = String::from_utf8_lossy(&output.stdout);
-        Some(format!("data:image/svg+xml;utf8,{svg}"))
+        // Some(format!("data:image/svg+xml;utf8,{svg}"))
+        Some(svg.into())
     }
 
     #[cfg(not(feature="desktop"))]
