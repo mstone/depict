@@ -4091,6 +4091,15 @@ pub mod geometry {
             e
         };
 
+        let mut horz_out_labels_by_node = HashMap::<&V, Vec<Option<Vec<V>>>>::new();
+        let mut horz_in_labels_by_node = HashMap::<&V, Vec<Option<Vec<V>>>>::new();
+        for ((src, dst), labels) in vcg.horz_edge_labels.iter() {
+            horz_out_labels_by_node.entry(src).or_default().push(labels.forward.clone());
+            horz_in_labels_by_node.entry(src).or_default().push(labels.reverse.clone());
+            horz_out_labels_by_node.entry(dst).or_default().push(labels.reverse.clone());
+            horz_in_labels_by_node.entry(dst).or_default().push(labels.forward.clone());
+        }
+
         for geom in obj_graph.node_weights() {
             match geom {
                 Geom::Node(obj@Obj::Node(ObjNode{vl})) => {
@@ -4148,10 +4157,15 @@ pub mod geometry {
                         let child_top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(child_sol));
                         let child_bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(child_sol));
                         let padding = 10.;
+                        let line_height = 20.;
+                        let max_out_label_height = horz_out_labels_by_node.get(node).and_then(|ls| ls.iter().filter_map(|l| l.as_ref().map(|l| l.len())).max()).unwrap_or(0) as f64;
+                        let max_in_label_height = horz_in_labels_by_node.get(node).and_then(|ls| ls.iter().filter_map(|l| l.as_ref().map(|l| l.len())).max()).unwrap_or(0) as f64;
+                        let child_top_margin = 2. * padding + 6. + max_out_label_height * line_height;
+                        let child_bottom_margin = padding + max_in_label_height * line_height;
                         con_graph.add_edge(left, child_left, con_edge("child-padding-left".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
                         con_graph.add_edge(child_right, right, con_edge("child-padding-right".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
-                        con_graph.add_edge(top, child_top, con_edge("child-padding-top".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(2.*padding + 6.)})));
-                        con_graph.add_edge(child_bottom, bottom, con_edge("child-padding-bottom".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
+                        con_graph.add_edge(top, child_top, con_edge("child-padding-top".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(child_top_margin)})));
+                        con_graph.add_edge(child_bottom, bottom, con_edge("child-padding-bottom".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(child_bottom_margin)})));
                     }
                 },
                 _ => {}
@@ -4297,7 +4311,7 @@ pub mod geometry {
                     horizontal_problem.c.sym(&mut horizontal_problem.v, &mut horizontal_problem.pd, *src, *tgt, 10.);
                 }
                 (Direction::Vertical, ConEdgeFlavor::Symmetrize()) => {
-                    vertical_problem.c.sym(&mut vertical_problem.v, &mut vertical_problem.pd, *src, *tgt, 10.);
+                    vertical_problem.c.sym(&mut vertical_problem.v, &mut vertical_problem.pd, *src, *tgt, 1000.);
                 }
             }
         }
@@ -6083,6 +6097,12 @@ pub mod frontend {
                 ("a [ b [ c ] ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Contains("b", "c")]),
                 ("a e; d b e; c [ e ]", vec![&Above("a", "e"), &Above("d", "b"), &Above("b", "e"), &Contains("c", "e"), &Above("b", "c")]),
                 ("a c; a b; b c; a c", vec![&Above("a", "c"), &Above("a", "b"), &Above("b", "c")]),
+                ("a [ b [ c ]; d ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Contains("b", "c"), &Contains("a", "d")]),
+                ("a [ b c -: dddd / e ]", vec![]),
+                ("a c: d; b [ c ]", vec![]),
+                ("a [ b c -: e ]; b d: f g; c d", vec![]),
+                ("a [ b ]; c [ d [ e ] ; f ]", vec![]),
+                ("a [ b [ c ]; d ]", vec![]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
