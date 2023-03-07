@@ -5,8 +5,8 @@
 [![Build Status](https://github.com/gimli-rs/gimli/workflows/Rust/badge.svg)](https://github.com/gimli-rs/gimli/actions)
 [![Coverage Status](https://coveralls.io/repos/github/gimli-rs/gimli/badge.svg?branch=master)](https://coveralls.io/github/gimli-rs/gimli?branch=master)
 
-`gimli` is a blazing fast library for consuming the
-[DWARF debugging format](http://dwarfstd.org/).
+`gimli` is a library for reading and writing the
+[DWARF debugging format](https://dwarfstd.org/).
 
 * **Zero copy:** everything is just a reference to the original input buffer. No
   copies of the input data get made.
@@ -30,7 +30,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-gimli = "0.26.1"
+gimli = "0.27.0"
 ```
 
 The minimum supported Rust version is 1.42.0.
@@ -49,7 +49,7 @@ The minimum supported Rust version is 1.42.0.
 
   * [An `addr2line` clone](https://github.com/gimli-rs/addr2line)
 
-  * [`ddbug`](https://github.com/philipc/ddbug), a utility giving insight into
+  * [`ddbug`](https://github.com/gimli-rs/ddbug), a utility giving insight into
     code generation by making debugging information readable.
 
   * [`dwprod`](https://github.com/fitzgen/dwprod), a tiny utility to list the

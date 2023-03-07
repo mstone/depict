@@ -4,7 +4,7 @@
 [![Latest Version](https://img.shields.io/crates/v/typed-index-collections.svg)](https://crates.io/crates/typed-index-collections)
 [![Documentation](https://docs.rs/typed-index-collections/badge.svg)](https://docs.rs/typed-index-collections)
 [![GitHub license](https://img.shields.io/crates/l/typed-index-collections)](https://github.com/zheland/typed-index-collections/#license)
-[![Rust Version](https://img.shields.io/badge/rustc-1.41+-lightgray.svg)](https://blog.rust-lang.org/2020/01/30/Rust-1.41.0.html)
+[![Rust Version](https://img.shields.io/badge/rustc-1.46+-lightgray.svg)](https://blog.rust-lang.org/2020/01/30/Rust-1.46.0.html)
 
 The `typed-index-collections` crate provides [`TiSlice`] and [`TiVec`] structs
 that are typed index versions of the Rust [`slice`] and [`std::vec::Vec`] types.
@@ -40,7 +40,7 @@ First, add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-typed-index-collections = "3.0"
+typed-index-collections = "3.1.0"
 ```
 
 This crate depends on the standard library by default that is useful
@@ -50,7 +50,7 @@ in your `Cargo.toml` as shown below:
 
 ```toml
 [dependencies.typed-index-collections]
-version = "3.0"
+version = "3.1.0"
 default-features = false
 features = ["alloc"]
 ```
@@ -62,7 +62,7 @@ add it to your `Cargo.toml` as shown below:
 ```toml
 [dependencies]
 derive_more = "0.99"
-typed-index-collections = "3.0"
+typed-index-collections = "3.1.0"
 ```
 
 ## Examples

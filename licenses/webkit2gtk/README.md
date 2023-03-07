@@ -11,7 +11,14 @@ See the [requirements page](http://gtk-rs.org/docs/requirements.html).
 
 ```toml
 [dependencies]
-webkit2gtk-rs = "0.15"
+webkit2gtk = "0.18.0"
+```
+
+## Simple Example Browser
+
+You can run the example in example/main.rs with
+```shell
+cargo run --example main
 ```
 
 ## License
