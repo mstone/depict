@@ -21,8 +21,8 @@ pretty_assertions = "1"
 proptest = "1"
 
 [dependencies]
-anyhow = { version = "*" }
-colorous = { version = "*" }
+anyhow = { version = "1" }
+colorous = { version = "1" }
 derive_more = "0.99"
 dioxus = { version = "0.3", optional = true }
 enum-kinds = "0.5.1"

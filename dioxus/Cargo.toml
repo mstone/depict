@@ -9,8 +9,8 @@ homepage = "https://github.com/mstone/depict"
 repository = "https://github.com/mstone/depict"
 
 [dependencies]
-anyhow = "*"
-colorous = "*"
+anyhow = "1"
+colorous = "1"
 depict = { path = "..", version = "0.3", default-features = false, features = [ "desktop", "dioxus", "osqp" ] }
 dioxus = { version = "0.3" }
 dioxus-desktop = { version = "0.3" }
