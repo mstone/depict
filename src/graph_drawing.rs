@@ -5584,7 +5584,8 @@ pub mod frontend {
                         let mut path_elt = Path::new()
                             .set("class", classes)
                             .set("d", path)
-                            .set("stroke", "black");
+                            .set("stroke", "black")
+                            .set("fill", "none");
 
                         match rel.as_str() {
                             "forward" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
