@@ -5525,11 +5525,11 @@ pub mod frontend {
 
         pub fn as_data_svg(drawing: Drawing) -> String {
             let viewbox_width = drawing.viewbox_width;
+            let viewbox_height = drawing.viewbox_height;
             let mut nodes = drawing.nodes;
-            let viewbox_height = 768f64;
 
             let mut svg = Document::new()
-                .set("viewBox", (0f64, 0f64, viewbox_width, viewbox_height))
+                .set("viewBox", (-20f64, -20f64, viewbox_width+40., viewbox_height+20.))
                 .set("text-depiction", "optimizeLegibility");
 
             svg.append(Marker::new()
@@ -5595,8 +5595,8 @@ pub mod frontend {
                         if let Some(Label{text, hpos, width: _, vpos, ..}) = label {
                             for (lineno, line) in text.lines().enumerate() {
                                 let translate = match (dir.as_ref(), rel.as_ref()) {
-                                    ("vertical", "forward") => format!("translate({}, {})", hpos-12., vpos + 56. + (20. * lineno as f64)),
-                                    ("vertical", "reverse") => format!("translate({}, {})", hpos+12., vpos + 56. + (20. * lineno as f64)),
+                                    ("vertical", "forward") => format!("translate({}, {})", hpos-12., vpos + 16. + (20. * lineno as f64)),
+                                    ("vertical", "reverse") => format!("translate({}, {})", hpos+12., vpos + 16. + (20. * lineno as f64)),
                                     ("horizontal", "forward") => format!("translate({}, {})", hpos, vpos - 10. - 20. * lineno as f64),
                                     ("horizontal", "reverse") => format!("translate({}, {})", hpos, vpos + 20. + 20. * lineno as f64),
                                     ("vertical", "fake") => format!("translate({}, {})", hpos, vpos + 20.),
