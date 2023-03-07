@@ -251,10 +251,6 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             download: "depict.svg",
                             "Export SVG"
                         }
-                        span {
-                            style: "font-style: italic; font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity));",
-                            "('Copy Link' to use)"
-                        }
                     }
                 }
                 div {
