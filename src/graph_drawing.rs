@@ -5235,10 +5235,11 @@ pub mod frontend {
                     let height = bs[&n] - ts[&n];
 
                     let key = vl.to_string();
-                    let label = vert_node_labels
+                    let mut label = vert_node_labels
                         .get(vl)
                         .or_err(Kind::KeyNotFoundError{key: vl.to_string()})?
                         .clone();
+                    if label.starts_with("_") { label = String::new(); };
                     // if !label.is_screaming_snake_case() {
                     //     label = label.to_title_case();
                     // }
@@ -5266,7 +5267,7 @@ pub mod frontend {
                     .get(container)
                     .or_err(Kind::KeyNotFoundError{key: container.to_string()})?
                     .clone();
-                if label == "_" { label = String::new(); };
+                if label.starts_with("_") { label = String::new(); };
 
                 let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
                 texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: cn, estimated_size});
@@ -5283,7 +5284,7 @@ pub mod frontend {
 
                 for (dir, labels) in &[("forward", level.forward.as_ref()), ("reverse", level.reverse.as_ref())] {
                     if labels.is_none() { continue; }
-                    let label_text = labels.map(|labels| labels.join("\n"));
+                    let label_text = labels.map(|labels| labels.iter().cloned().map(|f| if f == "_" { "".into() } else { f }).collect::<Vec<_>>().join("\n"));
                     let hops = hops_by_edge.get(&(vl.clone(), wl.clone()));
                     let hops = if let Some(hops) = hops { hops } else { continue; };
                     // eprintln!("vl: {}, wl: {}, hops: {:?}", vl, wl, hops);
@@ -5434,7 +5435,7 @@ pub mod frontend {
                     let vposr = ts[&nr] + forward_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let control_points = vec![(lr, vposl), (rl, vposr)];
-                    let label_text = forward.join("\n");
+                    let label_text = forward.iter().cloned().map(|f| if f == "_" { "".into() } else { f }).collect::<Vec<_>>().join("\n");
                     let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
                     let label = if !forward.is_empty() {
                         Some(Label{text: label_text, hpos: rl, width: label_width, vpos: vposl })
@@ -5459,7 +5460,7 @@ pub mod frontend {
                     let vposr = ts[&nr] + reverse_voffset;
                     let path = format!("M {} {} L {} {}", lr, vposl, rl, vposr);
                     let control_points = vec![(lr, vposl), (rl, vposr)];
-                    let label_text = reverse.join("\n");
+                    let label_text = reverse.iter().cloned().map(|f| if f == "_" { "".into() } else { f }).collect::<Vec<_>>().join("\n");
                     let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
                     let label = if !reverse.is_empty() {
                         Some(Label{text: label_text, hpos: lr, width: label_width, vpos: vposl })
