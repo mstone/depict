@@ -3329,6 +3329,17 @@ pub mod geometry {
         }
     }
 
+    impl<'a> TryFrom<&'a AnySol> for VarRank {
+        type Error = &'a AnySol;
+
+        fn try_from(sol: &'a AnySol) -> Result<Self, Self::Error> {
+            match sol {
+                AnySol::L(vr) |  AnySol::R(vr) | AnySol::S(vr) | AnySol::T(vr) | AnySol::B(vr) => Ok(*vr),
+                _ => Err(sol),
+            }
+        }
+    }
+
     #[derive(Clone, Debug)]
     pub struct LocRow<V: Graphic> {
         pub ovr: VerticalRank,
@@ -3934,6 +3945,7 @@ pub mod geometry {
         let size_by_loc = &geometry_problem.size_by_loc;
         let size_by_hop = &geometry_problem.size_by_hop;
         let varrank_by_obj = &geometry_problem.varrank_by_obj;
+        let loc_by_varrank = &geometry_problem.loc_by_varrank;
 
         let of = OrderedFloat::<f64>::from;
 
@@ -3980,7 +3992,13 @@ pub mod geometry {
             // todo: hop edges, nested edges, ...
         }
 
-        if let Some(svg) = as_svg(&vcg.vert) {
+        if let Some(svg) = as_svg(&vcg.vert,
+            &|_, (_vx, vl)| {
+                format!("class=\"box highlight_{vl}\"")
+            }, &|_, er| {
+                String::new()
+            }
+        ) {
             logs.log_svg(Some("lang_graph"), None::<String>, Vec::<String>::new(), svg);
         }
 
@@ -4074,7 +4092,23 @@ pub mod geometry {
 
         // eprintln!("obj graph: {}", Dot::new(&obj_graph));
 
-        if let Some(obj_svg) = as_svg(&obj_graph) {
+        if let Some(obj_svg) = as_svg(&obj_graph,
+            &|_, (_gx, geom)| {
+                match geom {
+                    Geom::Node(obj) | Geom::Container(obj) => format!("class=\"box highlight_{obj}\""),
+                    Geom::Hop(obj) => {
+                        let Some(vl) = obj.as_vl() else {return format!("class=\"{obj}\"")};
+                        let Some(wl) = obj.as_wl() else {return format!("class=\"{obj}\"")};
+                        format!("class=\"arrow {vl}_{wl} {obj}\"")
+                    },
+                    _ => String::new(),
+                }
+            }, &|g, er| {
+                let src = g.node_weight(er.source()).unwrap();
+                let dst = g.node_weight(er.target()).unwrap();
+                format!("class=\"arrow {src}_{dst}\"")
+            }
+        ) {
             logs.log_svg(Some("obj_graph"), None::<String>, Vec::<String>::new(), obj_svg).unwrap();
         }
 
@@ -4267,8 +4301,31 @@ pub mod geometry {
         }
 
         // eprintln!("con graph: {}", Dot::new(&con_graph));
+        let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
+            Obj::Node(ObjNode{vl: node}) => node.to_string().names(),
+            Obj::Hop(ObjHop{lvl: ovr, mhr, vl, wl}) => names![ovr, mhr, vl.to_string(), wl.to_string()],
+            Obj::Container(ObjContainer{vl}) => vl.to_string().names(),
+        };
+        let v2n = |varrank| {
+            let loc_ix = loc_by_varrank[&varrank];
+            l2n(loc_ix.0, loc_ix.1)
+        };
 
-        if let Some(con_svg) = as_svg(&con_graph) {
+        if let Some(con_svg) = as_svg(
+            &con_graph,
+            &|_, (_sx, sol)| {
+                let Ok(varrank) = sol.try_into() else { return String::new() };
+                let obj = &loc_to_node[&loc_by_varrank[&varrank]];
+                match obj {
+                    Obj::Node(_) | Obj::Container(_)=> format!("class=\"box highlight_{obj}\""),
+                    Obj::Hop(ObjHop{vl, wl, ..}) => format!("class=\"arrow {vl}_{wl}\""),
+                }
+            }, &|g, er| {
+                let src = g.node_weight(er.source()).unwrap();
+                let dst = g.node_weight(er.target()).unwrap();
+                format!("class=\"arrow {src}_{dst}\"")
+            }
+        ) {
             logs.log_svg(Some("con_graph"), None::<String>, Vec::<String>::new(), con_svg).unwrap();
         }
 
@@ -4319,11 +4376,24 @@ pub mod geometry {
         Ok((horizontal_problem, vertical_problem))
     }
 
+    use petgraph::visit::{IntoEdgeReferences, IntoNodeReferences, NodeIndexable, GraphProp};
+
     #[cfg(feature="desktop")]
-    fn as_svg<V: Display, E: Display>(graph: &Graph<V, E>) -> Option<String> {
+    fn as_svg<'a, G: IntoNodeReferences + IntoEdgeReferences + NodeIndexable + GraphProp>(
+        graph: G,
+        node_attrs: &'a dyn Fn(G, G::NodeRef) -> String,
+        edge_attrs: &'a dyn Fn(G, G::EdgeRef) -> String
+    ) -> Option<String> where
+        G::NodeWeight: Display,
+        G::EdgeWeight: Display,
+    {
         use std::{process::{Stdio, Command}, io::Write};
 
-        let dot = format!("{}", petgraph::dot::Dot::new(graph));
+        let dot = format!("{}", petgraph::dot::Dot::with_attr_getters(graph,
+            &[],
+            edge_attrs,
+            node_attrs,
+            ));
         let mut child = Command::new("dot")
             .arg("-Tsvg")
             .stdin(Stdio::piped())
@@ -4341,7 +4411,14 @@ pub mod geometry {
     }
 
     #[cfg(not(feature="desktop"))]
-    fn as_svg<V, E>(_graph: &Graph<V, E>) -> Option<String> {
+    fn as_svg<'a, G: IntoNodeReferences + IntoEdgeReferences + NodeIndexable + NodeWeight + GraphProp>(
+        graph: G,
+        node_attrs: &'a dyn Fn(G, G::NodeRef) -> String,
+        edge_attrs: &'a dyn Fn(G, G::EdgeRef) -> String
+    ) -> Option<String> where
+        G::NodeWeight: Display,
+        G::EdgeWeight: Display,
+    {
         None
     }
 

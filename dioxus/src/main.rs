@@ -257,7 +257,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                 bs.iter().map(|b| {
                     match b {
                         Val::Process { name: Some(pname), .. } | Val::Process { label: Some(pname), .. } => {
-                            let style = format!(".box.highlight_{pname} {{ background-color: red; color: white; }} .highlight_{pname} {{ color: red; }}");
+                            let style = format!(r#"
+                                .box.highlight_{pname} {{ background-color: red; color: white; }}
+                                .highlight_{pname} {{ color: red; }}
+                                .highlight_{pname} ellipse {{ fill: red; }}
+                                .highlight_{pname} text {{ fill: white; }}
+                            "#);
                             // eprintln!("STYLE: {style}");
                             rsx!{
                                 style {
@@ -266,7 +271,10 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             }
                         },
                         Val::Chain{ name: Some(cname), .. } => {
-                            let style = format!(".arrow.highlight_{cname} {{ color: red; }}");
+                            let style = format!(r#"
+                                .arrow.highlight_{cname} {{ color: red; }}
+                                .arrow.highlight_{cname} path {{ stroke: red; }}
+                            "#);
                             // eprintln!("STYLE: {style}");
                             rsx!{
                                 style {
@@ -281,7 +289,10 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                                         Val::Process { name: Some(pname), .. } | Val::Process { label: Some(pname), .. } => {
                                             match &pq[1] {
                                                 Val::Process { name: Some(qname), .. } | Val::Process { label: Some(qname), .. } => {
-                                                    let style = format!(".arrow.{pname}_{qname} svg > path {{ stroke: red; }}");
+                                                    let style = format!(r#"
+                                                        .arrow.{pname}_{qname} svg > path {{ stroke: red; }}
+                                                        .arrow.{pname}_{qname} path {{ stroke: red; }}
+                                                    "#);
                                                     // eprintln!("STYLE: {style}");
                                                     rsx!{
                                                         style {
