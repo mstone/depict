@@ -2059,9 +2059,9 @@ pub mod layout {
                                 format!("{}, {}", src, dst),
                                 "isize, &str",
                                 vec![],
-                                format!("0, contains")
+                                format!("-1, contains")
                             ).unwrap();
-                            0
+                            -1
                         } else {
                             l.log_pair(
                                 "(V, V)",
@@ -2916,7 +2916,7 @@ pub mod layout {
                     let container = match (vlc.as_ref(), wlc.as_ref()) {
                         (Some(vlc), Some(wlc)) => {
                             let wlc_vr = node_to_loc[&Obj::from_vl(wlc, containers)].0;
-                            if hop_loc.0 >= wlc_vr {
+                            if hop_loc.0 >= wlc_vr + 1 {
                                 Some(wlc.clone())
                             } else {
                                 Some(vlc.clone())
@@ -2924,7 +2924,7 @@ pub mod layout {
                         },
                         (None, Some(wlc)) => {
                             let wlc_vr = node_to_loc[&Obj::from_vl(wlc, containers)].0;
-                            if hop_loc.0 >= wlc_vr {
+                            if hop_loc.0 >= wlc_vr + 1{
                                 Some(wlc.clone())
                             } else {
                                 vlc.clone()
@@ -2933,7 +2933,7 @@ pub mod layout {
                         (Some(vlc), None) => {
                             let vlc_vr = node_to_loc[&Obj::from_vl(vlc, containers)].0;
                             let cd = container_depths[&vlc];
-                            if hop_loc.0 >= vlc_vr + cd {
+                            if hop_loc.0 >= vlc_vr + cd + 1 {
                                 wlc.clone()
                             } else {
                                 Some(vlc.clone())
@@ -3121,10 +3121,10 @@ pub mod layout {
                     if let Obj::Container(_) = obj {
                         let cd = container_depths[vl];
                         if cd > 0 {
-                            queue.insert((vr, MyOption::Some(*offset)), Some(vl.clone()));
+                            queue.insert((vr + 1, MyOption::Some(*offset)), Some(vl.clone()));
                         }
                         for i in 1..cd {
-                            queue.insert((vr + i, MyOption::Some(*offset)), Some(vl.clone()));
+                            queue.insert((vr + i + 1, MyOption::Some(*offset)), Some(vl.clone()));
                         }
                         continue 'queue;
                     }
@@ -4826,9 +4826,9 @@ pub mod frontend {
                                 format!("{}, {}", src, dst),
                                 "isize, &str",
                                 vec![],
-                                format!("0, src-contains-dst")
+                                format!("-1, src-contains-dst")
                             ).unwrap();
-                            0
+                            -1
                         } else {
                             l.log_pair(
                                 "(V, V)",
@@ -4843,6 +4843,7 @@ pub mod frontend {
                     }
                 }
             };
+
             let paths_by_rank = rank(vert, distance, logs)?;
 
             logs.with_map("paths_by_rank", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
