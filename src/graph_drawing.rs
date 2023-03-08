@@ -6112,7 +6112,7 @@ pub mod frontend {
 
         use super::dom::{Drawing, Rect};
 
-        use std::fmt::Debug;
+        use std::fmt::{Debug, Display};
 
         trait Check: Debug {
             fn check(&self, drawing: &Result<Drawing, Error>);
@@ -6130,13 +6130,13 @@ pub mod frontend {
         }
 
         #[derive(Debug)]
-        struct OnlyCollisions(Vec<(String, String)>);
+        struct OnlyCollisions<'a, V: Clone + Debug + Display>(&'a [(V, V)]);
 
-        impl Check for OnlyCollisions {
+        impl<'a, V: Clone + Debug + Display> Check for OnlyCollisions<'a, V> {
             fn check(&self, drawing: &Result<Drawing, Error>) {
                 let Drawing{nodes, ..} = drawing.as_ref().unwrap();
                 let collisions = find_collisions(nodes);
-                let mut expected_collisions = self.0.clone();
+                let mut expected_collisions = self.0.clone().into_iter().map(|(a,b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
                 expected_collisions.sort();
                 expected_collisions.dedup();
                 let mut found_collisions = collisions.into_iter().map(|(ri, rj)| (ri.id, rj.id)).collect::<Vec<_>>();
@@ -6252,6 +6252,7 @@ pub mod frontend {
                 ("a [ b c -: e ]; b d: f g; c d", vec![]),
                 ("a [ b ]; c [ d [ e ] ; f ]", vec![]),
                 ("a [ b [ c ]; d ]", vec![]),
+                ("a b: foo; c [ d ]", vec![&OnlyCollisions(&[("c", "d")])]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
@@ -6345,10 +6346,7 @@ pub mod frontend {
             c [ b ]
             "#, vec![
                 &OnlyCollisions(
-                    vec![("a", "d"), ("c", "b")]
-                        .into_iter()
-                        .map(|(a, b)| (a.to_string(), b.to_string()))
-                        .collect::<Vec<_>>()
+                    &[("a", "d"), ("c", "b")]
                 )
             ]);
         }
