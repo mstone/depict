@@ -3946,6 +3946,8 @@ pub mod geometry {
         let size_by_hop = &geometry_problem.size_by_hop;
         let varrank_by_obj = &geometry_problem.varrank_by_obj;
         let loc_by_varrank = &geometry_problem.loc_by_varrank;
+        let char_width = &geometry_problem.char_width.unwrap_or(9.);
+        let line_height = &geometry_problem.line_height.unwrap_or(20.);
 
         let of = OrderedFloat::<f64>::from;
 
@@ -4191,13 +4193,15 @@ pub mod geometry {
                         let child_top = or_insert(&mut con_graph, &mut con_vxmap, AnySol::T(child_sol));
                         let child_bottom = or_insert(&mut con_graph, &mut con_vxmap, AnySol::B(child_sol));
                         let padding = 10.;
-                        let line_height = 20.;
                         let max_out_label_height = horz_out_labels_by_node.get(node).and_then(|ls| ls.iter().filter_map(|l| l.as_ref().map(|l| l.len())).max()).unwrap_or(0) as f64;
                         let max_in_label_height = horz_in_labels_by_node.get(node).and_then(|ls| ls.iter().filter_map(|l| l.as_ref().map(|l| l.len())).max()).unwrap_or(0) as f64;
+                        let max_in_label_width = horz_in_labels_by_node.get(node).and_then(|ls| ls.iter().filter_map(|l| l.as_ref()).flat_map(|v| v.iter().map(|v| v.len())).max()).unwrap_or(0) as f64;
                         let child_top_margin = 2. * padding + 6. + max_out_label_height * line_height;
                         let child_bottom_margin = padding + max_in_label_height * line_height;
-                        con_graph.add_edge(left, child_left, con_edge("child-padding-left".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
-                        con_graph.add_edge(child_right, right, con_edge("child-padding-right".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(padding)})));
+                        let child_left_margin = 2. * padding + char_width * max_in_label_width;
+                        let child_right_margin = 2. * padding + char_width * max_in_label_width;
+                        con_graph.add_edge(left, child_left, con_edge("child-padding-left".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(child_left_margin)})));
+                        con_graph.add_edge(child_right, right, con_edge("child-padding-right".into(), Direction::Horizontal, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(child_right_margin)})));
                         con_graph.add_edge(top, child_top, con_edge("child-padding-top".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(child_top_margin)})));
                         con_graph.add_edge(child_bottom, bottom, con_edge("child-padding-bottom".into(), Direction::Vertical, ConEdgeFlavor::Margin(ConEdgeMargin{margin: of(child_bottom_margin)})));
                     }
