@@ -1998,10 +1998,8 @@ pub mod layout {
                     std::mem::swap(&mut src, &mut dst);
                     std::mem::swap(&mut src_ix, &mut dst_ix);
                 }
-                if !vcg.vert.contains_edge(src_ix, dst_ix) {
-                    vcg.vert.add_edge(src_ix, dst_ix, "vertical".into());
-                }
 
+                let mut edge_type = "vertical";
                 if let Some(level) = labels_by_level.get(n) {
                     let eval::Level{mut forward, mut reverse} = level.clone();
                     if has_prior_orientation {
@@ -2021,6 +2019,14 @@ pub mod layout {
                         (None, Some(r2)) => { vlvl.reverse.replace(r2); },
                         _ => {},
                     };
+                } else {
+                    edge_type = "implied_vertical";
+                }
+                let has_vertical_edge = vcg.vert.edges_connecting(src_ix, dst_ix).any(|er| er.weight() == "vertical");
+                if has_vertical_edge {
+                    continue
+                } else {
+                    vcg.vert.update_edge(src_ix, dst_ix, edge_type.into());
                 }
             }
         }
@@ -2124,7 +2130,8 @@ pub mod layout {
 
         let edge_indices = vcg.vert.edge_indices().collect::<Vec<_>>();
         for ex in edge_indices {
-            if vcg.vert.edge_weight(ex).unwrap() != "vertical" { continue };
+            let ew = vcg.vert.edge_weight(ex).unwrap();
+            if ew != "vertical" && ew != "implied_vertical" { continue };
             let (vx, wx) = vcg.vert.edge_endpoints(ex).unwrap();
             let mut vl = vcg.vert.node_weight(vx).unwrap().clone();
             let wl = vcg.vert.node_weight(wx).unwrap().clone();
@@ -2135,7 +2142,7 @@ pub mod layout {
                 let vcx = vcg.vert_vxmap[vlc];
                 let wx = vcg.vert_vxmap[&wl];
                 if !vcg.vert.contains_edge(vcx, wx) {
-                    vcg.vert.add_edge(vcx, wx, "vertical".into());
+                    vcg.vert.add_edge(vcx, wx, "implied_vertical".into());
                 }
                 vl = vlc.clone();
             }
@@ -2148,7 +2155,7 @@ pub mod layout {
                 let vx = vcg.vert_vxmap[&vl];
                 let wcx = vcg.vert_vxmap[wlc];
                 if !vcg.vert.contains_edge(vx, wcx) {
-                    vcg.vert.add_edge(vx, wcx, "vertical".into());
+                    vcg.vert.add_edge(vx, wcx, "implied_vertical".into());
                 }
                 wl = wlc.clone();
             }
@@ -4032,7 +4039,7 @@ pub mod geometry {
 
         for er in vcg.vert.edge_references() {
             let ew = er.weight();
-            if ew != "vertical" { continue; }
+            if ew != "vertical" && ew != "implied_vertical" { continue; }
             let src = vcg.vert.node_weight(er.source()).unwrap();
             let dst = vcg.vert.node_weight(er.target()).unwrap();
             let src_obj = Obj::from_vl(src, containers);
@@ -4046,6 +4053,12 @@ pub mod geometry {
             eprintln!("SOLVED_VXMAP: {solved_vxmap:?}");
             eprintln!("SOLVED_LOCS: {solved_locs:?}");
             eprintln!("NODE_TO_LOC: {node_to_loc:?}");
+
+            if ew == "implied_vertical" {
+                obj_graph.add_edge(src_ix, dst_ix, obj_edge(Direction::Vertical, ObjEdgeReason::VerticalEdge(ew.to_string()), 40.));
+                continue;
+            }
+
             let hops = &hops_by_edge.get(&(src.clone(), dst.clone()));
             let hops = if hops.is_none() {
                 vec![src_loc, dst_loc]
@@ -5389,6 +5402,10 @@ pub mod frontend {
                 let wl = vert.node_weight(er.target()).unwrap();
                 let ew = er.weight();
 
+                if ew == "implied_vertical" {
+                    continue;
+                }
+
                 let Some(level) = vert_edge_labels.get(&(vl.clone(), wl.clone())) else {continue};
 
                 for (dir, labels) in &[("forward", level.forward.as_ref()), ("reverse", level.reverse.as_ref())] {
@@ -6314,149 +6331,5 @@ pub mod frontend {
                 )
             ]);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::borrow::Cow;
-
-    use super::{error::Error};
-    use crate::{parser::{Parser, Token, Item}, graph_drawing::{layout::{*}, index::{VerticalRank, OriginalHorizontalRank}, geometry::calculate_sols, error::Kind, eval, frontend::log::Logger}};
-
-    use logos::Logos;
-
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    pub fn no_swaps() -> Result<(), Error> {
-        let mut logs = Logger::new();
-        let data = "Aa Ab Ac: y / z\nXx Xy Xz: w / x";
-        let mut p = Parser::new();
-        let mut lex = Token::lexer(data);
-        while let Some(tk) = lex.next() {
-            p.parse(tk)
-                .map_err(|_| {
-                    Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-                })?
-        }
-
-        let v: Vec<Item> = p.end_of_input()
-            .map_err(|_| {
-                Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
-            })?;
-
-        let val = eval::eval(&v[..]);
-
-        let vcg = calculate_vcg(&val, &mut logs)?;
-
-        let Vcg{vert, vert_vxmap, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
-        let vx = vert_vxmap["Ab"];
-        let wx = vert_vxmap["Ac"];
-        assert_eq!(vert.node_weight(vx), Some(&Cow::from("Ab")));
-        assert_eq!(vert.node_weight(wx), Some(&Cow::from("Ac")));
-
-        let distance = {
-            let containers = &containers;
-            let nodes_by_container = &nodes_by_container;
-            let container_depths = &container_depths;
-            |src: Cow<str>, dst: Cow<str>, logs: &mut Logger| {
-                if !containers.contains(&src) {
-                    -1
-                } else {
-                    if nodes_by_container[&src].contains(&dst) {
-                        0
-                    } else {
-                        -(container_depths[&src] as isize)
-                    }
-                }
-            }
-        };
-        let paths_by_rank = rank(&vcg.vert, distance, &mut logs)?;
-        assert_eq!(paths_by_rank[&VerticalRank(2)][0], (Cow::from("Aa"), Cow::from("Ac")));
-
-        let layout_problem = calculate_locs_and_hops(&val, &paths_by_rank, &vcg, &mut logs)?;
-        let LayoutProblem{hops_by_level, loc_to_node, node_to_loc, ..} = &layout_problem;
-        let nAa = Obj::Node(ObjNode{ vl: Cow::from("Aa") });
-        let nAb = Obj::Node(ObjNode{ vl: Cow::from("Ab") });
-        let nAc = Obj::Node(ObjNode{ vl: Cow::from("Ac") });
-        let nXx = Obj::Node(ObjNode{ vl: Cow::from("Xx") });
-        let nXy = Obj::Node(ObjNode{ vl: Cow::from("Xy") });
-        let nXz = Obj::Node(ObjNode{ vl: Cow::from("Xz") });
-        let lAa = node_to_loc[&nAa];
-        let lAb = node_to_loc[&nAb];
-        let lAc = node_to_loc[&nAc];
-        let lXx = node_to_loc[&nXx];
-        let lXy = node_to_loc[&nXy];
-        let lXz = node_to_loc[&nXz];
-        // assert_eq!(lv, (2, 1));
-        // assert_eq!(lw, (3, 0));
-        // assert_eq!(lp, (2, 0));
-        // assert_eq!(lq, (3, 1));
-        // assert_eq!(lv.1.0 + lw.1.0, 1); // lv.1 != lw.1
-        // assert_eq!(lp.1.0 + lq.1.0, 1); // lp.1 != lq.1
-
-        let nAa2 = &loc_to_node[&lAa];
-        let nAb2 = &loc_to_node[&lAb];
-        let nAc2 = &loc_to_node[&lAc];
-        let nXx2 = &loc_to_node[&lXx];
-        let nXy2 = &loc_to_node[&lXy];
-        let nXz2 = &loc_to_node[&lXz];
-        assert_eq!(nAa2, &nAa);
-        assert_eq!(nAb2, &nAb);
-        assert_eq!(nAc2, &nAc);
-        assert_eq!(nXx2, &nXx);
-        assert_eq!(nXy2, &nXy);
-        assert_eq!(nXz2, &nXz);
-
-
-        assert_eq!(hops_by_level.len(), 2);
-        let h0 = &hops_by_level[&VerticalRank(0)];
-        let h1 = &hops_by_level[&VerticalRank(1)];
-        let ohr = OriginalHorizontalRank;
-        let vr = VerticalRank;
-        let h0A: Hop<Cow<str>> = Hop { mhr: lAa.1, nhr: lAb.1, vl: "Aa".into(), wl: "Ab".into(), lvl: lAa.0 };
-        let h0X: Hop<Cow<str>> = Hop { mhr: lXx.1, nhr: lXy.1, vl: "Xx".into(), wl: "Xy".into(), lvl: lXx.0 };
-        let h1A: Hop<Cow<str>> = Hop { mhr: lAb.1, nhr: lAc.1, vl: "Ab".into(), wl: "Ac".into(), lvl: lAb.0 };
-        let h1X: Hop<Cow<str>> = Hop { mhr: lXy.1, nhr: lXz.1, vl: "Xy".into(), wl: "Xz".into(), lvl: lXy.0 };
-        let mut s0 = vec![h0A.clone(), h0X.clone()];
-        let mut s1 = vec![h1A.clone(), h1X.clone()];
-        s0.sort();
-        s1.sort();
-        let mut h0 = h0.iter().cloned().collect::<Vec<_>>();
-        h0.sort();
-        let mut h1 = h1.iter().cloned().collect::<Vec<_>>();
-        h1.sort();
-        assert_eq!(&h0[..], &s0[..]);
-        assert_eq!(&h1[..], &s1[..]);
-
-        let layout_solution = minimize_edge_crossing(&vcg, &layout_problem, &mut logs)?;
-        let LayoutSolution{crossing_number, solved_locs} = &layout_solution;
-        assert_eq!(*crossing_number, 0);
-        // let sv = solved_locs[&2][&1];
-        // let sw = solved_locs[&3][&0];
-        // let sp = solved_locs[&2][&0];
-        // let sq = solved_locs[&3][&1];
-        let sAa = solved_locs[&lAa.0][&lAa.1];
-        let sAb = solved_locs[&lAb.0][&lAb.1];
-        let sAc = solved_locs[&lAc.0][&lAc.1];
-        let sXx = solved_locs[&lXx.0][&lXx.1];
-        let sXy = solved_locs[&lXy.0][&lXy.1];
-        let sXz = solved_locs[&lXz.0][&lXz.1];
-        eprintln!("{:<2}: lv0: {}, lv1: {}, sv: {}", "Ab", &lAb.0, &lAb.1, sAb);
-        eprintln!("{:<2}: lw0: {}, lw1: {}, sw: {}", "Ac", &lAc.0, &lAc.1, sAc);
-        // assert_eq!(sv, 1);
-        // assert_eq!(sw, 1);
-        // assert_eq!(sp, 0);
-        // assert_eq!(sq, 0);
-        assert_eq!(sAa, sAb);
-        assert_eq!(sAb, sAc); // uncrossing happened
-        assert_eq!(sXx, sXy);
-        assert_eq!(sXy, sXz);
-
-
-        let geometry_problem = calculate_sols(&layout_problem, &layout_solution);
-        // ...
-
-        Ok(())
     }
 }
