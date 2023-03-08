@@ -4415,7 +4415,7 @@ pub mod geometry {
     }
 
     #[cfg(not(feature="desktop"))]
-    fn as_svg<'a, G: IntoNodeReferences + IntoEdgeReferences + NodeIndexable + NodeWeight + GraphProp>(
+    fn as_svg<'a, G: IntoNodeReferences + IntoEdgeReferences + NodeIndexable + GraphProp>(
         graph: G,
         node_attrs: &'a dyn Fn(G, G::NodeRef) -> String,
         edge_attrs: &'a dyn Fn(G, G::EdgeRef) -> String
