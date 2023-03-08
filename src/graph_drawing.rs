@@ -2727,6 +2727,20 @@ pub mod layout {
             x & 0b1 == 1
         }
 
+        #[cfg(all(target_arch="wasm32", target_os="unknown", target_vendor="unknown"))]
+        fn now() -> f64 {
+            let window = web_sys::window().expect("should have a window in this context");
+            let performance = window
+                .performance()
+                .expect("performance should be available");
+            performance.now()
+        }
+
+        #[cfg(not(all(target_arch="wasm32", target_os="unknown", target_vendor="unknown")))]
+        fn now() -> Instant {
+            Instant::now()
+        }
+
         // https://sedgewick.io/wp-content/themes/sedgewick/papers/1977Permutation.pdf, Algorithm 2
         pub fn search<T>(p: &mut [T], mut process: impl FnMut(&mut [T]) -> bool) {
             let n = p.len();
@@ -3013,9 +3027,12 @@ pub mod layout {
             let mut solution: Option<Vec<Vec<usize>>> = None;
             // eprintln!("MULTISEARCH {:#?}", shrs_ref);
 
+            #[cfg(all(target_arch="wasm32", target_os="unknown", target_vendor="unknown"))]
+            let time_budget = Duration::new(1, 0).as_secs_f64();
+            #[cfg(not(all(target_arch="wasm32", target_os="unknown", target_vendor="unknown")))]
             let time_budget = Duration::new(1, 0);
-            let now = Instant::now();
-            let deadline = now + time_budget;
+            let start = now();
+            let deadline = start + time_budget;
             let mut iterations = 0;
 
             multisearch(&mut shrs_ref, |p| {
@@ -3063,14 +3080,18 @@ pub mod layout {
                     }
                 }
 
-                if Instant::now() > deadline {
+                if iterations % 1000 == 0 && now() > deadline {
+                // if iterations > 60_000 {
                     return true;
                 }
                 // eprintln!("P cn: {cn}: p: {p:?}");
                 false
             });
 
-            let elapsed = (Instant::now() - now).as_secs_f64();
+            #[cfg(all(target_arch="wasm32", target_os="unknown", target_vendor="unknown"))]
+            let elapsed = now() - start;
+            #[cfg(not(all(target_arch="wasm32", target_os="unknown", target_vendor="unknown")))]
+            let elapsed = (Instant::now() - start).as_secs_f64();
             let rate = iterations as f64 / elapsed;
             eprintln!("iterations: {iterations} / elapsed: {elapsed:.2} = {rate:.2} iter/s");
 

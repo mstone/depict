@@ -725,6 +725,7 @@ dependencies = [
  "svg",
  "thiserror",
  "typed-index-collections",
+ "web-sys",
 ]
 
 [[package]]
