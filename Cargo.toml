@@ -26,6 +26,7 @@ colorous = { version = "1" }
 derive_more = "0.99"
 dioxus = { version = "0.3", optional = true }
 enum-kinds = "0.5.1"
+factorial = "0.3"
 include_dir = "0.7"
 itertools = "0.10"
 logos = "0.12"

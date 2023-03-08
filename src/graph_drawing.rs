@@ -2704,6 +2704,9 @@ pub mod layout {
         use std::cmp::Ordering;
         use std::collections::{BTreeMap, HashMap, VecDeque};
         use std::fmt::{Display};
+        use std::time::{Instant, Duration};
+
+        use factorial::Factorial;
 
         use crate::graph_drawing::error::{Error, LayoutError, OrErrExt, Kind};
         use crate::graph_drawing::geometry::LocIx;
@@ -2966,10 +2969,17 @@ pub mod layout {
             eprintln!("BUBBLE_BY_SLVL: {bubble_by_slvl:#?}");
             eprintln!("SHRS: {shrs:#?}");
 
+            let search_space_size = shrs
+                .iter()
+                .map(|row| row.len().checked_factorial())
+                .try_fold(1usize, |acc, sz| sz.and_then(|sz| acc.checked_mul(sz)).ok_or(()));
+            eprintln!("SEARCH SPACE SIZE: {search_space_size:?}");
+
             let mut shrs_ref = vec![];
             for shrs_lvl in shrs.iter_mut() {
                 shrs_ref.push(&mut shrs_lvl[..]);
             }
+
 
             let mut locs_by_level2 = vec![];
             for (ovr, locs) in locs_by_level.iter() {
@@ -2995,6 +3005,12 @@ pub mod layout {
             let mut crossing_number = usize::MAX;
             let mut solution: Option<Vec<Vec<usize>>> = None;
             // eprintln!("MULTISEARCH {:#?}", shrs_ref);
+
+            let time_budget = Duration::new(1, 0);
+            let now = Instant::now();
+            let deadline = now + time_budget;
+            let mut iterations = 0;
+
             multisearch(&mut shrs_ref, |p| {
                 // eprintln!("HEAPS PROCESS: ");
                 // for (n, s) in p.iter().enumerate() {
@@ -3027,6 +3043,8 @@ pub mod layout {
                         }
                     }
                 }
+                iterations += 1;
+
                 // eprintln!("CN: {cn}");
                 if cn < crossing_number {
                     if conforms(vcg, &layout_problem, &locs_by_level2, &nodes_by_container2, &bubble_by_loc, &slvl_by_bubble, &bhr_by_loc, p) {
@@ -3037,9 +3055,17 @@ pub mod layout {
                         }
                     }
                 }
+
+                if Instant::now() > deadline {
+                    return true;
+                }
                 // eprintln!("P cn: {cn}: p: {p:?}");
                 false
             });
+
+            let elapsed = (Instant::now() - now).as_secs_f64();
+            let rate = iterations as f64 / elapsed;
+            eprintln!("iterations: {iterations} / elapsed: {elapsed:.2} = {rate:.2} iter/s");
 
             let solution = solution.or_err(LayoutError::HeapsError{error: "no solution found".into()})?;
             eprintln!("HEAPS CN: {crossing_number}");
