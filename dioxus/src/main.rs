@@ -20,8 +20,7 @@ use tao::dpi::LogicalSize;
 use indoc::indoc;
 
 const PLACEHOLDER: &str = indoc!("
-person microwave food: open, start, stop / beep : heat
-person food: stir
+a [ b ]; c d: _; e f: _
 ");
 
 pub struct AppProps {

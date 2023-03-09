@@ -2845,7 +2845,7 @@ pub mod layout {
             c as usize
         }
 
-        use crate::graph_drawing::frontend::log;
+        use crate::graph_drawing::frontend::log::{self, Log};
 
         fn conforms<V: Graphic + Display + log::Name, E: Graphic>(
             vcg: &Vcg<V, E>,
@@ -2908,6 +2908,8 @@ pub mod layout {
             l2n.sort();
             eprintln!("LOC_TO_NODE: {l2n:#?}");
             eprintln!("HOPS_BY_EDGE: {hops_by_edge:#?}");
+            loc_to_node.log((), logs);
+            // hops_by_edge.log((), logs);
 
             let mut bubbles = HashMap::<(VerticalRank, Option<V>), Vec<Obj<V>>>::new();
             let mut bubble_by_loc = HashMap::<LocIx, Option<V>>::new();
@@ -3105,6 +3107,12 @@ pub mod layout {
             let elapsed = (Instant::now() - start).as_secs_f64();
             let rate = iterations as f64 / elapsed;
             eprintln!("iterations: {iterations} / elapsed: {elapsed:.2} = {rate:.2} iter/s");
+            logs.with_group("multisearch", String::new(), Vec::<String>::new(), |logs| {
+                logs.log_string("search_space_size", search_space_size)?;
+                logs.log_string("iterations", iterations)?;
+                logs.log_string("elapsed", format!("{elapsed:.2}"))?;
+                logs.log_string("rate", format!("{rate:.2}"))
+            });
 
             let solution = solution.or_err(LayoutError::HeapsError{error: "no solution found".into()})?;
             eprintln!("HEAPS CN: {crossing_number}");
@@ -3124,7 +3132,10 @@ pub mod layout {
                 );
             }
             eprintln!("SOLVED BUBBLES: {solved_bubbles:#?}");
-
+            logs.with_map("solved_bubbles", "", solved_bubbles.iter().enumerate(), |blvl, value, logs| {
+                let ((vr, bubble), queue) = value;
+                logs.log_pair("(vr, bubble)", vec![], format!("blvl: {blvl}, vr: {vr}, bubble: {bubble:?}"), "vecdeque", vec![], format!("{queue:#?}"))
+            });
 
             #[derive(Eq, PartialEq, PartialOrd)]
             enum MyOption<V: Display + Ord> {
@@ -3157,70 +3168,76 @@ pub mod layout {
 
             eprintln!("CONTAINER DEPTHS: {container_depths:#?}");
 
-            // interrupted contour traversal: oy!
             let mut solved_locs: BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> = BTreeMap::new();
-            let mut prev_vr = VerticalRank(0);
-            let mut offset = 0;
-            let max_vr = locs_by_level.keys().max().unwrap();
-            eprintln!("MAX_VR: {max_vr}");
-            let mut min_container_offset = None;
-            let mut max_container_offset = None;
-            'queue: while let Some(((vr, bubble_start), bubble)) = queue.first_key_value() {
-                eprintln!("\n\nQUEUE: {queue:?}");
-                let vr = vr.clone();
-                if vr > prev_vr {
-                    offset = 0;
-                    prev_vr = vr;
-                }
-                let bubble = bubble.clone();
-                eprintln!("VR: {vr}, BUBBLE_START: {bubble_start} -> BUBBLE: {bubble:?}, starting offset: {}", offset);
+            logs.with_group("bubble readout", String::new(), Vec::<String>::new(), |logs| {
+                // interrupted contour traversal: oy!
+                let mut prev_vr = VerticalRank(0);
+                let mut offset = 0;
+                let max_vr = locs_by_level.keys().max().unwrap();
+                eprintln!("MAX_VR: {max_vr}");
+                let mut min_container_offset = None;
+                let mut max_container_offset = None;
+                'queue: while let Some(((vr, bubble_start), bubble)) = queue.first_key_value() {
+                    eprintln!("\n\nQUEUE: {queue:?}");
+                    let vr = vr.clone();
+                    if vr > prev_vr {
+                        offset = 0;
+                        prev_vr = vr;
+                    }
+                    let bubble = bubble.clone();
+                    eprintln!("VR: {vr}, BUBBLE_START: {bubble_start} -> BUBBLE: {bubble:?}, starting offset: {}", offset);
+                    logs.log_pair("(vr, usize)", vec![], format!("{vr}, {bubble_start}"), "bubble", vec![], format!("{bubble:?}"));
 
-                if let Some(solved_bubble) = solved_bubbles.get_mut(&(vr, bubble.clone())) {
-                    solved_bubble.make_contiguous().sort_by_key(|(obr, sbr)| *sbr);
-                    while let Some((obr, sbr)) = solved_bubble.pop_front() {
-                        let obj = &bubbles[&(vr, bubble.clone())][obr];
-                        let vl = obj.as_vl().unwrap();
-                        let loc = node_to_loc[obj];
-                        let shr = SolvedHorizontalRank(offset);
-                        eprintln!("found obj: {obj:?}, vr: {vr}, obr: {obr}, sbr: {sbr}, loc: {loc:?}, offset: {offset} -> shr: {shr}");
-                        let prev = solved_locs.entry(loc.0).or_default().insert(loc.1, shr);
-                        offset += 1;
-                        assert!(prev.is_none());
-                        if let Obj::Container(_) = obj {
-                            let cd = container_depths[vl];
-                            for i in 0..cd {
-                                queue.insert((vr + i + 1, offset-1), Some(vl.clone()));
+                    if let Some(solved_bubble) = solved_bubbles.get_mut(&(vr, bubble.clone())) {
+                        solved_bubble.make_contiguous().sort_by_key(|(obr, sbr)| *sbr);
+                        while let Some((obr, sbr)) = solved_bubble.pop_front() {
+                            let obj = &bubbles[&(vr, bubble.clone())][obr];
+                            let vl = obj.as_vl().unwrap();
+                            let loc = node_to_loc[obj];
+                            let shr = SolvedHorizontalRank(offset);
+                            eprintln!("found obj: {obj:?}, vr: {vr}, obr: {obr}, sbr: {sbr}, loc: {loc:?}, offset: {offset} -> shr: {shr}");
+                            logs.log_pair("", vec![], format!("{obj:?}, {vr}, {obr}, {sbr}, {loc:?}, {offset}"), "", vec![], format!("{shr}"));
+                            let prev = solved_locs.entry(loc.0).or_default().insert(loc.1, shr);
+                            offset += 1;
+                            assert!(prev.is_none());
+                            if let Obj::Container(_) = obj {
+                                let cd = container_depths[vl];
+                                for i in 0..cd {
+                                    queue.insert((vr + i + 1, offset-1), Some(vl.clone()));
+                                }
+                                min_container_offset = Some(min_container_offset.map(|mco| usize::min(mco, offset-1)).unwrap_or(offset-1));
+                                max_container_offset = Some(max_container_offset.map(|mco| usize::max(mco, offset-1)).unwrap_or(offset-1));
+                                continue 'queue;
                             }
-                            min_container_offset = Some(min_container_offset.map(|mco| usize::min(mco, offset-1)).unwrap_or(offset-1));
-                            max_container_offset = Some(max_container_offset.map(|mco| usize::max(mco, offset-1)).unwrap_or(offset-1));
-                            continue 'queue;
                         }
                     }
-                }
-                else {
-                    eprintln!("skipping {bubble:?}");
-                }
+                    else {
+                        eprintln!("skipping {bubble:?}");
+                    }
 
-                if bubble.is_none() && vr <= *max_vr {
-                    let mut prev = None;
-                    let mut mco = min_container_offset.map(|mco| if mco > 0 { 0 } else { max_container_offset.unwrap() + 1 } ).unwrap_or(0);
-                    while true {
-                        eprintln!("INSERT1: ({}, {}) -> {prev:?}", vr+1, mco);
-                        let prev2 = queue.insert((vr+1, mco), prev);
-                        if let Some(prev2) = prev2 {
-                            eprintln!("RELOCATING PREV: {prev2:?} -> {}", mco+1);
-                            mco += 1;
-                            prev = prev2;
-                        } else {
-                            eprintln!("OK");
-                            break
-                        }
-                    };
-                    min_container_offset = None;
-                    max_container_offset = None;
+                    if bubble.is_none() && vr <= *max_vr {
+                        let mut prev = None;
+                        let mut mco = min_container_offset.map(|mco| if mco > 0 { 0 } else { max_container_offset.unwrap() + 1 } ).unwrap_or(0);
+                        while true {
+                            eprintln!("INSERT1: ({}, {}) -> {prev:?}", vr+1, mco);
+                            logs.log_element("Insert", Vec::<String>::new(), format!("{}, {} -> {prev:?}", vr+1, mco));
+                            let prev2 = queue.insert((vr+1, mco), prev);
+                            if let Some(prev2) = prev2 {
+                                eprintln!("RELOCATING PREV: {prev2:?} -> {}", mco+1);
+                                mco += 1;
+                                prev = prev2;
+                            } else {
+                                eprintln!("OK");
+                                break
+                            }
+                        };
+                        min_container_offset = None;
+                        max_container_offset = None;
+                    }
+                    queue.pop_first();
                 }
-                queue.pop_first();
-            }
+                Ok(())
+            });
 
 
             eprintln!("SOLVED_LOCS: {solved_locs:#?}");
