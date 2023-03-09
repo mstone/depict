@@ -2718,7 +2718,7 @@ pub mod layout {
         use crate::graph_drawing::error::{Error, LayoutError, OrErrExt, Kind};
         use crate::graph_drawing::geometry::LocIx;
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
-        use crate::graph_drawing::layout::ObjHop;
+        use crate::graph_drawing::layout::{ObjHop, ObjContainer, Hop};
 
         use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Obj, Vcg};
 
@@ -3035,13 +3035,24 @@ pub mod layout {
             let deadline = start + time_budget;
             let mut iterations = 0;
 
+            let mut hops_by_level2 = hops_by_level.clone();
+            for (container, nodes) in nodes_by_container.iter() {
+                let cloc = node_to_loc[&Obj::Container(ObjContainer{vl: container.clone()})];
+                for node in nodes {
+                    let nloc = node_to_loc[&Obj::from_vl(node, containers)];
+                    // if nloc.0 != cloc.0 + 1 { continue }
+                    hops_by_level2.entry(cloc.0).or_default().insert(Hop{vl: container.clone(), wl: node.clone(), lvl: cloc.0, mhr: cloc.1, nhr: nloc.1});
+                }
+            }
+            eprintln!("HOPS_BY_LEVEL2: {hops_by_level2:#?}");
+
             multisearch(&mut shrs_ref, |p| {
                 // eprintln!("HEAPS PROCESS: ");
                 // for (n, s) in p.iter().enumerate() {
                 //     eprintln!("{n}: {s:?}");
                 // }
                 let mut cn = 0;
-                for (rank, hops) in hops_by_level.iter() {
+                for (rank, hops) in hops_by_level2.iter() {
                     for h1i in 0..hops.len() {
                         for h2i in 0..h1i {
                             let h1 = &hops[h1i];
@@ -3141,47 +3152,72 @@ pub mod layout {
                 }
             }
 
-            let mut queue: BTreeMap<(VerticalRank, MyOption<usize>), Option<V>> = Default::default();
-            for vr in locs_by_level.keys().copied() {
-                queue.insert((vr, MyOption::None), None);
-            };
+            let mut queue: BTreeMap<(VerticalRank, usize), Option<V>> = Default::default();
+            queue.insert((VerticalRank(0), 0), None);
 
             eprintln!("CONTAINER DEPTHS: {container_depths:#?}");
 
+            // interrupted contour traversal: oy!
             let mut solved_locs: BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> = BTreeMap::new();
             let mut prev_vr = VerticalRank(0);
-            let mut offsets = (0..locs_by_level.len()).map(|n| 0_usize).collect::<Vec<_>>();
-            'queue: while let Some(((vr, offset2), bubble)) = queue.first_key_value() {
+            let mut offset = 0;
+            let max_vr = locs_by_level.keys().max().unwrap();
+            eprintln!("MAX_VR: {max_vr}");
+            let mut min_container_offset = None;
+            let mut max_container_offset = None;
+            'queue: while let Some(((vr, bubble_start), bubble)) = queue.first_key_value() {
+                eprintln!("\n\nQUEUE: {queue:?}");
                 let vr = vr.clone();
-                let offset2 = match offset2 {
-                    MyOption::Some(o) => *o,
-                    MyOption::None => 0,
-                };
+                if vr > prev_vr {
+                    offset = 0;
+                    prev_vr = vr;
+                }
                 let bubble = bubble.clone();
-                let offset = &mut offsets[vr.0];
-                eprintln!("VR: {vr}, BUBBLE: {bubble:?}, starting offset: {}, offset2: {}", offset, offset2);
-                let Some(solved_bubble) = solved_bubbles.get_mut(&(vr, bubble.clone())) else { eprintln!("skipping {bubble:?}"); queue.pop_first(); continue };
-                solved_bubble.make_contiguous().sort_by_key(|(obr, sbr)| *sbr);
-                while let Some((obr, sbr)) = solved_bubble.pop_front() {
-                    *offset += 1;
-                    let obj = &bubbles[&(vr, bubble.clone())][obr];
-                    let vl = obj.as_vl().unwrap();
-                    let loc = node_to_loc[obj];
-                    // let shr = SolvedHorizontalRank(sbr+offset2);
-                    let shr = SolvedHorizontalRank(*offset-1);
-                    eprintln!("found obj: {obj:?}, vr: {vr}, obr: {obr}, sbr: {sbr}, loc: {loc:?}, offset: {offset}, offset2: {offset2} -> shr: {shr}");
-                    let prev = solved_locs.entry(loc.0).or_default().insert(loc.1, shr);
-                    assert!(prev.is_none());
-                    if let Obj::Container(_) = obj {
-                        let cd = container_depths[vl];
-                        if cd > 0 {
-                            queue.insert((vr + 1, MyOption::Some(*offset)), Some(vl.clone()));
+                eprintln!("VR: {vr}, BUBBLE_START: {bubble_start} -> BUBBLE: {bubble:?}, starting offset: {}", offset);
+
+                if let Some(solved_bubble) = solved_bubbles.get_mut(&(vr, bubble.clone())) {
+                    solved_bubble.make_contiguous().sort_by_key(|(obr, sbr)| *sbr);
+                    while let Some((obr, sbr)) = solved_bubble.pop_front() {
+                        let obj = &bubbles[&(vr, bubble.clone())][obr];
+                        let vl = obj.as_vl().unwrap();
+                        let loc = node_to_loc[obj];
+                        let shr = SolvedHorizontalRank(offset);
+                        eprintln!("found obj: {obj:?}, vr: {vr}, obr: {obr}, sbr: {sbr}, loc: {loc:?}, offset: {offset} -> shr: {shr}");
+                        let prev = solved_locs.entry(loc.0).or_default().insert(loc.1, shr);
+                        offset += 1;
+                        assert!(prev.is_none());
+                        if let Obj::Container(_) = obj {
+                            let cd = container_depths[vl];
+                            for i in 0..cd {
+                                queue.insert((vr + i + 1, offset-1), Some(vl.clone()));
+                            }
+                            min_container_offset = Some(min_container_offset.map(|mco| usize::min(mco, offset-1)).unwrap_or(offset-1));
+                            max_container_offset = Some(max_container_offset.map(|mco| usize::max(mco, offset-1)).unwrap_or(offset-1));
+                            continue 'queue;
                         }
-                        for i in 1..cd {
-                            queue.insert((vr + i + 1, MyOption::Some(*offset)), Some(vl.clone()));
-                        }
-                        continue 'queue;
                     }
+                }
+                else {
+                    eprintln!("skipping {bubble:?}");
+                }
+
+                if bubble.is_none() && vr <= *max_vr {
+                    let mut prev = None;
+                    let mut mco = min_container_offset.map(|mco| if mco > 0 { 0 } else { max_container_offset.unwrap() + 1 } ).unwrap_or(0);
+                    while true {
+                        eprintln!("INSERT1: ({}, {}) -> {prev:?}", vr+1, mco);
+                        let prev2 = queue.insert((vr+1, mco), prev);
+                        if let Some(prev2) = prev2 {
+                            eprintln!("RELOCATING PREV: {prev2:?} -> {}", mco+1);
+                            mco += 1;
+                            prev = prev2;
+                        } else {
+                            eprintln!("OK");
+                            break
+                        }
+                    };
+                    min_container_offset = None;
+                    max_container_offset = None;
                 }
                 queue.pop_first();
             }
