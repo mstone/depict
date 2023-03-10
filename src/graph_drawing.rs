@@ -4662,9 +4662,9 @@ pub mod geometry {
         #[default] Default,
     }
 
-    fn solve_problem<S: Sol, C: Coeff>(
-        optimization_problem: &OptimizationProblem<S, C>
-    ) -> Result<(Vec<(Var<S>, f64)>, OSQPStatusKind), Error> {
+    fn solve_problem<C: Coeff>(
+        optimization_problem: &OptimizationProblem<AnySol, C>
+    ) -> Result<(Vec<(Var<AnySol>, f64)>, OSQPStatusKind), Error> {
         let OptimizationProblem{v, c, pd, q} = optimization_problem;
 
         let settings = osqp::Settings::default()
@@ -4694,6 +4694,9 @@ pub mod geometry {
         let mut q2 = Vec::with_capacity(n);
         q2.resize(n, 0.);
         for q in q.iter() {
+            if matches!(q.var.sol, AnySol::L(_) | AnySol::T(_)) {
+                continue;
+            }
             q2[q.var.index] += q.coeff.into();
         }
 

@@ -12,10 +12,8 @@ repository = "https://github.com/mstone/depict"
 
 [dependencies]
 clap = { version = "3.1.18", features = ["derive"] }
-depict = { path = "..", version = "0.3", default-features = false, features = ["osqp"] }
+depict = { path = "..", version = "0.3", default-features = false, features = ["dioxus", "osqp"] }
 logos = "0.12"
 miette = { version = "4", features = [ "fancy" ] }
 thiserror = "1.0"
-tracing = "0.1"
-tracing-error = { version = "0.2", features = [ "traced-error" ] }
-tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
+walkdir = "2"

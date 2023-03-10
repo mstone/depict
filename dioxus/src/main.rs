@@ -20,8 +20,7 @@ use tao::dpi::LogicalSize;
 use indoc::indoc;
 
 const PLACEHOLDER: &str = indoc!("
-a c: d / e
-b [ c ]
+a [ b c ]; b d: p; c d: q; a e: r
 ");
 
 pub struct AppProps {
