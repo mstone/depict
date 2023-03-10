@@ -20,7 +20,7 @@ use tao::dpi::LogicalSize;
 use indoc::indoc;
 
 const PLACEHOLDER: &str = indoc!("
-a [ b ]; c d: _; e f: _
+a [ b [ c ] ]
 ");
 
 pub struct AppProps {
@@ -241,10 +241,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let viewbox_width = drawing.get().viewbox_width;
     let viewbox_height = drawing.get().viewbox_height;
-    let _crossing_number = cx.render(rsx!(match drawing.get().crossing_number {
-        Some(cn) => rsx!(span { "{cn}" }),
-        None => rsx!(div{}),
-    }));
+    let crossing_number = drawing.get().crossing_number;
 
     let data_svg = as_data_svg(drawing.get().clone());
 
@@ -487,17 +484,6 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         }
                     }
                 }
-                // div {
-                //     style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
-                //     span {
-                //         style: "color: #000;",
-                //         "Crossing Number: "
-                //     }
-                //     span {
-                //         style: "font-style: italic;",
-                //         crossing_number
-                //     }
-                // }
                 show_logs.then(|| rsx!{
                         div {
                         style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
@@ -507,7 +493,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         }
                         span {
                             style: "font-style: italic;",
-                            "v: {status_v:?} h: {status_h:?} c: {status_c:?}"
+                            "v: {status_v:?} h: {status_h:?} cn: {crossing_number:?}, c: {status_c:?}"
                         }
                     }
                 })

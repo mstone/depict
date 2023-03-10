@@ -168,6 +168,12 @@ pub mod error {
     #[non_exhaustive]
     #[derive(Debug, thiserror::Error)]
     pub enum LayoutError {
+        #[error("incomplete solution error")]
+        Incomplete{error: String},
+        #[error("sparse solution error")]
+        Sparse{error: String},
+        #[error("non-injective solution error")]
+        NonInjective{error: String},
         #[error("heaps solver error")]
         HeapsError{error: String},
         #[error("osqp solver error")]
@@ -2340,19 +2346,20 @@ pub mod layout {
     }
 
     #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
-    pub struct ObjBorder<V: Graphic> {
-        pub border: Border<V>,
+    pub struct ObjGap<V: Graphic> {
+        pub container: V,
+        pub lvl: VerticalRank,
     }
 
-    impl<'n, V: Graphic> Display for ObjBorder<V> {
+    impl<'n, V: Graphic> Display for ObjGap<V> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}", self.border)
+            write!(f, "{}.{}", self.container, self.lvl)
         }
     }
 
-    impl<'n, V: Graphic + 'n> log::Names<'n> for ObjBorder<V> {
+    impl<'n, V: Graphic + 'n> log::Names<'n> for ObjGap<V> {
         fn names(&self) -> Vec<Box<dyn Name + 'n>> {
-            self.border.names()
+            self.container.names()
         }
     }
 
@@ -2365,6 +2372,8 @@ pub mod layout {
         Hop(ObjHop<V>),
         /// A container of other objects
         Container(ObjContainer<V>),
+        // a gap left by a container in a bubble
+        Gap(ObjGap<V>),
     }
 
     impl<V: Graphic> Obj<V> {
@@ -2381,6 +2390,7 @@ pub mod layout {
                 Obj::Node(ObjNode{vl}) => Some(vl),
                 Obj::Hop(ObjHop{vl, ..}) => Some(vl),
                 Obj::Container(ObjContainer{vl}) => Some(vl),
+                Obj::Gap(ObjGap{container, ..}) => Some(container),
             }
         }
 
@@ -2389,6 +2399,7 @@ pub mod layout {
                 Obj::Node(ObjNode{vl}) => Some(vl),
                 Obj::Hop(ObjHop{wl, ..}) => Some(wl),
                 Obj::Container(ObjContainer{vl}) => Some(vl),
+                Obj::Gap(ObjGap{container, ..}) => Some(container),
             }
         }
     }
@@ -2408,6 +2419,9 @@ pub mod layout {
                 Obj::Container(ObjContainer{ vl }) => {
                     names![vl]
                 },
+                Obj::Gap(ObjGap{container, lvl}) => {
+                    names![lvl, container]
+                }
             }
         }
     }
@@ -2418,6 +2432,7 @@ pub mod layout {
                 Obj::Node(inner) => write!(f, "{inner}"),
                 Obj::Hop(inner) => write!(f, "{inner}"),
                 Obj::Container(inner) => write!(f, "{inner}"),
+                Obj::Gap(inner) => write!(f, "{inner}"),
             }
         }
     }
@@ -2509,6 +2524,16 @@ pub mod layout {
                             format!("{loc}")
                         )
                     },
+                    Obj::Gap(loc) => {
+                        l.log_pair(
+                            "Loc",
+                            loc_ix.names(),
+                            format!("{:?}, {:?}", loc_ix.0, loc_ix.1),
+                            "Obj::Gap",
+                            loc.names(),
+                            format!("{loc}")
+                        )
+                    }
                 }
             })
         }
@@ -2661,6 +2686,21 @@ pub mod layout {
             }
         }
 
+        for container in containers.iter() {
+            let cd = container_depths[container];
+            let (ovr, _) = node_to_loc[&Obj::Container(ObjContainer{vl: container.clone()})];
+            for vr in (ovr.0+1)..(ovr.0+1+cd) {
+                let level = locs_by_level.entry(VerticalRank(vr)).or_insert(0);
+                let mhr = OriginalHorizontalRank(*level);
+                *level += 1;
+                let gap = Obj::Gap(ObjGap{container: container.clone(), lvl: VerticalRank(vr)});
+                if let Some(old) = loc_to_node.insert((VerticalRank(vr), mhr), gap.clone()) {
+                    panic!("loc_to_node.insert({vr}v, {mhr}) -> {:?}", old);
+                };
+                node_to_loc.insert(gap.clone(), (VerticalRank(vr), mhr));
+            }
+        }
+
         logs.with_map("hops_by_edge", "HashMap<(V, V), (VerticalRank, (OriginalHorizontalRank, OriginalHorizontalRank))>", hops_by_edge.iter(), |edge, hops, l| {
             l.with_set(format!("hops_by_edge[{}->{}]", edge.0, edge.1), "Hops", hops.iter(), |(lvl, (mhr, nhr)), l| {
                 l.log_pair(
@@ -2711,6 +2751,7 @@ pub mod layout {
         use std::cmp::Ordering;
         use std::collections::{BTreeMap, HashMap, VecDeque};
         use std::fmt::{Display};
+        use std::ops::{Sub, SubAssign};
         use std::time::{Instant, Duration};
 
         use factorial::Factorial;
@@ -2718,7 +2759,7 @@ pub mod layout {
         use crate::graph_drawing::error::{Error, LayoutError, OrErrExt, Kind};
         use crate::graph_drawing::geometry::LocIx;
         use crate::graph_drawing::index::{VerticalRank, OriginalHorizontalRank, SolvedHorizontalRank};
-        use crate::graph_drawing::layout::{ObjHop, ObjContainer, Hop};
+        use crate::graph_drawing::layout::{ObjHop, ObjContainer, Hop, ObjGap};
 
         use super::{LayoutProblem, Graphic, LayoutSolution, HorizontalConstraint, Obj, Vcg};
 
@@ -2850,14 +2891,11 @@ pub mod layout {
         fn conforms<V: Graphic + Display + log::Name, E: Graphic>(
             vcg: &Vcg<V, E>,
             layout_problem: &LayoutProblem<V>,
-            locs_by_level2: &Vec<Vec<&Obj<V>>>,
-            nodes_by_container2: &HashMap<V, Vec<(VerticalRank, OriginalHorizontalRank)>>,
             bubble_by_loc: &HashMap<LocIx, Option<V>>,
             slvl_by_bubble: &HashMap<(VerticalRank, Option<V>), usize>,
             bhr_by_loc: &HashMap<LocIx, usize>,
             p: &mut [&mut [usize]]
         ) -> bool {
-            let Vcg{nodes_by_container_transitive: nodes_by_container, ..} = vcg;
             let LayoutProblem{node_to_loc, ..} = layout_problem;
 
             // eprintln!("HCG: {:#?}", hcg.iter().collect::<Vec<_>>());
@@ -2870,9 +2908,7 @@ pub mod layout {
                 let aloc = node_to_loc[aobj];
                 let bloc = node_to_loc[bobj];
                 let aovr = aloc.0.0;
-                let aohr = aloc.1.0;
                 let bovr = bloc.0.0;
-                let bohr = bloc.1.0;
                 let abub = bubble_by_loc[&aloc].clone();
                 let bbub = bubble_by_loc[&bloc].clone();
                 let pa = &p[slvl_by_bubble[&(aloc.0, abub)]];
@@ -2898,7 +2934,7 @@ pub mod layout {
         ) -> Result<LayoutSolution, Error> where
             V: Graphic + PartialEq<str> + From<String> + Default
         {
-            let Vcg{vert, containers, nodes_by_container, container_by_node, container_depths, ..} = vcg;
+            let Vcg{containers, nodes_by_container, container_by_node, container_depths, ..} = vcg;
             let LayoutProblem{loc_to_node, node_to_loc, locs_by_level, hops_by_level, hops_by_edge, ..} = layout_problem;
 
             // eprintln!("MINIMIZE");
@@ -2908,7 +2944,10 @@ pub mod layout {
             l2n.sort();
             eprintln!("LOC_TO_NODE: {l2n:#?}");
             eprintln!("HOPS_BY_EDGE: {hops_by_edge:#?}");
-            loc_to_node.log((), logs);
+            loc_to_node.log((), logs)?;
+            let mut n2l = node_to_loc.iter().collect::<Vec<_>>();
+            n2l.sort_by_key(|(_, l)| l.clone());
+            eprintln!("NODE_TO_LOC0: {n2l:#?}");
             // hops_by_edge.log((), logs);
 
             let mut bubbles = HashMap::<(VerticalRank, Option<V>), Vec<Obj<V>>>::new();
@@ -2968,7 +3007,7 @@ pub mod layout {
                         _ => None,
                     };
 
-                    let mut bubble = bubbles.entry((hop_loc.0, container.clone())).or_default();
+                    let bubble = bubbles.entry((hop_loc.0, container.clone())).or_default();
                     bubble.push(hop.clone());
                     container_by_obj.insert(hop.clone(), container.clone());
                     bubble_by_loc.insert(hop_loc, container.clone());
@@ -2976,8 +3015,26 @@ pub mod layout {
                 }
             }
 
+            for container in containers.iter() {
+                let cd = container_depths[container];
+                let container_obj = &Obj::Container(ObjContainer { vl: container.clone() });
+                let cloc = node_to_loc[container_obj];
+                let parent_container = &container_by_node[container];
+                for n in 0..cd {
+                    let lvl = cloc.0 + n + 1;
+                    let obj = Obj::Gap(ObjGap{lvl, container: container.clone()});
+                    let loc = node_to_loc[&obj];
+                    let bubble = bubbles.entry((lvl, parent_container.clone())).or_default();
+                    container_by_obj.insert(obj.clone(), parent_container.clone());
+                    bubble.push(obj);
+                    bubble_by_loc.insert(loc, parent_container.clone());
+                    bhr_by_loc.insert(loc, bubble.len()-1);
+                }
+            }
+
             eprintln!("CONTAINER_BY_OBJ: {container_by_obj:#?}");
             eprintln!("BUBBLES: {bubbles:#?}");
+            eprintln!("BUBBLE_BY_LOC: {bubble_by_loc:#?}");
 
             let mut slvl_by_bubble = HashMap::new();
             let mut bubble_by_slvl = HashMap::new();
@@ -3038,12 +3095,18 @@ pub mod layout {
             let mut iterations = 0;
 
             let mut hops_by_level2 = hops_by_level.clone();
-            for (container, nodes) in nodes_by_container.iter() {
-                let cloc = node_to_loc[&Obj::Container(ObjContainer{vl: container.clone()})];
-                for node in nodes {
-                    let nloc = node_to_loc[&Obj::from_vl(node, containers)];
+            for container in containers.iter() {
+                let cd = container_depths[container];
+                let container_obj = &Obj::Container(ObjContainer{vl: container.clone()});
+                let cloc = node_to_loc[container_obj];
+                for gap in 0..cd {
+                    let lvl = cloc.0 + gap;
+                    let nobj1 = &if gap == 0 { container_obj.clone() } else { Obj::Gap(ObjGap{container: container.clone(), lvl}) };
+                    let nobj2 = &Obj::Gap(ObjGap{container: container.clone(), lvl: lvl+1});
+                    let nloc1 = node_to_loc[nobj1];
+                    let nloc2 = node_to_loc[nobj2];
                     // if nloc.0 != cloc.0 + 1 { continue }
-                    hops_by_level2.entry(cloc.0).or_default().insert(Hop{vl: container.clone(), wl: node.clone(), lvl: cloc.0, mhr: cloc.1, nhr: nloc.1});
+                    hops_by_level2.entry(lvl).or_default().insert(Hop{vl: container.clone(), wl: container.clone(), lvl: nloc1.0, mhr: nloc1.1, nhr: nloc2.1});
                 }
             }
             eprintln!("HOPS_BY_LEVEL2: {hops_by_level2:#?}");
@@ -3054,12 +3117,13 @@ pub mod layout {
                 //     eprintln!("{n}: {s:?}");
                 // }
                 let mut cn = 0;
-                for (rank, hops) in hops_by_level2.iter() {
+                for (_rank, hops) in hops_by_level2.iter() {
                     for h1i in 0..hops.len() {
                         for h2i in 0..h1i {
                             let h1 = &hops[h1i];
                             let h2 = &hops[h2i];
 
+                            eprintln!("hop: {h1} {h2}");
                             let b11 = &bubble_by_loc[&(h1.lvl, h1.mhr)];
                             let b12 = &bubble_by_loc[&((h1.lvl+1), h1.nhr)];
                             let b21 = &bubble_by_loc[&(h2.lvl, h2.mhr)];
@@ -3084,7 +3148,7 @@ pub mod layout {
 
                 // eprintln!("CN: {cn}");
                 if cn < crossing_number {
-                    if conforms(vcg, &layout_problem, &locs_by_level2, &nodes_by_container2, &bubble_by_loc, &slvl_by_bubble, &bhr_by_loc, p) {
+                    if conforms(vcg, &layout_problem, &bubble_by_loc, &slvl_by_bubble, &bhr_by_loc, p) {
                         crossing_number = cn;
                         solution = Some(p.iter().map(|q| q.to_vec()).collect());
                         if crossing_number == 0 {
@@ -3112,7 +3176,7 @@ pub mod layout {
                 logs.log_string("iterations", iterations)?;
                 logs.log_string("elapsed", format!("{elapsed:.2}"))?;
                 logs.log_string("rate", format!("{rate:.2}"))
-            });
+            })?;
 
             let solution = solution.or_err(LayoutError::HeapsError{error: "no solution found".into()})?;
             eprintln!("HEAPS CN: {crossing_number}");
@@ -3135,109 +3199,141 @@ pub mod layout {
             logs.with_map("solved_bubbles", "", solved_bubbles.iter().enumerate(), |blvl, value, logs| {
                 let ((vr, bubble), queue) = value;
                 logs.log_pair("(vr, bubble)", vec![], format!("blvl: {blvl}, vr: {vr}, bubble: {bubble:?}"), "vecdeque", vec![], format!("{queue:#?}"))
-            });
+            })?;
 
-            #[derive(Eq, PartialEq, PartialOrd)]
-            enum MyOption<V: Display + Ord> {
+            use std::fmt::Debug;
+            #[derive(Debug, Clone, Eq, PartialEq, PartialOrd)]
+            enum MyOption<V: Clone + Debug + Display + Ord> {
+                Min,
                 Some(V),
-                None,
+                Max,
             }
 
-            impl<V: Display + Ord> Ord for MyOption<V> {
+            impl<V: Clone + Debug + Display + Ord> Ord for MyOption<V> {
                 fn cmp(&self, other: &Self) -> Ordering {
                     match (self, other) {
                         (MyOption::Some(a), MyOption::Some(b)) => <V as Ord>::cmp(a, b),
-                        (MyOption::Some(_), MyOption::None) => Ordering::Less,
-                        (MyOption::None, MyOption::Some(_)) => Ordering::Greater,
-                        (MyOption::None, MyOption::None) => Ordering::Equal,
+                        (MyOption::Some(_), MyOption::Max) => Ordering::Less,
+                        (MyOption::Min, MyOption::Some(_)) => Ordering::Greater,
+                        (MyOption::Min, MyOption::Min) => Ordering::Equal,
+                        (MyOption::Max, MyOption::Max) => Ordering::Equal,
+                        (MyOption::Min, MyOption::Max) => Ordering::Less,
+                        (MyOption::Max, MyOption::Min) => Ordering::Greater,
+                        (MyOption::Some(_), MyOption::Min) => Ordering::Greater,
+                        (MyOption::Max, MyOption::Some(_)) => Ordering::Greater,
                     }
                 }
             }
 
-            impl<V: Display + Ord> Display for MyOption<V> {
+            impl<V: Clone + Debug + Display + Ord> Display for MyOption<V> {
                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     match self {
                         MyOption::Some(v) => write!(f, "Some({v})"),
-                        MyOption::None => write!(f, "None"),
+                        MyOption::Max => write!(f, "Max"),
+                        MyOption::Min => write!(f, "Min"),
                     }
                 }
             }
 
-            let mut queue: BTreeMap<(VerticalRank, usize), Option<V>> = Default::default();
-            queue.insert((VerticalRank(0), 0), None);
+            impl<V: Clone + Debug + Display + Ord + Sub<Output=V>> Sub<V> for MyOption<V> {
+                type Output = MyOption<V>;
+
+                fn sub(self, rhs: V) -> Self::Output {
+                    match self {
+                        MyOption::Min => MyOption::Min,
+                        MyOption::Some(lhs) => MyOption::Some(lhs - rhs),
+                        MyOption::Max => MyOption::Max,
+                    }
+                }
+            }
+
+            impl<V: Clone + Debug + Display + Ord + SubAssign<V>> SubAssign<V> for MyOption<V> {
+                fn sub_assign(&mut self, rhs: V) {
+                    match self {
+                        MyOption::Min => {},
+                        MyOption::Some(lhs) => *lhs -= rhs,
+                        MyOption::Max => {},
+                    }
+                }
+            }
 
             eprintln!("CONTAINER DEPTHS: {container_depths:#?}");
 
+            // each container generates several bubbles that "slice" the bubbles below it
+            // slicing means that a child container's contents have been bubbled:
+            // for example, suppose we have a b c; d [ e f; g [h]; i j ]; k l m; n [ o p; q [r]; s t ]; u v w.
+            // then on row0 we might have 0@[a        d        k        n       u]
+            // but on row 1 might have    1@[b _[e    g    i]_ j _[o    q    s]_ v]
+            // and on row 2 we might have 2@[c _[f  _[h]_  j]_ k _[p  _[r]_  t]_ w]
+            // where the first gap (which is not recorded in the 1@... bubble contains d.1@[e g i],
+            // the second gap contains n.1@[o q s], the third gap contains d.2@[f _ j], the fourth gap
+            // (nested in the third gap) contains g.2@[h], the fifth gap contains n.2@[o q s], and the
+            // sixth and final gap contains q.2@[r].
+            // here, the bubbles for d and n "slice" the bubbles for row 1 and row 2, and the bubbles for
+            // g and q slice the d.2 and n.2 bubbles respectively.
+            // consequently, to readout a row, we need to recursively identify the interleaving of elements
+            // and gaps and then we need to fill the gaps with the corresponding bubbles, offseting their
+            // elements values as we go
+            // to identify the gaps that need to be placed, I think we can just examine what bubbles
+            // exist on the row of interest.
+            // to place gaps, we need to use hops_by_level2 and our solution data to order the
+            // (containment-augmented) hops between us and the previous row. hence, to go from
+            // 1@[b j v] to 1@[b !d.1 j !n.1 v], we need to see a run of
+
             let mut solved_locs: BTreeMap<VerticalRank, BTreeMap<OriginalHorizontalRank, SolvedHorizontalRank>> = BTreeMap::new();
+            let mut readout_queue = VecDeque::<(VerticalRank, Option<V>)>::new();
+            readout_queue.push_back((VerticalRank(0), None));
+            let mut output_queue = VecDeque::new();
+            let max_vr = *locs_by_level.keys().max().unwrap();
+
             logs.with_group("bubble readout", String::new(), Vec::<String>::new(), |logs| {
                 // interrupted contour traversal: oy!
-                let mut prev_vr = VerticalRank(0);
-                let mut offset = 0;
-                let max_vr = locs_by_level.keys().max().unwrap();
-                eprintln!("MAX_VR: {max_vr}");
-                let mut min_container_offset = None;
-                let mut max_container_offset = None;
-                'queue: while let Some(((vr, bubble_start), bubble)) = queue.first_key_value() {
-                    eprintln!("\n\nQUEUE: {queue:?}");
-                    let vr = vr.clone();
-                    if vr > prev_vr {
-                        offset = 0;
-                        prev_vr = vr;
-                    }
-                    let bubble = bubble.clone();
-                    eprintln!("VR: {vr}, BUBBLE_START: {bubble_start} -> BUBBLE: {bubble:?}, starting offset: {}", offset);
-                    logs.log_pair("(vr, usize)", vec![], format!("{vr}, {bubble_start}"), "bubble", vec![], format!("{bubble:?}"));
+                'readout: while let Some((vr, bubble)) = readout_queue.pop_front() {
+                    eprintln!("bubble: {vr}/{max_vr}, {bubble:?}");
+                    logs.log_string("bubble", (vr, &bubble))?;
+                    let solved_bubble = solved_bubbles.remove(&(vr, bubble.clone()));
+                    if let Some(mut solved_bubble) = solved_bubble {
+                        solved_bubble.make_contiguous().sort_by_key(|(_obr, sbr)| *sbr);
 
-                    if let Some(solved_bubble) = solved_bubbles.get_mut(&(vr, bubble.clone())) {
-                        solved_bubble.make_contiguous().sort_by_key(|(obr, sbr)| *sbr);
-                        while let Some((obr, sbr)) = solved_bubble.pop_front() {
+                        while let Some((obr, _sbr)) = solved_bubble.pop_front() {
                             let obj = &bubbles[&(vr, bubble.clone())][obr];
-                            let vl = obj.as_vl().unwrap();
-                            let loc = node_to_loc[obj];
-                            let shr = SolvedHorizontalRank(offset);
-                            eprintln!("found obj: {obj:?}, vr: {vr}, obr: {obr}, sbr: {sbr}, loc: {loc:?}, offset: {offset} -> shr: {shr}");
-                            logs.log_pair("", vec![], format!("{obj:?}, {vr}, {obr}, {sbr}, {loc:?}, {offset}"), "", vec![], format!("{shr}"));
-                            let prev = solved_locs.entry(loc.0).or_default().insert(loc.1, shr);
-                            offset += 1;
-                            assert!(prev.is_none());
-                            if let Obj::Container(_) = obj {
-                                let cd = container_depths[vl];
-                                for i in 0..cd {
-                                    queue.insert((vr + i + 1, offset-1), Some(vl.clone()));
-                                }
-                                min_container_offset = Some(min_container_offset.map(|mco| usize::min(mco, offset-1)).unwrap_or(offset-1));
-                                max_container_offset = Some(max_container_offset.map(|mco| usize::max(mco, offset-1)).unwrap_or(offset-1));
-                                continue 'queue;
+                            if let Obj::Gap(ObjGap{container, lvl}) = obj {
+                                // when we find a container, future linked bubbles may need to be sliced
+                                solved_bubbles.insert((vr, bubble.clone()), solved_bubble.clone());
+                                readout_queue.push_front((vr, bubble.clone()));
+                                readout_queue.push_front((*lvl, Some(container.clone())));
+                                continue 'readout;
+                            } else {
+                                output_queue.push_back(obj.clone());
                             }
+                            eprintln!("obj: {obj:?}");
+                            logs.log_string("obj", obj)?;
                         }
                     }
-                    else {
-                        eprintln!("skipping {bubble:?}");
+                    if bubble.is_none() {
+                        if vr <= max_vr {
+                            eprintln!("insert container4: ({}, None)", vr+1);
+                            logs.log_string("insert container4", (vr+1, None::<V>))?;
+                            readout_queue.push_front((vr+1, None));
+                        }
                     }
-
-                    if bubble.is_none() && vr <= *max_vr {
-                        let mut prev = None;
-                        let mut mco = min_container_offset.map(|mco| if mco > 0 { 0 } else { max_container_offset.unwrap() + 1 } ).unwrap_or(0);
-                        while true {
-                            eprintln!("INSERT1: ({}, {}) -> {prev:?}", vr+1, mco);
-                            logs.log_element("Insert", Vec::<String>::new(), format!("{}, {} -> {prev:?}", vr+1, mco));
-                            let prev2 = queue.insert((vr+1, mco), prev);
-                            if let Some(prev2) = prev2 {
-                                eprintln!("RELOCATING PREV: {prev2:?} -> {}", mco+1);
-                                mco += 1;
-                                prev = prev2;
-                            } else {
-                                eprintln!("OK");
-                                break
-                            }
-                        };
-                        min_container_offset = None;
-                        max_container_offset = None;
-                    }
-                    queue.pop_first();
                 }
+
+                let mut vr = MyOption::Min;
+                let mut shr = SolvedHorizontalRank(0);
+                for obj in output_queue {
+                    let (ovr, ohr) = node_to_loc[&obj];
+                    if MyOption::Some(ovr) > vr {
+                        vr = MyOption::Some(ovr);
+                        shr = SolvedHorizontalRank(0);
+                    }
+                    let prev = solved_locs.entry(ovr).or_default().insert(ohr, shr);
+                    assert!(prev.is_none());
+                    shr = shr + 1;
+                }
+
                 Ok(())
-            });
+            })?;
 
 
             eprintln!("SOLVED_LOCS: {solved_locs:#?}");
@@ -3246,22 +3342,39 @@ pub mod layout {
             let mut solved_locs_inv = HashMap::new();
             for (vr, shrs) in solved_locs.iter() {
                 for (ohr, shr) in shrs {
-                    assert!(solved_locs_inv.insert((vr, shr), (vr, ohr)).is_none())
+                    if !solved_locs_inv.insert((vr, shr), (vr, ohr)).is_none() {
+                        return Err(Error::LayoutError{ source: LayoutError::NonInjective { error: format!("duplicate {vr},{shr}")}});
+                    }
+                    // assert!(solved_locs_inv.insert((vr, shr), (vr, ohr)).is_none())
                 }
             }
 
+            let loc_to_node = loc_to_node.iter().filter(|(_loc, node)| !matches!(node, Obj::Gap(..))).collect::<HashMap<_, _>>();
+            let node_to_loc = node_to_loc.iter().filter(|(node, _loc)| !matches!(node, Obj::Gap(..))).collect::<HashMap<_, _>>();
             eprintln!("NODE_TO_LOC: {node_to_loc:#?}");
             eprintln!("LOC_TO_NODE: {loc_to_node:#?}");
             // check that all locs are solved for
             for (node, loc) in node_to_loc.iter() {
-                assert!(solved_locs.contains_key(&loc.0) && solved_locs[&loc.0].contains_key(&loc.1));
+                if !solved_locs.contains_key(&loc.0) && solved_locs[&loc.0].contains_key(&loc.1) {
+                    return Err(Error::LayoutError{ source: LayoutError::Incomplete { error: format!("missing {loc:?}-{node:?}")}});
+                }
+                // assert!(solved_locs.contains_key(&loc.0) && solved_locs[&loc.0].contains_key(&loc.1));
+            }
+            for (loc, node) in loc_to_node.iter() {
+                if !solved_locs.contains_key(&loc.0) && solved_locs[&loc.0].contains_key(&loc.1) {
+                    return Err(Error::LayoutError{ source: LayoutError::Incomplete { error: format!("missing {node:?}->{loc:?}")}});
+                }
+                // assert!(solved_locs.contains_key(&loc.0) && solved_locs[&loc.0].contains_key(&loc.1));
             }
 
             // check that shrs are dense
             for (vr, shrs) in solved_locs.iter() {
                 let mut shrs = shrs.values().collect::<Vec<_>>();
                 shrs.sort();
-                assert!(shrs.iter().enumerate().all(|(n, s)| s.0 == n));
+                if !shrs.iter().enumerate().all(|(n, s)| s.0 == n) {
+                    return Err(Error::LayoutError{source: LayoutError::Sparse { error: format!("sparse {vr}, {shrs:?}")}});
+                }
+                // assert!(shrs.iter().enumerate().all(|(n, s)| s.0 == n));
             }
 
             Ok(LayoutSolution{crossing_number, solved_locs})
@@ -3943,6 +4056,7 @@ pub mod geometry {
                 Obj::Node(_) => Geom::Node(value),
                 Obj::Hop(_) => Geom::Hop(value),
                 Obj::Container(_) => Geom::Container(value),
+                _ => unimplemented!(),
             }
         }
     }
@@ -4104,11 +4218,11 @@ pub mod geometry {
         if let Some(svg) = as_svg(&vcg.vert,
             &|_, (_vx, vl)| {
                 format!("class=\"box highlight_{vl}\"")
-            }, &|_, er| {
+            }, &|_, _er| {
                 String::new()
             }
         ) {
-            logs.log_svg(Some("lang_graph"), None::<String>, Vec::<String>::new(), svg);
+            logs.log_svg(Some("lang_graph"), None::<String>, Vec::<String>::new(), svg)?;
         }
 
         for er in vcg.vert.edge_references() {
@@ -4418,15 +4532,6 @@ pub mod geometry {
         }
 
         // eprintln!("con graph: {}", Dot::new(&con_graph));
-        let l2n = |ovr, ohr| match &loc_to_node[&(ovr, ohr)] {
-            Obj::Node(ObjNode{vl: node}) => node.to_string().names(),
-            Obj::Hop(ObjHop{lvl: ovr, mhr, vl, wl}) => names![ovr, mhr, vl.to_string(), wl.to_string()],
-            Obj::Container(ObjContainer{vl}) => vl.to_string().names(),
-        };
-        let v2n = |varrank| {
-            let loc_ix = loc_by_varrank[&varrank];
-            l2n(loc_ix.0, loc_ix.1)
-        };
 
         if let Some(con_svg) = as_svg(
             &con_graph,
@@ -4436,6 +4541,7 @@ pub mod geometry {
                 match obj {
                     Obj::Node(_) | Obj::Container(_)=> format!("class=\"box highlight_{obj}\""),
                     Obj::Hop(ObjHop{vl, wl, ..}) => format!("class=\"arrow {vl}_{wl}\""),
+                    _ => unimplemented!(),
                 }
             }, &|g, er| {
                 let src = g.node_weight(er.source()).unwrap();
@@ -4529,9 +4635,9 @@ pub mod geometry {
 
     #[cfg(not(feature="desktop"))]
     fn as_svg<'a, G: IntoNodeReferences + IntoEdgeReferences + NodeIndexable + GraphProp>(
-        graph: G,
-        node_attrs: &'a dyn Fn(G, G::NodeRef) -> String,
-        edge_attrs: &'a dyn Fn(G, G::EdgeRef) -> String
+        _graph: G,
+        _node_attrs: &'a dyn Fn(G, G::NodeRef) -> String,
+        _edge_attrs: &'a dyn Fn(G, G::EdgeRef) -> String
     ) -> Option<String> where
         G::NodeWeight: Display,
         G::EdgeWeight: Display,
@@ -4972,11 +5078,13 @@ pub mod frontend {
                 })
             })?;
 
-            let layout_problem = calculate_locs_and_hops(&val, &paths_by_rank, &vcg, logs)?;
+            let mut layout_problem = calculate_locs_and_hops(&val, &paths_by_rank, &vcg, logs)?;
 
             // ... adjust problem for horizontal edges
 
             let layout_solution = minimize_edge_crossing(&vcg, &layout_problem, logs)?;
+            layout_problem.loc_to_node = layout_problem.loc_to_node.into_iter().filter(|(_loc, node)| !matches!(node, Obj::Gap(..))).collect::<HashMap<_, _>>();
+            layout_problem.node_to_loc = layout_problem.node_to_loc.into_iter().filter(|(node, _loc)| !matches!(node, Obj::Gap(..))).collect::<HashMap<_, _>>();
 
             let mut geometry_problem = calculate_sols(&layout_problem, &layout_solution);
 
@@ -5210,7 +5318,7 @@ pub mod frontend {
 
         use petgraph::visit::EdgeRef;
 
-        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, ObjContainer, ObjNode, ObjHop}, index::{VarRank}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
+        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, ObjContainer, ObjNode, ObjHop, ObjGap}, index::{VarRank}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
 
         use super::log::{self, Log};
 
@@ -5258,12 +5366,12 @@ pub mod frontend {
             fn from(node: &Node) -> Self {
                 let char_width = 9.;
                 match node {
-                    Node::Div { key, label, hpos, vpos, width, height, z_index, loc, estimated_size } => {
+                    Node::Div { key, hpos, vpos, width, height, .. } => {
                         vec![Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + height }]
                     },
-                    Node::Svg { key, path, z_index, dir, rel, label, hops, classes, estimated_size, control_points } => {
+                    Node::Svg { key, rel, label, estimated_size, control_points, .. } => {
                         let mut res = vec![];
-                        if let Some(Label{text, hpos, width, vpos}) = label {
+                        if let Some(Label{hpos, width, vpos, ..}) = label {
                             if rel == "forward" {
                                 res.push(Rect { id: format!("{key}_fwd"), l: (*hpos - width + 1.).trunc(), r: (*hpos - 1.5 * char_width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
                             } else {
@@ -5387,6 +5495,7 @@ pub mod frontend {
                 Obj::Node(ObjNode{vl: node}) => node.to_string().names(),
                 Obj::Hop(ObjHop{lvl: ovr, mhr, vl, wl}) => names![ovr, mhr, vl.to_string(), wl.to_string()],
                 Obj::Container(ObjContainer{vl}) => vl.to_string().names(),
+                Obj::Gap(ObjGap{container, ..}) => container.to_string().names(),
             };
             let v2n = |varrank| {
                 let loc_ix = loc_by_varrank[&varrank];
@@ -5694,7 +5803,7 @@ pub mod frontend {
                 logs.with_set("Collisions", "", &colliding_rects, |r, logs| {
                     logs.log_element("Rect", Vec::<String>::new(), r.to_string())
                 })
-            });
+            })?;
             let mut logs = logs.to_vec();
             logs.reverse();
 
