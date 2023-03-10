@@ -6449,6 +6449,7 @@ pub mod frontend {
                 ("a b: foo; c [ d ]", vec![&OnlyCollisions(&[("c", "d")])]),
                 ("a [ b ]; c d: _; e f: _", vec![&OnlyCollisions(&[("a", "b")])]),
                 ("a c: d / e; b [ c ]", vec![&MaxCurvature("a", "c", 1.)]),
+                ("a [ b c ]; b d: p; c d: q; a e: r", vec![&OnlyCollisions(&[("a", "b"), ("a", "c")])]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
