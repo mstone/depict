@@ -4159,6 +4159,7 @@ pub mod geometry {
     {
         let containers = &vcg.containers;
         let nodes_by_container = &vcg.nodes_by_container;
+        let nodes_by_container_transitive = &vcg.nodes_by_container_transitive;
         let loc_to_node = &layout_problem.loc_to_node;
         let node_to_loc = &layout_problem.node_to_loc;
         let hops_by_edge = &layout_problem.hops_by_edge;
@@ -4204,6 +4205,13 @@ pub mod geometry {
                 let solved_ix = solved_vxmap[solved];
                 let left_obj = &loc_to_node[orig];
                 let solved_obj = &loc_to_node[&solved_to_orig[&left]];
+                eprintln!("solved left obj: {left_obj}, solved_obj: {solved_obj}");
+                if let (Obj::Hop(ObjHop{wl, ..}), Obj::Container(ObjContainer{vl: container})) = (left_obj, solved_obj) {
+                    if nodes_by_container_transitive[container].contains(wl) {
+                        eprintln!("skipping container-hop solved-left");
+                        continue;
+                    }
+                }
                 if !obj_graph.contains_edge(left_ix, solved_ix) &&
                     !matches!((left_obj, solved_obj),
                         (Obj::Container(ObjContainer{vl: container}),
@@ -6375,6 +6383,30 @@ pub mod frontend {
             }
         }
 
+        #[derive(Debug)]
+        struct MaxCurvature<'a>(&'a str, &'a str, f64);
+
+        impl<'a> Check for MaxCurvature<'a> {
+            fn check(&self, drawing: &Result<Drawing, Error>) {
+                let Drawing{nodes, ..} = drawing.as_ref().unwrap();
+                for node in nodes {
+                    match node {
+                        Node::Svg { key, control_points, .. } if key.starts_with(&format!("{}_{}", self.0, self.1)) => {
+                            let total_width_deviation: f64 = control_points
+                                .windows(2)
+                                .map(|w| {
+                                    (w[0].0 - w[1].0).abs()
+                                })
+                                .sum();
+                            eprintln!("node: {node:?}, twd: {total_width_deviation:.2}");
+                            assert!(total_width_deviation < self.2);
+                        },
+                        _ => {},
+                    }
+                }
+            }
+        }
+
         fn check(model: &str, checks: Vec<&dyn Check>) {
             let drawing = super::dom::draw(model.into());
             for check in checks {
@@ -6416,7 +6448,7 @@ pub mod frontend {
                 ("a [ b [ c ]; d ]", vec![]),
                 ("a b: foo; c [ d ]", vec![&OnlyCollisions(&[("c", "d")])]),
                 ("a [ b ]; c d: _; e f: _", vec![&OnlyCollisions(&[("a", "b")])]),
-                ("a c: d / e; b [ c ]", vec![&OnlyCollisions(&[("b", "c")])]),
+                ("a c: d / e; b [ c ]", vec![&MaxCurvature("a", "c", 1.)]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
