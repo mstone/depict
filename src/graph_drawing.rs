@@ -3123,7 +3123,7 @@ pub mod layout {
                             let h1 = &hops[h1i];
                             let h2 = &hops[h2i];
 
-                            eprintln!("hop: {h1} {h2}");
+                            // eprintln!("hop: {h1} {h2}");
                             let b11 = &bubble_by_loc[&(h1.lvl, h1.mhr)];
                             let b12 = &bubble_by_loc[&((h1.lvl+1), h1.nhr)];
                             let b21 = &bubble_by_loc[&(h2.lvl, h2.mhr)];
@@ -6415,7 +6415,8 @@ pub mod frontend {
                 ("a [ b ]; c [ d [ e ] ; f ]", vec![]),
                 ("a [ b [ c ]; d ]", vec![]),
                 ("a b: foo; c [ d ]", vec![&OnlyCollisions(&[("c", "d")])]),
-                ("a [ b ]; c d: _; e f: _", vec![&OnlyCollisions(&[("a", "b")])])
+                ("a [ b ]; c d: _; e f: _", vec![&OnlyCollisions(&[("a", "b")])]),
+                ("a c: d / e; b [ c ]", vec![&OnlyCollisions(&[("b", "c")])]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
