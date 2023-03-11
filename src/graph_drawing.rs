@@ -5849,8 +5849,11 @@ pub mod frontend {
             let mut nodes = drawing.nodes;
 
             let mut svg = Document::new()
-                .set("viewBox", (-20f64, -20f64, viewbox_width+40., viewbox_height+20.))
-                .set("text-depiction", "optimizeLegibility");
+                // .set("viewBox", (-20f64, -20f64, viewbox_width+40., viewbox_height+20.))
+                .set("width", format!("{viewbox_width}"))
+                .set("height", format!("{viewbox_height}"))
+                .set("text-depiction", "optimizeLegibility")
+                .set("preserveAspectRatio", "xMidyMid");
 
             svg.append(Marker::new()
                 .set("id", "arrowhead")
@@ -5889,7 +5892,9 @@ pub mod frontend {
                                     .set("width", width)
                                     .set("height", height)
                                     .set("stroke", "black")
-                                    .set("fill", "none"))
+                                    .set("fill", "none")
+                                    .set("viewBox", (-20f64, -20f64, viewbox_width+40., viewbox_height+20.))
+                                )
                                 .add(TextElt::new()
                                     .set("text-anchor", "middle")
                                     .set("transform", format!("translate({}, {})", width / 2., 16.))
@@ -5905,7 +5910,10 @@ pub mod frontend {
                             .set("class", classes)
                             .set("d", path)
                             .set("stroke", "black")
-                            .set("fill", "none");
+                            .set("fill", "none")
+                            .set("viewBox", (-20f64, -20f64, viewbox_width+40., viewbox_height+20.))
+                            .set("vector-effect", "non-scaling-stroke")
+                            ;
 
                         let octothorpe = if urlencode { "%23" } else { "#" };
                         match rel.as_str() {

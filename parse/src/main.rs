@@ -33,7 +33,9 @@ fn do_one_path<P: AsRef<Path> + Clone>(output: &mut Option<Box<dyn Write>>, path
                 output.write(data.as_bytes());
                 output.write("</div>".as_bytes());
             });
+            output.as_mut().map(|output| output.write(r#"<div class="drawing">"#.as_bytes()));
             do_one_expr(output, entry.path(), data)?;
+            output.as_mut().map(|output| output.write("</div>".as_bytes()));
             output.as_mut().map(|output| output.write("</div>".as_bytes()));
             output.as_mut().map(|output| output.write("</div>".as_bytes()));
             output.as_mut().map(|output| output.write("</div>".as_bytes()));
@@ -86,12 +88,14 @@ fn main() -> Result<(), Error> {
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <style>
         body {
-            display: grid; grid-template-columns: repeat(auto-fit, 32pc); grid-gap: 2pc; justify-content: space-between;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(54pc, 1fr)); grid-gap: 2pc; justify-content: space-between;
             padding-left: 2pc;
             padding-right: 2pc;
+            width: 100%;
         }
-        div.example { width: 30pc; border: 1px dashed black; margin-left: auto; margin-right: auto; margin-bottom: 20px; padding: 20px; }
+        div.example { max-width: calc(60pc - 40px); border: 1px dashed black; margin-bottom: 20px; padding: 20px; }
         div.data { white-space: pre; overflow-x: scroll; max-width: 100%; }
+        div.drawing { overflow: scroll; }
         @media (prefers-color-scheme: dark) {
             html {
               color: #eee;
