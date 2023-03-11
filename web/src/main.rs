@@ -195,7 +195,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     //     None => rsx!(div{}),
     // }));
 
-    let data_svg = as_data_svg(drawing.get().clone());
+    let data_svg = as_data_svg(drawing.get().clone(), true);
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
     let style_default = "

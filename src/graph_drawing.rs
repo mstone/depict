@@ -5843,9 +5843,9 @@ pub mod frontend {
 
         use std::io::BufWriter;
 
-        pub fn as_data_svg(drawing: Drawing) -> String {
-            let viewbox_width = drawing.viewbox_width;
-            let viewbox_height = drawing.viewbox_height;
+        pub fn as_data_svg(drawing: Drawing, urlencode: bool) -> String {
+            let viewbox_width = drawing.viewbox_width + 20.;
+            let viewbox_height = drawing.viewbox_height + 20.;
             let mut nodes = drawing.nodes;
 
             let mut svg = Document::new()
@@ -5907,9 +5907,10 @@ pub mod frontend {
                             .set("stroke", "black")
                             .set("fill", "none");
 
+                        let octothorpe = if urlencode { "%23" } else { "#" };
                         match rel.as_str() {
-                            "forward" => path_elt = path_elt.set("marker-end", "url(%23arrowhead)"),
-                            "reverse" => path_elt = path_elt.set("marker-start", "url(%23arrowheadrev)"),
+                            "forward" => path_elt = path_elt.set("marker-end", format!("url({octothorpe}arrowhead)")),
+                            "reverse" => path_elt = path_elt.set("marker-start", format!("url({octothorpe}arrowheadrev)")),
                             _ => {},
                         };
 

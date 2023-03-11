@@ -243,7 +243,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let viewbox_height = drawing.get().viewbox_height;
     let crossing_number = drawing.get().crossing_number;
 
-    let data_svg = as_data_svg(drawing.get().clone());
+    let data_svg = as_data_svg(drawing.get().clone(), true);
 
     // parse and eval the highlight string to get a sub-model to highlight
     let highlight_styles = match parse_highlights(&highlight.get()[..]) {

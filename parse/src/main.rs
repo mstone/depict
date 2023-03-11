@@ -43,11 +43,15 @@ fn do_one_path<P: AsRef<Path> + Clone>(output: &mut Option<Box<dyn Write>>, path
 }
 
 fn do_one_expr<P: AsRef<Path> + Clone>(output: &mut Option<Box<dyn Write>>, _path: P, data: String) -> Result<(), Error> {
-    let drawing = depict::graph_drawing::frontend::dom::draw(data)?;
+    let drawing = depict::graph_drawing::frontend::dom::draw(data);
     output.as_mut().map(|output| {
-        let svg = as_data_svg(drawing);
-        let svg = svg.splitn(2, ',').last().unwrap();
-        output.write(svg.as_bytes());
+        if let Ok(drawing) = drawing {
+            let svg = as_data_svg(drawing, false);
+            let svg = svg.splitn(2, ',').last().unwrap();
+            output.write(svg.as_bytes());
+        } else {
+            output.write(format!("<p>Error: {drawing:?}</p>").as_bytes());
+        }
     });
     Ok(())
 }
@@ -81,10 +85,32 @@ fn main() -> Result<(), Error> {
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <style>
-        div.example { width: 100px; border: 1px dashed black; margin-left: auto; margin-right: auto; margin-bottom: 20px; }
-        div.data { whitespace: pre; }
+        body {
+            display: grid; grid-template-columns: repeat(auto-fit, 32pc); grid-gap: 2pc; justify-content: space-between;
+            padding-left: 2pc;
+            padding-right: 2pc;
+        }
+        div.example { width: 30pc; border: 1px dashed black; margin-left: auto; margin-right: auto; margin-bottom: 20px; padding: 20px; }
+        div.data { white-space: pre; overflow-x: scroll; max-width: 100%; }
+        @media (prefers-color-scheme: dark) {
+            html {
+              color: #eee;
+              background-color: #121212;
+            }
+            a {
+              color: #809fff;
+            }
+            svg {
+              background-color: #bbb;
+              padding: 1em;
+            }
+            img {
+              background-color: #eee;
+            }
+          }
         </style>
         </head>
+        <body>
         "#.as_bytes()));
     for path in args.paths {
         do_one_path(&mut output, path)?;
@@ -93,6 +119,6 @@ fn main() -> Result<(), Error> {
     for expr in args.exprs {
         do_one_expr(&mut output, String::new(), expr)?;
     }
-    output.as_mut().map(|output| output.write("</html>".as_bytes()));
+    output.as_mut().map(|output| output.write("</body></html>".as_bytes()));
     Ok(())
 }
