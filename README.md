@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>Depict</h1>
+  <h1>Depict - share mental models better</h1>
 </div>
 
 <div align="center">
@@ -29,24 +29,55 @@
   </a>
 </div>
 
-*Depict* helps people communicate about complex systems with pictures. ([demo](https://mstone.info/depict/))
+*Depict* helps people establish and validate shared mental models of complex systems and situations via pictures drawn from shorthand notes: ([demo](https://mstone.info/depict/))
 
-[![Depict live demo, showing a model of a microwave](https://raw.githubusercontent.com/mstone/depict/main/doc/microwave.gif)](https://mstone.info/depict/)
+[![An image, linking to a free hosted version of depict, of a model of a software development process involving a government agency, a contracted developer, an app, outside stakeholders, funders, and various feedback loops](https://raw.githubusercontent.com/mstone/depict/main/doc/agency.gif)](https://mstone.info/depict/)
 
-People who need to communicate about complex systems often draw pictures with boxes and arrows. 
+<details>
+<summary><i>agency situation shorthand notes</i></summary>
+<pre>
+agency [ priorities ]
+developer [ design ]
+agency developer: approve release,
+developer app: release
+developer code: update
+agency developer: report issue,
+agency app: /review design
+stakeholders word: /review
+funders agency: money, deliverables, timelines / grant application, renegotiation
+developer json
+word excel json code app -: _ : _ : _ : _
+developer json: defines
+agency developer: funding
+agency word: / review
+agency excel: edit
+agency app: / test results,
+agency app: test
+agency developer: / report issue,
+agency developer: prioritize
+stakeholders agency: propose
+</pre>
+</details>
 
-Unfortunately, many people find it hard to make these drawings quickly and legibly with conventional tools. They often struggle to uncross arrows or to keep parts of their drawing from colliding, especially while editing text labels. These challenges also make the drawings hard to reuse and to maintain over time.
+<!-- [![Depict live demo, showing a model of a microwave](https://raw.githubusercontent.com/mstone/depict/main/doc/microwave.gif)](https://mstone.info/depict/) -->
 
-*Depict* can help:
-* concisely describe processes, systems, and concepts of operations
-* automatically draw pretty, legible, maintainable pictures
-* extract and reuse portions of previous descriptions
+People who work with complex systems and situations often need to establish and validate shared mental models with partners in order to demonstrate understanding, build trust, and to set everyone up for success in future conversations.
 
-thereby helping you to analyze and tell powerful stories about such systems.
+Often, this process of establishing and validating shared mental models takes place by interviewing knowledgable people, taking notes, synthesizing notes into candidate pictures, and then reviewing the candidate pictures with stakeholders until everyone agrees that a satisfactory picture is available.
 
-## Installation
+Unfortunately, many people find it hard to make these pictures in realtime as part of the interviewing process, let alone to make them legibly and comfortably. Specifically, conventional drawing tools often break the "flow" of the interview by requiring too much attention from the interviewer to use in realtime. People also often struggle to uncross arrows or to keep parts of their drawing from colliding, especially while editing text labels. Finally, the resulting drawings are brittle and are usually not meaningfully versioned or versionable such that people have trouble reusing and maintaining the resulting drawings over time.
 
-The simplest way to try depict is to use [nix](https://nixos.org/nix/) with flakes enabled to run:
+*Depict* can drastically improve this "interview - record - synthesize - review" loop by:
+* freeing interviewers' attention to improve and validate their understanding in realtime while maintaining flow
+* enabling interviewers to concisely describe the players and interactions present in complex systems and situations via a shorthand notation specially developed for this purpose
+* automatically drawing pretty, legible, maintainable pictures of models described by shorthand notes in realtime with minimal fuss, and
+* automatically producing a transcript of the shared validated mental model developed so far which analysts can easily manipulate, version, reuse, and maintain.
+
+## Getting *depict*
+
+*depict* is available for free online at <https://mstone.info/depict/>.
+
+Alternately, on macOS and Linux, you can build and run *depict* locally using [nix](https://nixos.org/nix/) with flakes enabled to run:
 
 ```bash
 nix run github:mstone/depict#desktop
@@ -54,45 +85,54 @@ nix run github:mstone/depict#desktop
 
 This should produce a window similar to the one shown in the screenshot above.
 
-Alternately, if you'd like to run depict without with nix, you'll need to
+(For more information on how to install and use nix, see <https://zero-to-nix.com> and <https://mstone.info/posts/nix-tutorial/>).
 
-1. install a recent Rust compiler, and any dependencies necessary for your platform
-2. use `cargo` to build or run one of Depict's sub-packages, like:
+## Using *depict*
 
-```bash
-cargo run -p depict-desktop
-```
+*Depict* helps people establish and validate shared mental models with partners by automating the process of drawing pictures of situations involving complex interactions from shorthand notes such as might be recorded by an interviewer or an analyst on a video-call (possibly screensharing *depict* to enable other participants to review and help improve the interview or analysis team's developing understanding).
 
+In these notes, each line of input describes a new part of the situation (system) to be drawn.
 
-## Usage/Examples
+In the resulting drawing, processes can be ordered vertically (`a b`), horizontally (`a b -`), or via nesting (`a [ b ]`).
 
-*Depict* models systems as hierarchies of interacting processes expressed as partial orders. Each input line describes a chain in this order, which will be drawn as a downward-directed path with labels through this graph. Hence the input line:
+Additionally, interactions between processes can be shown with an arrow labeled in the "forward" (`a b: interaction`) direction from *a* to *b* or with an arrow labeled in the reverse (`a b: / interaction`) direction on either horizontal and vertical arrows.
+
+(In the convention which this shorthand was invented to describe, downward-directed arrows represent "control actions" or "authority" of one player over another, upward arrows represent "feedback", rightward arrows represent "requests" between peers, leftward arrows represent "results" or "replies", and nesting represents how interacting parts can be abstracted, how higher-level conceptual processes can be decomposed, or the fate-sharing relationship between "platforms" and the processes they host.)
+
+For example:
 
 ```
 person microwave food: open, start, stop / beep : heat
 person food: eat
 ```
 
-says: 
+says:
 
-* there is a path downward in our model from a process (controller) named `person` to a process named `microwave` to a process named `food`, 
-* in the space between `person` and `microwave`, there are three actions, `open`, `start`, and `stop`, and one feedback, `beep`, 
+* there are `person`, `microwave`, and `food` boxes,
+* `person` acts on `microwave`, `microwave` acts on `food`, and these interactions should vertically order these boxes
+* in the space between `person` and `microwave`, there should be a downward arrow with three action labels, `open`, `start`, and `stop`, and an upward arrow with one feedback, `beep`,
 * in the space between `microwave` and `food`, there is one action, `heat`.
 * finally, there is also a direct relationship between `person` and `food` consisting of the action: `eat`.
 
+For more detailed examples, please see these articles:
+
+* [Introducing *depict](https://mstone.info/posts/introducing-depict/()
+* [Real-world system depictions with *depict*](https://mstone.info/posts/real-world-system-depictions/)
 
 ## Syntax
 
-The language of depictions loosely consists of 
+*depict* offers an inline Syntax Guide with short examples of the *depict* shorthand input format.
 
-| production |   | syntax                                                  |
-|------------|---|---------------------------------------------------------|
-|definitions |::=| *name* **:** *expr*
-|relations   |::=| *name* *name* ... (**:** *labels* (**/** */ *labels*)?)*
-|labels      |::=| *label*... for single-word labels 
-|labels      |::=| *label* (**,** *label*)* for multi-word labels
-|nesting     |::=| **[** *model* **]**
-|alternatives|::=| **{** *model* **}**
+Slightly formally though, the current *depict* input language roughly consists of:
+
+| production  |   | syntax                                                  |
+|-------------|---|---------------------------------------------------------|
+|abbreviation |::=| *name* **:** *expr*
+|relations    |::=| *name* *name* ... **[-]** (**:** *labels* (**/** */ *labels*)?)*
+|labels       |::=| *label*... for single-word labels
+|labels       |::=| *label* (**,** *label*)* for multi-word labels
+|nesting      |::=| **[** *model* **]**
+|alternatives |::=| **{** *model* **}**
 
 
 ## License
@@ -103,4 +143,4 @@ This project is licensed under the [MIT license].
 
 ## Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Depict by you, shall be licensed as MIT, without any additional terms or conditions.
+Unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in *depict* shall be licensed as MIT without any additional terms or conditions.
