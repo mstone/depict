@@ -5711,9 +5711,9 @@ pub mod frontend {
 
                         if n == hops.len() - 1 && *dir == "forward" {
                             vpos2 -= 7.0; // arrowhead length
-                            if *dir == "forward" {
-                                label_vpos = Some(vpos2 - estimated_size0.as_ref().unwrap().height);
-                            }
+                            label_vpos = Some(vpos2 - estimated_size0.as_ref().unwrap().height);
+                            label_hpos = Some(hposd);
+                            label_width = Some(sposd - ls[&hnd]);
                         }
 
                         path.push(format!("L {hposd} {vpos2}"));
