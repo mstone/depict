@@ -1,7 +1,7 @@
 use std::{borrow::Cow, path::Path, fs::File, io::{Write, stdout}};
 
 use clap::Parser;
-use depict::graph_drawing::{error::Error, frontend::{dioxus::{as_data_svg, render}, dom::Drawing}};
+use depict::graph_drawing::{error::Error, frontend::{dioxus::{as_data_svg, render, default_css}, dom::Drawing}};
 
 use dioxus::prelude::{*};
 use thiserror::__private::PathAsDisplay;
@@ -26,7 +26,7 @@ fn do_one_path<P: AsRef<Path> + Clone>(output: &mut Option<Box<dyn Write>>, path
                 .expect("read error");
 
             output.as_mut().map(|output| {
-                output.write(r#"<div class="example">"#.as_bytes());
+                output.write(r#"<div class="file">"#.as_bytes());
                 output.write(r#"<div class=path">"#.as_bytes());
                 output.write(entry.path().to_string_lossy().as_bytes());
                 output.write(r#"/<div>"#.as_bytes());
@@ -95,7 +95,8 @@ fn main() -> Result<(), Error> {
         Some(Box::new(File::create(args.output).unwrap()) as Box<dyn Write>)
     };
 
-    output.as_mut().map(|output| output.write(r#"
+    output.as_mut().map(|output| {
+        output.write(r#"
         <!DOCTYPE html>
         <html>
         <head>
@@ -107,39 +108,21 @@ fn main() -> Result<(), Error> {
             padding-right: 2pc;
             width: 100%;
         }
-        div.example { max-width: calc(60pc - 40px); height: 40pc; border: 1px dashed black; margin-bottom: 20px; padding: 20px; }
+        div.file { max-width: calc(60pc - 40px); height: 40pc; border: 1px dashed black; margin-bottom: 20px; padding: 20px; }
         div.data { white-space: pre; overflow-x: scroll; max-width: 100%; }
-
-        svg { stroke: currentColor; stroke-width: 1; }
-        path { stroke-dasharray: none; }
-        .keyword { font-weight: bold; color: rgb(207, 34, 46); }
-        /* .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; } */
-        .svg text { stroke: none; fill: black; }
-
-        div.drawing { margin-top: 1em; }
         /* div.drawing { overflow: scroll; } */
-        /* @media (prefers-color-scheme: dark) {
-            html {
-              color: #eee;
-              background-color: #121212;
-            }
-            a {
-              color: #809fff;
-            }
-            svg {
-              background-color: #bbb;
-              padding: 1em;
-            }
-            img {
-              background-color: #eee;
-            }
-            div.drawing { color: #eee; }
-          } */
-
+        div.drawing { margin-top: 1em; }
+        @media (prefers-color-scheme: dark) {
+            div.file { border: 1px dashed #aaa; }
+        }
+        "#.as_bytes());
+        output.write(default_css.as_bytes());
+        output.write(r#"
         </style>
         </head>
         <body>
-        "#.as_bytes()));
+        "#.as_bytes())
+    });
     for path in args.paths {
         do_one_path(&mut output, path)?;
     }

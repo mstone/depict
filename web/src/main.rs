@@ -3,7 +3,7 @@
 use std::{default::Default, panic::catch_unwind};
 
 use depict::{graph_drawing::{
-    frontend::dom::{draw, Drawing},
+    frontend::{dom::{draw, Drawing}, dioxus::default_css},
     frontend::dioxus::{render, as_data_svg}
 }};
 
@@ -198,14 +198,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let data_svg = as_data_svg(drawing.get().clone(), true);
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
-    let style_default = "
-        svg { stroke: currentColor; stroke-width: 1; }
-        .fake svg { stroke: hsl(0, 0%, 50%); }
-        path { stroke-dasharray: none; }
-        .arrow.fake path { stroke-dasharray: 5; }
-        .keyword { font-weight: bold; color: rgb(207, 34, 46); }
-        .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
-    ";
+    let style_default = default_css;
     cx.render(rsx!{
         head {
             style {

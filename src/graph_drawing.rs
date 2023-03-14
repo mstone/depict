@@ -6054,10 +6054,6 @@ pub mod frontend {
                                             ("horizontal", "reverse") => "4px",
                                             _ => "0px",
                                         };
-                                        #[cfg(debug_assertions)]
-                                        let border = "border: 1px dashed black;";
-                                        #[cfg(not(debug_assertions))]
-                                        let border = "";
                                         // let border = match rel.as_str() {
                                         //     // "actuates" => "border border-red-300",
                                         //     // "senses" => "border border-blue-300",
@@ -6066,7 +6062,8 @@ pub mod frontend {
                                         rsx!(div {
                                             style: "position: absolute; left: {hpos}px; top: calc({vpos}px + {offset});", // width: "{width}px",
                                             div {
-                                                style: "{border} white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; transform: {translate}; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
+                                                class: "label {dir} {rel}",
+                                                style: "transform: {translate};",
                                                 "{text}"
                                             }
                                         })
@@ -6092,7 +6089,7 @@ pub mod frontend {
                                 // open: "true",
                                 summary {
                                     span {
-                                        style: "color: #000;",
+                                        class: "ui",
                                         "Syntax + Examples"
                                     }
                                 }
@@ -6289,6 +6286,24 @@ pub mod frontend {
                 }
             })
         }
+
+        pub const default_css: &'static str = r#"
+            svg { stroke: currentColor; stroke-width: 1; }
+            path { stroke-dasharray: none; }
+            .keyword { font-weight: bold; color: rgb(207, 34, 46); }
+            .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
+            .svg text { stroke: none; fill: black; }
+            div.label { padding: 2px 0px; white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
+            @media (prefers-color-scheme: dark) {
+                html { color: #aaa; background-color: rgb(32, 32, 32); }
+                a { color: #809fff; }
+                textarea { background-color: #aaa; color: #000; }
+                .box { color: black; background-color: #aaa; }
+                .arrow { color: #eee; }
+                .arrow svg { stroke: #eee; }
+                .arrow div div { color: black; background-color: #aaa; padding: 0px 2px; }
+            }
+        "#;
     }
 
 

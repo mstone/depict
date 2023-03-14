@@ -6,7 +6,7 @@ use depict::graph_drawing::error::{Error, Kind};
 use depict::graph_drawing::eval::{Val, Body};
 use depict::graph_drawing::frontend::log::Record;
 use depict::graph_drawing::frontend::dom::{draw, Drawing, Rect};
-use depict::graph_drawing::frontend::dioxus::{render, as_data_svg};
+use depict::graph_drawing::frontend::dioxus::{render, as_data_svg, default_css};
 
 use dioxus::prelude::*;
 use dioxus_desktop::{self, Config, WindowBuilder};
@@ -377,14 +377,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
-    let style_default = "
-        svg { stroke: currentColor; stroke-width: 1; }
-        path { stroke-dasharray: none; }
-        .keyword { font-weight: bold; color: rgb(207, 34, 46); }
-        .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
-        .svg text { stroke: none; fill: black; }
-
-    ";
+    let style_default = default_css;
     cx.render(rsx!{
         head {
             style {
@@ -521,10 +514,11 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                         div {
                         style: "font-size: 0.875rem; line-height: 1.25rem; --tw-text-opacity: 1; color: rgba(156, 163, 175, var(--tw-text-opacity)); width: 100%;",
                         span {
-                            style: "color: #000;",
+                            class: "ui",
                             "Solution Status: "
                         }
                         span {
+                            class: "ui",
                             style: "font-style: italic;",
                             "v: {status_v:?} h: {status_h:?} cn: {crossing_number:?}, c: {status_c:?}"
                         }
