@@ -5,7 +5,7 @@ use std::panic::catch_unwind;
 use depict::graph_drawing::error::{Error, Kind};
 use depict::graph_drawing::eval::{Val, Body};
 use depict::graph_drawing::frontend::log::Record;
-use depict::graph_drawing::frontend::dom::{draw, Drawing};
+use depict::graph_drawing::frontend::dom::{draw, Drawing, Rect};
 use depict::graph_drawing::frontend::dioxus::{render, as_data_svg};
 
 use dioxus::prelude::*;
@@ -20,7 +20,8 @@ use tao::dpi::LogicalSize;
 use indoc::indoc;
 
 const PLACEHOLDER: &str = indoc!("
-a [ b c ]; b d: p; c d: q; a e: r
+a b c: p / q: r/s
+a c: t/ u
 ");
 
 pub struct AppProps {
@@ -237,6 +238,13 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         return false;
     });
 
+    let show_all_boxes = use_state(&cx, ||{
+        #[cfg(debug_assertions)]
+        return true;
+        #[cfg(not(debug_assertions))]
+        return false;
+    });
+
     model_sender.send(model.get().clone());
 
     let viewbox_width = drawing.get().viewbox_width;
@@ -343,10 +351,29 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         cx.render(rsx!{
             div {
                 key: "{r.id}_col",
-                style: "position: absolute; display: border-box; left: {r.l}px; top: {r.t}px; width: {w}px; height: {h}px; z-index: 100; border: 1px solid rgba({color.r}, {color.g}, {color.b}, 0.9); background: rgba({color.r}, {color.b}, {color.g}, 0.5);",
+                style: "position: absolute; box-sizing: border-box; left: {r.l}px; top: {r.t}px; width: {w}px; height: {h}px; z-index: 100; border: 1px solid rgba({color.r}, {color.g}, {color.b}, 0.9); background: rgba({color.r}, {color.b}, {color.g}, 0.5);",
             }
         })
     }).into_iter().collect::<Vec<_>>().into_iter();
+
+    let mut all_rects = drawing.get().nodes.iter()
+        .flat_map(Into::<Vec<Rect>>::into)
+        .collect::<Vec<_>>();
+    all_rects.sort_by_key(|r| r.id.clone());
+    all_rects.dedup();
+    let num_all_rects = all_rects.len();
+    let all_rects_nodes = all_rects.iter().enumerate().filter_map(|(n, r)| {
+        let color = colorous::COOL.eval_rational(n, num_all_rects);
+        let w = r.r - r.l;
+        let h = r.b - r.t;
+        cx.render(rsx!{
+            div {
+                key: "{r.id}_col",
+                style: "position: absolute; box-sizing: border-box; left: {r.l}px; top: {r.t}px; width: {w}px; height: {h}px; z-index: 100; border: 1px solid rgba({color.r}, {color.g}, {color.b}, 0.9); background: rgba({color.r}, {color.b}, {color.g}, 0.5);",
+            }
+        })
+    }).into_iter().collect::<Vec<_>>().into_iter();
+
 
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
@@ -472,13 +499,19 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                             div {
                                 button {
                                     onclick: move |_| show_logs.modify(|v| !v),
-                                    "Show debug logs"
+                                    show_logs.then(|| rsx!{"Hide debug logs"}).unwrap_or_else(|| rsx!{"Show debug logs"})
                                 }
                             }
                             div {
                                 button {
                                     onclick: move |_| show_collisions.modify(|v| !v),
-                                    "Show colliding boxes"
+                                    show_collisions.then(|| rsx!{"Hide colliding boxes"}).unwrap_or_else(|| rsx!{"Show colliding boxes"})
+                                }
+                            }
+                            div {
+                                button {
+                                    onclick: move |_| show_all_boxes.modify(|v| !v),
+                                    show_all_boxes.then(|| rsx!{"Hide debug boxes"}).unwrap_or_else(|| rsx!{"Show debug boxes"})
                                 }
                             }
                         }
@@ -504,9 +537,8 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             div {
                 style: "position: relative; width: {viewbox_width}px; height: {viewbox_height}px; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000; margin-bottom: 40px;",
                 nodes
-                show_collisions.then(|| rsx!{
-                    collision_nodes
-                })
+                show_collisions.then(|| rsx!{collision_nodes})
+                show_all_boxes.then(|| rsx!{all_rects_nodes})
             }
         }
         // LOGS

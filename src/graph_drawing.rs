@@ -3729,8 +3729,8 @@ pub mod geometry {
         let size_by_hop = HashMap::new();
 
         let height_scale = None;
-        let line_height = None;
-        let char_width = None;
+        let line_height = Some(20.);
+        let char_width = Some(8.66);
         let nesting_top_padding = None;
         let nesting_bottom_padding = None;
 
@@ -4168,8 +4168,8 @@ pub mod geometry {
         let size_by_hop = &geometry_problem.size_by_hop;
         let varrank_by_obj = &geometry_problem.varrank_by_obj;
         let loc_by_varrank = &geometry_problem.loc_by_varrank;
-        let char_width = &geometry_problem.char_width.unwrap_or(9.);
-        let line_height = &geometry_problem.line_height.unwrap_or(20.);
+        let char_width = &geometry_problem.char_width.unwrap();
+        let line_height = &geometry_problem.line_height.unwrap();
 
         let of = OrderedFloat::<f64>::from;
 
@@ -4279,7 +4279,7 @@ pub mod geometry {
                     let hop_left = hop_pos.checked_sub(1).and_then(|hop_left_pos| src_out_first_hops.get(hop_left_pos));
                     if let Some(hop_left) = hop_left {
                         let hop_left_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: hop_left.2.clone(), wl: hop_left.3.clone(), lvl: hop_left.0, mhr: hop_left.1})));
-                        obj_graph.add_edge(hop_left_ix, hop_ix, obj_edge(Direction::Horizontal, ObjEdgeReason::AdjacentHop, 20.));
+                        obj_graph.add_edge(hop_left_ix, hop_ix, obj_edge(Direction::Horizontal, ObjEdgeReason::AdjacentHop, 80.));
                     }
                 }
                 if terminal {
@@ -4288,7 +4288,7 @@ pub mod geometry {
                     let hop_left = hop_pos.checked_sub(1).and_then(|hop_left_pos| dst_in_last_hops.get(hop_left_pos));
                     if let Some(hop_left) = hop_left {
                         let hop_left_ix = or_insert(&mut obj_graph, &mut obj_vxmap, Geom::Hop(Obj::Hop(ObjHop{vl: hop_left.2.clone(), wl: hop_left.3.clone(), lvl: hop_left.0, mhr: hop_left.1})));
-                        obj_graph.add_edge(hop_left_ix, hop_ix, obj_edge(Direction::Horizontal, ObjEdgeReason::AdjacentHop, 20.));
+                        obj_graph.add_edge(hop_left_ix, hop_ix, obj_edge(Direction::Horizontal, ObjEdgeReason::AdjacentHop, 80.));
                     }
                 }
                 if let Some(prev_hop_ix) = prev_hop_ix {
@@ -4320,7 +4320,6 @@ pub mod geometry {
                     .map(|label| label.len())
                     .max()
                 );
-            let char_width = 9.;
             let forward_width = forward_label_width.map(|label_width| char_width * label_width as f64).unwrap_or(20.);
             let reverse_width = reverse_label_width.map(|label_width| char_width * label_width as f64).unwrap_or(20.);
             let margin = 1.2 * f64::max(forward_width, reverse_width) + 50.;
@@ -4695,9 +4694,10 @@ pub mod geometry {
         q2.resize(n, 0.);
         for q in q.iter() {
             if matches!(q.var.sol, AnySol::L(_) | AnySol::T(_)) {
-                continue;
+                q2[q.var.index] -= 0.5 * q.coeff.into();
+            } else {
+                q2[q.var.index] += q.coeff.into();
             }
-            q2[q.var.index] += q.coeff.into();
         }
 
         let mut l2 = vec![];
@@ -4842,10 +4842,9 @@ pub mod frontend {
     ) -> Result<(), Error> where
         I: Graphic + Len,
     {
-        // let char_width = 8.67;
-        let char_width = 9.0;
-        let line_height = geometry_problem.line_height.unwrap_or(20.);
-        let arrow_width = 40.0;
+        let char_width = geometry_problem.char_width.unwrap();
+        let line_height = geometry_problem.line_height.unwrap();
+        let arrow_width = 0.0;
 
         let vert = &vcg.vert;
         let vert_node_labels = &vcg.vert_node_labels;
@@ -5375,7 +5374,7 @@ pub mod frontend {
 
         impl From<&Node> for Vec<Rect> {
             fn from(node: &Node) -> Self {
-                let char_width = 9.;
+                let char_width = 8.66;
                 match node {
                     Node::Div { key, hpos, vpos, width, height, .. } => {
                         vec![Rect { id: key.clone(), l: *hpos, r: hpos + width, t: *vpos, b: vpos + height }]
@@ -5384,9 +5383,9 @@ pub mod frontend {
                         let mut res = vec![];
                         if let Some(Label{hpos, width, vpos, ..}) = label {
                             if rel == "forward" {
-                                res.push(Rect { id: format!("{key}_fwd"), l: (*hpos - width + 1.).trunc(), r: (*hpos - 1.5 * char_width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
+                                res.push(Rect { id: format!("{key}_fwd"), l: (*hpos + - width - 1.5 * char_width), r: (*hpos - 1.5 * char_width), t: (*vpos + 1.), b: (vpos + estimated_size.height) });
                             } else {
-                                res.push(Rect { id: format!("{key}_rev"), l: (*hpos + 1.5 * char_width + 1.).trunc(), r: (hpos + width).trunc(), t: (*vpos + 1.).trunc(), b: (vpos + estimated_size.height).trunc() });
+                                res.push(Rect { id: format!("{key}_rev"), l: (*hpos + 1.5 * char_width), r: (hpos + width + 1.5 * char_width), t: (*vpos + 1.), b: (vpos + estimated_size.height) });
                             }
                         }
                         for (n, window) in control_points.windows(2).enumerate() {
@@ -5492,7 +5491,7 @@ pub mod frontend {
             let horizontal_problem = &depiction.horizontal_problem;
             let vertical_problem = &depiction.vertical_problem;
 
-            let char_width = &depiction.geometry_problem.char_width.unwrap_or(9.);
+            let char_width = &depiction.geometry_problem.char_width.unwrap();
 
             let mut texts = vec![];
 
@@ -5694,13 +5693,15 @@ pub mod frontend {
                             label_width = Some(match *dir {
                                 "reverse" => {
                                     // ls[n]
-                                    rs[&n] - sposd
+                                    rs[&n] - spos
                                 },
                                 "forward" => {
                                     // ls[n]
-                                    sposd - ls[&n]
+                                    spos - ls[&n]
                                 },
-                                _ => rs[&n] - ls[&n]
+                                _ => {
+                                    rs[&n] - ls[&n]
+                                }
                             });
                         }
 
@@ -6053,6 +6054,10 @@ pub mod frontend {
                                             ("horizontal", "reverse") => "4px",
                                             _ => "0px",
                                         };
+                                        #[cfg(debug_assertions)]
+                                        let border = "border: 1px dashed black;";
+                                        #[cfg(not(debug_assertions))]
+                                        let border = "";
                                         // let border = match rel.as_str() {
                                         //     // "actuates" => "border border-red-300",
                                         //     // "senses" => "border border-blue-300",
@@ -6061,7 +6066,7 @@ pub mod frontend {
                                         rsx!(div {
                                             style: "position: absolute; left: {hpos}px; top: calc({vpos}px + {offset});", // width: "{width}px",
                                             div {
-                                                style: "white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; transform: {translate}; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
+                                                style: "{border} white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; transform: {translate}; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;",
                                                 "{text}"
                                             }
                                         })
@@ -6462,6 +6467,7 @@ pub mod frontend {
                 ("a [ b ]; c d: _; e f: _", vec![&OnlyCollisions(&[("a", "b")])]),
                 ("a c: d / e; b [ c ]", vec![&MaxCurvature("a", "c", 1.)]),
                 ("a [ b c ]; b d: p; c d: q; a e: r", vec![&OnlyCollisions(&[("a", "b"), ("a", "c")])]),
+                ("- a b: vvvvvv; - a c: pppppp; d f: qqqqqq; d b: rrrrrr; e f: tttttt; e b: uuuuuu; f c: ssssss", vec![]);
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
