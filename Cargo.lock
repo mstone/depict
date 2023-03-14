@@ -753,6 +753,8 @@ version = "0.3.0"
 dependencies = [
  "clap",
  "depict",
+ "dioxus",
+ "dioxus-ssr",
  "logos",
  "miette",
  "thiserror",
@@ -972,6 +974,15 @@ dependencies = [
  "quote",
  "serde",
  "syn",
+]
+
+[[package]]
+name = "dioxus-ssr"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d66715940895b1c285ef8ea203955db0e3c8c53c96c0b8ada0b42677f485a381"
+dependencies = [
+ "dioxus-core",
 ]
 
 [[package]]

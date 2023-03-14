@@ -1,8 +1,9 @@
 use std::{borrow::Cow, path::Path, fs::File, io::{Write, stdout}};
 
 use clap::Parser;
-use depict::graph_drawing::{error::Error, frontend::dioxus::as_data_svg};
+use depict::graph_drawing::{error::Error, frontend::{dioxus::{as_data_svg, render}, dom::Drawing}};
 
+use dioxus::prelude::{*};
 use thiserror::__private::PathAsDisplay;
 use walkdir::WalkDir;
 
@@ -44,13 +45,26 @@ fn do_one_path<P: AsRef<Path> + Clone>(output: &mut Option<Box<dyn Write>>, path
     Ok(())
 }
 
+struct Props {
+    drawing: Drawing,
+}
+
 fn do_one_expr<P: AsRef<Path> + Clone>(output: &mut Option<Box<dyn Write>>, _path: P, data: String) -> Result<(), Error> {
     let drawing = depict::graph_drawing::frontend::dom::draw(data);
     output.as_mut().map(|output| {
         if let Ok(drawing) = drawing {
-            let svg = as_data_svg(drawing, false);
-            let svg = svg.splitn(2, ',').last().unwrap();
-            output.write(svg.as_bytes());
+            fn app(cx: Scope<Props>) -> Element {
+                let drawing = render(cx, cx.props.drawing.clone());
+                cx.render(rsx!{
+                    div {
+                        style: "position: relative;",
+                        drawing
+                    }
+                })
+            }
+            let mut vdom = VirtualDom::new_with_props(app, Props{drawing});
+            let _ = vdom.rebuild();
+            output.write(dioxus_ssr::render(&vdom).as_bytes());
         } else {
             output.write(format!("<p>Error: {drawing:?}</p>").as_bytes());
         }
@@ -93,10 +107,18 @@ fn main() -> Result<(), Error> {
             padding-right: 2pc;
             width: 100%;
         }
-        div.example { max-width: calc(60pc - 40px); border: 1px dashed black; margin-bottom: 20px; padding: 20px; }
+        div.example { max-width: calc(60pc - 40px); height: 40pc; border: 1px dashed black; margin-bottom: 20px; padding: 20px; }
         div.data { white-space: pre; overflow-x: scroll; max-width: 100%; }
-        div.drawing { overflow: scroll; }
-        @media (prefers-color-scheme: dark) {
+
+        svg { stroke: currentColor; stroke-width: 1; }
+        path { stroke-dasharray: none; }
+        .keyword { font-weight: bold; color: rgb(207, 34, 46); }
+        /* .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; } */
+        .svg text { stroke: none; fill: black; }
+
+        div.drawing { margin-top: 1em; }
+        /* div.drawing { overflow: scroll; } */
+        /* @media (prefers-color-scheme: dark) {
             html {
               color: #eee;
               background-color: #121212;
@@ -111,7 +133,9 @@ fn main() -> Result<(), Error> {
             img {
               background-color: #eee;
             }
-          }
+            div.drawing { color: #eee; }
+          } */
+
         </style>
         </head>
         <body>
