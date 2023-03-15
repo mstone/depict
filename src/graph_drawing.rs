@@ -6542,6 +6542,7 @@ pub mod frontend {
                 ("a [ b [ c ]; d ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Contains("b", "c"), &Contains("a", "d")]),
                 ("a [ b c -: dddd / e ]", vec![]),
                 ("a c: d; b [ c ]", vec![]),
+                ("a [ b ]; a c -; b d -; c d", vec![&Contains("a", "b"), &Left("a", "c"), &Left("b", "d"), &Above("c", "d")]),
                 ("a [ b ]; c [ d ]; a c", vec![&Above("a", "c")]), // not solved-left(a, c)?
                 ("a [ b c -: e ]; b d: f g; c d", vec![]),
                 ("a [ b ]; c [ d [ e ] ; f ]", vec![]),
