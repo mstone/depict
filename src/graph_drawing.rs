@@ -2207,6 +2207,18 @@ pub mod layout {
             }
         }
 
+        let hcs = vcg.horz_constraints.iter().cloned().collect::<Vec<_>>();
+        for hc in hcs {
+            let vx = vcg.vert_vxmap[&hc.a];
+            let wx = vcg.vert_vxmap[&hc.b];
+            let rel = if vcg.horz_edge_labels.contains_key(&(hc.a.clone(), hc.b.clone())) {
+                "horizontal"
+            } else {
+                "implied_horizontal"
+            };
+            vcg.vert.add_edge(vx, wx, rel.into());
+        }
+
         eprintln!("VCG2: \n{:?}", Dot::new(&vcg.vert));
         eprintln!("HCG2: \n{:?}", vcg.horz_constraints);
 
@@ -4867,6 +4879,7 @@ pub mod frontend {
 
     use logos::Logos;
     use ordered_float::OrderedFloat;
+    use petgraph::dot::Dot;
     use self_cell::self_cell;
 
     use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, rank, calculate_locs_and_hops, ObjNode}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
@@ -5066,6 +5079,8 @@ pub mod frontend {
 
             let Vcg{vert, containers, nodes_by_container_transitive: nodes_by_container, container_depths, ..} = &vcg;
 
+            // eprintln!("DISTANCE VERT: {:?}", Dot::new(&vert));
+
             let distance = {
                 let containers = &containers;
                 let nodes_by_container = &nodes_by_container;
@@ -5113,7 +5128,9 @@ pub mod frontend {
                 }
             };
 
-            let paths_by_rank = rank(vert, distance, logs)?;
+            let filtered_vert = vert.filter_map(|vx, vl| Some(vl.clone()), |ex, er| { if er == "horizontal" || er == "implied_horizontal" { None } else { Some(er.clone()) }});
+
+            let paths_by_rank = rank(&filtered_vert, distance, logs)?;
 
             logs.with_map("paths_by_rank", "BTreeMap<VerticalRank, SortedVec<(V, V)>>", paths_by_rank.iter(), |rank, paths, l| {
                 l.with_map(format!("paths_by_rank[{rank}]"), "SortedVec<(V, V)>", paths.iter().map(|p| (&p.0, &p.1)), |from, to, l| {
