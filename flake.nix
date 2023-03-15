@@ -73,8 +73,7 @@
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <link rel="preload" href="./web_bg.wasm" as="fetch" type="application/wasm" crossorigin="">
               <link rel="modulepreload" href="./web.js"></head>
-              <body>
-                <div id="main"> </div>
+              <body id="main">
                 <script type="module">import init from './web.js';init('./web_bg.wasm');</script>
               </body>
               </html>
