@@ -4225,9 +4225,11 @@ pub mod geometry {
 
         if let Some(svg) = as_svg(&vcg.vert,
             &|_, (_vx, vl)| {
-                format!("class=\"box highlight_{vl}\"")
-            }, &|_, _er| {
-                String::new()
+                format!(r##"color="#000000"; class="box highlight_{vl}""##)
+            }, &|g, er| {
+                let src = g.node_weight(er.source()).unwrap();
+                let dst = g.node_weight(er.target()).unwrap();
+                format!(r##"color="#000000"; class="arrow {src}_{dst}""##)
             }
         ) {
             logs.log_svg(Some("lang_graph"), None::<String>, Vec::<String>::new(), svg)?;
@@ -4331,18 +4333,18 @@ pub mod geometry {
         if let Some(obj_svg) = as_svg(&obj_graph,
             &|_, (_gx, geom)| {
                 match geom {
-                    Geom::Node(obj) | Geom::Container(obj) => format!("class=\"box highlight_{obj}\""),
+                    Geom::Node(obj) | Geom::Container(obj) => format!(r##"color="#000000"; class="box highlight_{obj}""##),
                     Geom::Hop(obj) => {
-                        let Some(vl) = obj.as_vl() else {return format!("class=\"{obj}\"")};
-                        let Some(wl) = obj.as_wl() else {return format!("class=\"{obj}\"")};
-                        format!("class=\"arrow {vl}_{wl} {obj}\"")
+                        let Some(vl) = obj.as_vl() else {return format!(r##"color="#000000"; class="{obj}""##)};
+                        let Some(wl) = obj.as_wl() else {return format!(r##"color="#000000"; class="{obj}""##)};
+                        format!(r##"color="#000000"; class="arrow {vl}_{wl} {obj}""##)
                     },
                     _ => String::new(),
                 }
             }, &|g, er| {
-                let src = g.node_weight(er.source()).unwrap();
-                let dst = g.node_weight(er.target()).unwrap();
-                format!("class=\"arrow {src}_{dst}\"")
+                let src = g.node_weight(er.source()).unwrap().as_vl().unwrap();
+                let dst = g.node_weight(er.target()).unwrap().as_wl().unwrap();
+                format!(r##"color="#000000"; class="arrow {src}_{dst}""##)
             }
         ) {
             logs.log_svg(Some("obj_graph"), None::<String>, Vec::<String>::new(), obj_svg).unwrap();
@@ -4546,14 +4548,18 @@ pub mod geometry {
                 let Ok(varrank) = sol.try_into() else { return String::new() };
                 let obj = &loc_to_node[&loc_by_varrank[&varrank]];
                 match obj {
-                    Obj::Node(_) | Obj::Container(_)=> format!("class=\"box highlight_{obj}\""),
-                    Obj::Hop(ObjHop{vl, wl, ..}) => format!("class=\"arrow {vl}_{wl}\""),
+                    Obj::Node(_) | Obj::Container(_)=> format!(r##"color="#000000"; class="box highlight_{obj}""##),
+                    Obj::Hop(ObjHop{vl, wl, ..}) => format!(r##"color="#000000"; class="arrow {vl}_{wl}""##),
                     _ => unimplemented!(),
                 }
             }, &|g, er| {
-                let src = g.node_weight(er.source()).unwrap();
-                let dst = g.node_weight(er.target()).unwrap();
-                format!("class=\"arrow {src}_{dst}\"")
+                let src: Result<VarRank, _> = g.node_weight(er.source()).unwrap().try_into();
+                let dst: Result<VarRank, _> = g.node_weight(er.target()).unwrap().try_into();
+                let Ok(src) = src else { return r##"color="#000000"; class="arrow""##.into(); };
+                let Ok(dst) = dst else { return r##"color="#000000"; class="arrow""##.into(); };
+                let src = (&loc_to_node[&loc_by_varrank[&src]]).as_vl().unwrap();
+                let dst = (&loc_to_node[&loc_by_varrank[&dst]]).as_wl().unwrap();
+                format!(r##"color="#000000"; class="arrow {src}_{dst}""##)
             }
         ) {
             logs.log_svg(Some("con_graph"), None::<String>, Vec::<String>::new(), con_svg).unwrap();
@@ -4619,8 +4625,11 @@ pub mod geometry {
     {
         use std::{process::{Stdio, Command}, io::Write};
 
-        let dot = format!("{}", petgraph::dot::Dot::with_attr_getters(graph,
-            &[],
+        let dot = format!(r#"digraph {{
+                bgcolor="transparent";
+                {}
+            }}"#, petgraph::dot::Dot::with_attr_getters(graph,
+            &[petgraph::dot::Config::GraphContentOnly],
             edge_attrs,
             node_attrs,
             ));
@@ -4636,6 +4645,7 @@ pub mod geometry {
         });
         let output = child.wait_with_output().expect("Failed to read stdout");
         let svg = String::from_utf8_lossy(&output.stdout);
+        let svg = svg.replace("#000000", "currentColor");
         // Some(format!("data:image/svg+xml;utf8,{svg}"))
         Some(svg.into())
     }
@@ -6310,6 +6320,8 @@ pub mod frontend {
                 .arrow { color: #eee; }
                 .arrow svg { stroke: #eee; }
                 .arrow div div { color: black; background-color: #aaa; padding: 0px 2px; }
+                .svg text { fill: #aaa; }
+                .svg ellipse { stroke: #aaa; }
             }
         "#;
     }
@@ -6483,6 +6495,7 @@ pub mod frontend {
                 ("a [ b [ c ]; d ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Contains("b", "c"), &Contains("a", "d")]),
                 ("a [ b c -: dddd / e ]", vec![]),
                 ("a c: d; b [ c ]", vec![]),
+                ("a [ b ]; c [ d ]; a c", vec![&Above("a", "c")]), // not solved-left(a, c)?
                 ("a [ b c -: e ]; b d: f g; c d", vec![]),
                 ("a [ b ]; c [ d [ e ] ; f ]", vec![]),
                 ("a [ b [ c ]; d ]", vec![]),
@@ -6490,7 +6503,7 @@ pub mod frontend {
                 ("a [ b ]; c d: _; e f: _", vec![&OnlyCollisions(&[("a", "b")])]),
                 ("a c: d / e; b [ c ]", vec![&MaxCurvature("a", "c", 1.)]),
                 ("a [ b c ]; b d: p; c d: q; a e: r", vec![&OnlyCollisions(&[("a", "b"), ("a", "c")])]),
-                ("- a b: vvvvvv; - a c: pppppp; d f: qqqqqq; d b: rrrrrr; e f: tttttt; e b: uuuuuu; f c: ssssss", vec![]);
+                ("- a b: vvvvvv; - a c: pppppp; d f: qqqqqq; d b: rrrrrr; e f: tttttt; e b: uuuuuu; f c: ssssss", vec![]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
