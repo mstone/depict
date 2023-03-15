@@ -2904,7 +2904,7 @@ pub mod layout {
             c as usize
         }
 
-        use crate::graph_drawing::frontend::log::{self, Log};
+        use crate::graph_drawing::frontend::log::{self, Log, Names};
 
         fn conforms<V: Graphic + Display + log::Name, E: Graphic>(
             vcg: &Vcg<V, E>,
@@ -3355,6 +3355,18 @@ pub mod layout {
 
 
             eprintln!("SOLVED_LOCS: {solved_locs:#?}");
+
+            logs.with_group("solved locs", String::new(), Vec::<String>::new(), |logs| {
+                for (vr, shrs) in solved_locs.iter() {
+                    let mut sorted_shrs = shrs.into_iter().collect::<Vec<_>>();
+                    sorted_shrs.sort_by_key(|(ohr, shr)| *shr);
+                    logs.with_set("", format!("solved_locs[{vr}]"), sorted_shrs.iter(), |(ohr, shr), logs| {
+                        let obj = &loc_to_node[&(*vr, **ohr)];
+                        logs.log_element("", obj.names().into_iter().map(|n| n.name()).collect::<Vec<_>>(), format!("{obj}"))
+                    })?;
+                }
+                Ok(())
+            })?;
 
             // check that solved_locs is 1-1
             let mut solved_locs_inv = HashMap::new();
