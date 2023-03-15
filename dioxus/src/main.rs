@@ -377,7 +377,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
-    let style_default = default_css;
+    let style_default = format!("{default_css}\n.content {{margin-top: 240px; }}");
     cx.render(rsx!{
         head {
             style {
@@ -387,9 +387,8 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         }
         div {
             // key: "editor",
-            style: "width: 100%; z-index: 20; padding: 1rem;",
+            class: "main_editor",
             div {
-                style: "max-width: 36rem; margin-left: auto; margin-right: auto; flex-direction: column;",
                 div {
                     // key: "editor_label",
                     "Model"
@@ -397,7 +396,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                 div {
                     // key: "editor_editor",
                     textarea {
-                        style: "border-width: 1px; border-color: #000;",
+                        style: "box-sizing: border-box; width: calc(100% - 2em); border-width: 1px; border-color: #000;",
                         rows: "6",
                         cols: "80",
                         autocomplete: "off",
@@ -528,6 +527,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
         }
         // DRAWING
         div {
+            class: "content",
             div {
                 style: "position: relative; width: {viewbox_width}px; height: {viewbox_height}px; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000; margin-bottom: 40px;",
                 nodes

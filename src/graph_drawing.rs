@@ -6290,10 +6290,18 @@ pub mod frontend {
         pub const default_css: &'static str = r#"
             svg { stroke: currentColor; stroke-width: 1; }
             path { stroke-dasharray: none; }
+            .main_editor { box-sizing: border-box; position: fixed; top: 0; width: 100%; z-index: 20; padding: 1rem;}
+            .main_editor > div { max-width: 36rem; margin-left: auto; margin-right: auto; flex-direction: column; }
+            .content { width: 100%; margin-top: 180px; }
             .keyword { font-weight: bold; color: rgb(207, 34, 46); }
             .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
             .svg text { stroke: none; fill: black; }
             div.label { padding: 2px 0px; white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
+            @media only screen and (max-width: 575.98px) {
+                .main_editor > div { max-width: calc(100% - 2em); }
+            }
+            @media only screen and (min-width: 1200px) {
+            }
             @media (prefers-color-scheme: dark) {
                 html { color: #aaa; background-color: rgb(32, 32, 32); }
                 a { color: #809fff; }

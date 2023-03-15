@@ -198,19 +198,12 @@ pub fn app(cx: Scope<AppProps>) -> Element {
     let data_svg = as_data_svg(drawing.get().clone(), true);
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
-    let style_default = default_css;
     cx.render(rsx!{
-        head {
-            style {
-                "{style_default}"
-            }
-            // highlight_styles
-        }
+        // highlight_styles
         div {
             // key: "editor",
-            style: "width: 100%; z-index: 20; padding: 1rem;",
+            class: "main_editor",
             div {
-                style: "max-width: 36rem; margin-left: auto; margin-right: auto; flex-direction: column;",
                 div {
                     // key: "editor_label",
                     "Model"
@@ -218,9 +211,8 @@ pub fn app(cx: Scope<AppProps>) -> Element {
                 div {
                     // key: "editor_editor",
                     textarea {
-                        style: "border-width: 1px; border-color: #000;",
+                        style: "box-sizing: border-box; width: calc(100% - 2em); border-width: 1px; border-color: #000;",
                         rows: "6",
-                        cols: "80",
                         autocomplete: "off",
                         // autocorrect: "off",
                         "autocapitalize": "off",
@@ -298,7 +290,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
             }
         }
         div {
-            style: "width: 100%;",
+            class: "content",
             div {
                 style: "position: relative; width: {viewbox_width}px; margin-left: auto; margin-right: auto; border-width: 1px; border-color: #000;",
                 nodes
@@ -310,6 +302,13 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     console_error_panic_hook::set_once();
+
+    let window = web_sys::window().unwrap();
+    let document = window.document().unwrap();
+    let head = document.get_elements_by_tag_name("head").item(0).unwrap();
+    let style = document.create_element("style").unwrap();
+    style.set_inner_html(default_css);
+    head.append_child(&style);
 
     dioxus_web::launch_with_props(
         app,
