@@ -6661,6 +6661,7 @@ pub mod frontend {
                 ("a c: d / e; b [ c ]", vec![&MaxCurvature("a", "c", 4.)]), // <--- bug: why is there so much horizontal positioning error here?
                 ("a [ b c ]; b d: p; c d: q; a e: r", vec![]),// , vec![&OnlyCollisions(&[("a", "b"), ("a", "c")])]), <-- there are acceptable edge-container collisions too
                 ("- a b: vvvvvv; - a c: pppppp; d f: qqqqqq; d b: rrrrrr; e f: tttttt; e b: uuuuuu; f c: ssssss", vec![]),
+                ("a b; a c; a e; e d; b c d f -", vec![&Above("a", "b"), &Above("a", "c"), &Above("a", "e"), &Above("e", "d"), &Left("b", "c"), &Left("c", "d"), &Left("d", "f")]),
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
