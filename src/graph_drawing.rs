@@ -2779,7 +2779,7 @@ pub mod layout {
 
     pub mod heaps {
         use std::cmp::Ordering;
-        use std::collections::{BTreeMap, HashMap, VecDeque};
+        use std::collections::{BTreeMap, HashMap, VecDeque, HashSet};
         use std::fmt::{Display};
         use std::ops::{Sub, SubAssign};
         use std::time::{Instant, Duration};
@@ -2937,20 +2937,129 @@ pub mod layout {
                 let bobj = &Obj::from_vl(b, &vcg.containers);
                 let aloc = node_to_loc[aobj];
                 let bloc = node_to_loc[bobj];
-                let aovr = aloc.0.0;
-                let bovr = bloc.0.0;
-                let abub = bubble_by_loc[&aloc].clone();
-                let bbub = bubble_by_loc[&bloc].clone();
-                let pa = &p[slvl_by_bubble[&(aloc.0, abub)]];
-                let pb = &p[slvl_by_bubble[&(bloc.0, bbub)]];
-                let abhr = bhr_by_loc[&aloc];
-                let bbhr = bhr_by_loc[&bloc];
-                let ashr = pa[abhr];
-                let bshr = pb[bbhr];
-                // let ret = (aovr == bovr && ashr < bshr) || ashr <= bshr;
-                // eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
-                // imperfect without rank-spanning constraint edges but maybe a place to start?
-                (aovr == bovr && ashr < bshr) || ashr <= bshr
+                let mut alocseq = vec![aloc];
+                let mut blocseq = vec![bloc];
+                if matches!(aobj, Obj::Container(_)) {
+                    let acd = vcg.container_depths[a];
+                    let ovr = aloc.0;
+                    for vr in (ovr.0+1)..(ovr.0+1+acd) {
+                        let gap = Obj::Gap(ObjGap{container: a.clone(), lvl: VerticalRank(vr)});
+                        alocseq.push(node_to_loc[&gap]);
+                    }
+                }
+                if matches!(bobj, Obj::Container(_)) {
+                    let bcd = vcg.container_depths[b];
+                    let ovr = bloc.0;
+                    for vr in (ovr.0+1)..(ovr.0+1+bcd) {
+                        let gap = Obj::Gap(ObjGap{container: b.clone(), lvl: VerticalRank(vr)});
+                        blocseq.push(node_to_loc[&gap]);
+                    }
+                }
+                let mut ret = true;
+                for an in 0..alocseq.len() {
+                    for bn in 0..blocseq.len() {
+                        let aovr = aloc.0.0;
+                        let bovr = bloc.0.0;
+                        let abub = bubble_by_loc[&aloc].clone();
+                        let bbub = bubble_by_loc[&bloc].clone();
+                        let pa = &p[slvl_by_bubble[&(aloc.0, abub.clone())]];
+                        let pb = &p[slvl_by_bubble[&(bloc.0, bbub.clone())]];
+                        let abhr = bhr_by_loc[&aloc];
+                        let bbhr = bhr_by_loc[&bloc];
+                        let ashr = pa[abhr];
+                        let bshr = pb[bbhr];
+                        // imperfect without rank-spanning constraint edges but maybe a place to start?
+                        if abub == bbub {
+                            ret &= (aovr == bovr && ashr < bshr) || ashr <= bshr;
+                            eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, abub: {abub:?}, bbub: {bbub:?}, pa: {pa:?}, pb: {pb:?}, abhr: {abhr:?}, bbhr: {bbhr:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
+                            continue
+                        } else {
+                            eprintln!("BUBBLE CHASE");
+                            // find the LCA bubble of a and b...
+                            let abubseq = itertools::unfold(aloc, |st| {
+                                let bub = &bubble_by_loc[&st];
+                                let prev_st = st.clone();
+                                if let Some(container) = bub {
+                                    *st = node_to_loc[&Obj::Container(ObjContainer{vl: container.clone()})];
+                                } else {
+                                    return None;
+                                }
+                                Some((bub.clone(), prev_st))
+                            });
+                            let mut abubseq = abubseq.collect::<Vec<_>>();
+                            if abubseq.len() > 0 {
+                                abubseq.push((None, node_to_loc[&Obj::Container(ObjContainer{vl: abubseq.last().unwrap().0.as_ref().unwrap().clone()})]));
+                            } else {
+                                abubseq.push((None, aloc));
+                            }
+
+                            let bbubseq = itertools::unfold(bloc, |st| {
+                                let bub = &bubble_by_loc[&st];
+                                let prev_st = st.clone();
+                                if let Some(container) = bub {
+                                    *st = node_to_loc[&Obj::Container(ObjContainer{vl: container.clone()})];
+                                } else {
+                                    return None;
+                                }
+                                Some((bub.clone(), prev_st))
+                            });
+                            let mut bbubseq = bbubseq.collect::<Vec<_>>();
+                            if bbubseq.len() > 0 {
+                                bbubseq.push((None, node_to_loc[&Obj::Container(ObjContainer{vl: bbubseq.last().unwrap().0.as_ref().unwrap().clone()})]));
+                            } else {
+                                bbubseq.push((None, bloc));
+                            }
+
+                            let abubs = abubseq.iter().map(|(bub, loc)| bub.clone()).collect::<HashSet<_>>();
+                            let mut lca = None;
+                            for bbub in bbubseq.iter() {
+                                if abubs.contains(&bbub.0) {
+                                    lca = bbub.0.clone();
+                                }
+                            }
+
+                            let abubs = abubseq.iter().cloned().collect::<HashMap<_,_>>();
+                            let bbubs = bbubseq.iter().cloned().collect::<HashMap<_,_>>();
+
+                            let aloc2 = abubs[&lca];
+                            let bloc2 = bbubs[&lca];
+
+                            let mut aobj2 = aobj.clone();
+                            if aloc != aloc2 {
+                                let acon = layout_problem.loc_to_node[&aloc2].as_vl().unwrap();
+                                aobj2 = Obj::Gap(ObjGap{container: acon.clone(), lvl: aloc.0});
+                            }
+                            let mut bobj2 = bobj.clone();
+                            if bloc != bloc2 {
+                                let bcon = layout_problem.loc_to_node[&bloc2].as_vl().unwrap();
+                                bobj2 = Obj::Gap(ObjGap{container: bcon.clone(), lvl: bloc.0});
+                            }
+
+                            let aloc3 = node_to_loc[&aobj2];
+                            let bloc3 = node_to_loc[&bobj2];
+
+                            eprintln!("abubs: {abubseq:?}, bbubs: {bbubseq:?} -> lca: {lca:?}, using modified aloc2: {aloc2:?}, bloc2: {bloc2:?}, aloc3: {aloc3:?}, bloc3: {bloc3:?}");
+
+                            let aloc = aloc3;
+                            let bloc = bloc3;
+
+                            let aovr = aloc.0.0;
+                            let bovr = bloc.0.0;
+                            let abub = bubble_by_loc[&aloc].clone();
+                            let bbub = bubble_by_loc[&bloc].clone();
+                            let pa = &p[slvl_by_bubble[&(aloc.0, abub.clone())]];
+                            let pb = &p[slvl_by_bubble[&(bloc.0, bbub.clone())]];
+                            let abhr = bhr_by_loc[&aloc];
+                            let bbhr = bhr_by_loc[&bloc];
+                            let ashr = pa[abhr];
+                            let bshr = pb[bbhr];
+
+                            ret &= (aovr == bovr && ashr < bshr) || ashr <= bshr;
+                            eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, abub: {abub:?}, bbub: {bbub:?}, pa: {pa:?}, pb: {pb:?}, abhr: {abhr:?}, bbhr: {bbhr:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
+                        }
+                    }
+                }
+                ret
             });
 
             hcg_satisfied
@@ -3142,10 +3251,10 @@ pub mod layout {
             eprintln!("HOPS_BY_LEVEL2: {hops_by_level2:#?}");
 
             multisearch(&mut shrs_ref, |p| {
-                // eprintln!("HEAPS PROCESS: ");
-                // for (n, s) in p.iter().enumerate() {
-                //     eprintln!("{n}: {s:?}");
-                // }
+                eprintln!("HEAPS PROCESS: ");
+                for (n, s) in p.iter().enumerate() {
+                    eprintln!("{n}: {s:?}");
+                }
                 let mut cn = 0;
                 for (_rank, hops) in hops_by_level2.iter() {
                     for h1i in 0..hops.len() {
