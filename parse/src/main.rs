@@ -1,10 +1,9 @@
-use std::{borrow::Cow, path::Path, fs::File, io::{Write, stdout}};
+use std::{path::Path, fs::File, io::{Write, stdout}};
 
 use clap::Parser;
-use depict::graph_drawing::{error::Error, frontend::{dioxus::{as_data_svg, render, default_css}, dom::Drawing}};
+use depict::graph_drawing::{error::Error, frontend::{dioxus::{render, DEFAULT_CSS}, dom::Drawing}};
 
 use dioxus::prelude::{*};
-use thiserror::__private::PathAsDisplay;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
@@ -26,20 +25,20 @@ fn do_one_path<P: AsRef<Path> + Clone>(output: &mut Option<Box<dyn Write>>, path
                 .expect("read error");
 
             output.as_mut().map(|output| {
-                output.write(r#"<div class="file">"#.as_bytes());
-                output.write(r#"<div class=path">"#.as_bytes());
-                output.write(entry.path().to_string_lossy().as_bytes());
-                output.write(r#"/<div>"#.as_bytes());
-                output.write(r#"<div class="data">"#.as_bytes());
-                output.write(data.as_bytes());
-                output.write("</div>".as_bytes());
+                output.write(r#"<div class="file">"#.as_bytes()).unwrap();
+                output.write(r#"<div class=path">"#.as_bytes()).unwrap();
+                output.write(entry.path().to_string_lossy().as_bytes()).unwrap();
+                output.write(r#"/<div>"#.as_bytes()).unwrap();
+                output.write(r#"<div class="data">"#.as_bytes()).unwrap();
+                output.write(data.as_bytes()).unwrap();
+                output.write("</div>".as_bytes()).unwrap();
             });
-            output.as_mut().map(|output| output.write(r#"<div class="drawing">"#.as_bytes()));
+            output.as_mut().map(|output| output.write(r#"<div class="drawing">"#.as_bytes()).unwrap());
             do_one_expr(output, entry.path(), data)?;
-            output.as_mut().map(|output| output.write("</div>".as_bytes()));
-            output.as_mut().map(|output| output.write("</div>".as_bytes()));
-            output.as_mut().map(|output| output.write("</div>".as_bytes()));
-            output.as_mut().map(|output| output.write("</div>".as_bytes()));
+            output.as_mut().map(|output| output.write("</div>".as_bytes()).unwrap());
+            output.as_mut().map(|output| output.write("</div>".as_bytes()).unwrap());
+            output.as_mut().map(|output| output.write("</div>".as_bytes()).unwrap());
+            output.as_mut().map(|output| output.write("</div>".as_bytes()).unwrap());
         }
     }
     Ok(())
@@ -64,9 +63,9 @@ fn do_one_expr<P: AsRef<Path> + Clone>(output: &mut Option<Box<dyn Write>>, _pat
             }
             let mut vdom = VirtualDom::new_with_props(app, Props{drawing});
             let _ = vdom.rebuild();
-            output.write(dioxus_ssr::render(&vdom).as_bytes());
+            output.write(dioxus_ssr::render(&vdom).as_bytes()).unwrap();
         } else {
-            output.write(format!("<p>Error: {drawing:?}</p>").as_bytes());
+            output.write(format!("<p>Error: {drawing:?}</p>").as_bytes()).unwrap();
         }
     });
     Ok(())
@@ -115,13 +114,13 @@ fn main() -> Result<(), Error> {
         @media (prefers-color-scheme: dark) {
             div.file { border: 1px dashed #aaa; }
         }
-        "#.as_bytes());
-        output.write(default_css.as_bytes());
+        "#.as_bytes()).unwrap();
+        output.write(DEFAULT_CSS.as_bytes()).unwrap();
         output.write(r#"
         </style>
         </head>
         <body>
-        "#.as_bytes())
+        "#.as_bytes()).unwrap()
     });
     for path in args.paths {
         do_one_path(&mut output, path)?;

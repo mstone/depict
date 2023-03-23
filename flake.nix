@@ -167,6 +167,7 @@
                 cmake
                 graphviz
               ] ++ final.lib.optionals isShell [
+                bacon
                 entr
                 trunk
                 wasm-bindgen-cli

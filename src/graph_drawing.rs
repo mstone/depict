@@ -2493,33 +2493,6 @@ pub mod layout {
         }
     }
 
-    #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub enum Node {
-        Point(OriginalHorizontalRank),
-        Interval(OriginalHorizontalRank, OriginalHorizontalRank),
-    }
-
-    #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub struct Border<V: Graphic + Display> {
-        pub vl: V,
-        pub ovr: VerticalRank,
-        pub ohr: OriginalHorizontalRank,
-        pub pair: OriginalHorizontalRank,
-    }
-
-    impl<V: Graphic + Display> Display for Border<V> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "Border({}, {}, {}, {})", self.vl, self.ovr, self.ohr, self.pair)
-        }
-    }
-
-    impl<'n, V: Graphic + 'n> log::Names<'n> for Border<V> {
-        fn names(&self) -> Vec<Box<dyn Name + 'n>> {
-            let Border{ vl, ovr, ohr, pair } = self;
-            names![vl, ovr, ohr, pair]
-        }
-    }
-
     impl<V: Graphic + Display + log::Name> log::Log for HashMap<(VerticalRank, OriginalHorizontalRank), Obj<V>> {
         fn log(&self, _cx: (), l: &mut log::Logger) -> Result<(), log::Error> {
             l.with_map("loc_to_node", "LocToNode", self.iter(), |loc_ix, loc, l| {
@@ -2958,6 +2931,8 @@ pub mod layout {
                 let mut ret = true;
                 for an in 0..alocseq.len() {
                     for bn in 0..blocseq.len() {
+                        let aloc = alocseq[an];
+                        let bloc = blocseq[bn];
                         let aovr = aloc.0.0;
                         let bovr = bloc.0.0;
                         let abub = bubble_by_loc[&aloc].clone();
@@ -2970,11 +2945,11 @@ pub mod layout {
                         let bshr = pb[bbhr];
                         // imperfect without rank-spanning constraint edges but maybe a place to start?
                         if abub == bbub {
-                            ret &= (aovr == bovr && ashr < bshr) || ashr <= bshr;
-                            eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, abub: {abub:?}, bbub: {bbub:?}, pa: {pa:?}, pb: {pb:?}, abhr: {abhr:?}, bbhr: {bbhr:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
+                            ret &= (aovr == bovr && ashr < bshr) || (aovr > bovr && ashr <= bshr) || (aovr < bovr && bshr <= ashr);// || ashr <= bshr;
+                            // eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, abub: {abub:?}, bbub: {bbub:?}, pa: {pa:?}, pb: {pb:?}, abhr: {abhr:?}, bbhr: {bbhr:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
                             continue
                         } else {
-                            eprintln!("BUBBLE CHASE");
+                            // eprintln!("BUBBLE CHASE");
                             // find the LCA bubble of a and b...
                             let abubseq = itertools::unfold(aloc, |st| {
                                 let bub = &bubble_by_loc[&st];
@@ -3010,7 +2985,7 @@ pub mod layout {
                                 bbubseq.push((None, bloc));
                             }
 
-                            let abubs = abubseq.iter().map(|(bub, loc)| bub.clone()).collect::<HashSet<_>>();
+                            let abubs = abubseq.iter().map(|(bub, _loc)| bub.clone()).collect::<HashSet<_>>();
                             let mut lca = None;
                             for bbub in bbubseq.iter() {
                                 if abubs.contains(&bbub.0) {
@@ -3038,7 +3013,7 @@ pub mod layout {
                             let aloc3 = node_to_loc[&aobj2];
                             let bloc3 = node_to_loc[&bobj2];
 
-                            eprintln!("abubs: {abubseq:?}, bbubs: {bbubseq:?} -> lca: {lca:?}, using modified aloc2: {aloc2:?}, bloc2: {bloc2:?}, aloc3: {aloc3:?}, bloc3: {bloc3:?}");
+                            // eprintln!("abubs: {abubseq:?}, bbubs: {bbubseq:?} -> lca: {lca:?}, using modified aloc2: {aloc2:?}, bloc2: {bloc2:?}, aloc3: {aloc3:?}, bloc3: {bloc3:?}");
 
                             let aloc = aloc3;
                             let bloc = bloc3;
@@ -3055,7 +3030,7 @@ pub mod layout {
                             let bshr = pb[bbhr];
 
                             ret &= (aovr == bovr && ashr < bshr) || ashr <= bshr;
-                            eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, abub: {abub:?}, bbub: {bbub:?}, pa: {pa:?}, pb: {pb:?}, abhr: {abhr:?}, bbhr: {bbhr:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
+                            // eprintln!("HCG CONFORMS: constraint: {constraint:?}, aobj: {aobj}, bobj: {bobj}, aloc: {aloc:?}, bloc: {bloc:?}, abub: {abub:?}, bbub: {bbub:?}, pa: {pa:?}, pb: {pb:?}, abhr: {abhr:?}, bbhr: {bbhr:?}, ashr: {ashr}, bshr: {bshr}, ret: {ret}");
                         }
                     }
                 }
@@ -3251,10 +3226,10 @@ pub mod layout {
             eprintln!("HOPS_BY_LEVEL2: {hops_by_level2:#?}");
 
             multisearch(&mut shrs_ref, |p| {
-                eprintln!("HEAPS PROCESS: ");
-                for (n, s) in p.iter().enumerate() {
-                    eprintln!("{n}: {s:?}");
-                }
+                // eprintln!("HEAPS PROCESS: ");
+                // for (n, s) in p.iter().enumerate() {
+                //     eprintln!("{n}: {s:?}");
+                // }
                 let mut cn = 0;
                 for (_rank, hops) in hops_by_level2.iter() {
                     for h1i in 0..hops.len() {
@@ -3345,6 +3320,7 @@ pub mod layout {
             enum MyOption<V: Clone + Debug + Display + Ord> {
                 Min,
                 Some(V),
+                #[allow(dead_code)]
                 Max,
             }
 
@@ -3480,8 +3456,8 @@ pub mod layout {
             logs.with_group("solved locs", String::new(), Vec::<String>::new(), |logs| {
                 for (vr, shrs) in solved_locs.iter() {
                     let mut sorted_shrs = shrs.into_iter().collect::<Vec<_>>();
-                    sorted_shrs.sort_by_key(|(ohr, shr)| *shr);
-                    logs.with_set("", format!("solved_locs[{vr}]"), sorted_shrs.iter(), |(ohr, shr), logs| {
+                    sorted_shrs.sort_by_key(|(_ohr, shr)| *shr);
+                    logs.with_set("", format!("solved_locs[{vr}]"), sorted_shrs.iter(), |(ohr, _shr), logs| {
                         let obj = &loc_to_node[&(*vr, **ohr)];
                         logs.log_element("", obj.names().into_iter().map(|n| n.name()).collect::<Vec<_>>(), format!("{obj}"))
                     })?;
@@ -4988,7 +4964,6 @@ pub mod frontend {
 
     use logos::Logos;
     use ordered_float::OrderedFloat;
-    use petgraph::dot::Dot;
     use self_cell::self_cell;
 
     use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, rank, calculate_locs_and_hops, ObjNode}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
@@ -5237,7 +5212,7 @@ pub mod frontend {
                 }
             };
 
-            let filtered_vert = vert.filter_map(|vx, vl| Some(vl.clone()), |ex, er| { if er == "horizontal" || er == "implied_horizontal" { None } else { Some(er.clone()) }});
+            let filtered_vert = vert.filter_map(|_vx, vl| Some(vl.clone()), |_ex, er| { if er == "horizontal" || er == "implied_horizontal" { None } else { Some(er.clone()) }});
 
             let paths_by_rank = rank(&filtered_vert, distance, logs)?;
 
@@ -6453,7 +6428,7 @@ pub mod frontend {
             })
         }
 
-        pub const default_css: &'static str = r#"
+        pub const DEFAULT_CSS: &'static str = r#"
             svg { stroke: currentColor; stroke-width: 1; }
             path { stroke-dasharray: none; }
             .main_editor { box-sizing: border-box; position: fixed; top: 0; width: 100%; z-index: 20; padding: 1rem;}
@@ -6662,6 +6637,8 @@ pub mod frontend {
                 ("a [ b c ]; b d: p; c d: q; a e: r", vec![]),// , vec![&OnlyCollisions(&[("a", "b"), ("a", "c")])]), <-- there are acceptable edge-container collisions too
                 ("- a b: vvvvvv; - a c: pppppp; d f: qqqqqq; d b: rrrrrr; e f: tttttt; e b: uuuuuu; f c: ssssss", vec![]),
                 ("a b; a c; a e; e d; b c d f -", vec![&Above("a", "b"), &Above("a", "c"), &Above("a", "e"), &Above("e", "d"), &Left("b", "c"), &Left("c", "d"), &Left("d", "f")]),
+                ("a b; a c; a e; e d; b c f g -", vec![&Above("a", "b"), &Above("a", "c"), &Above("a", "e"), &Above("e", "d"), &Left("b", "c"), &Left("c", "f"), &Left("f", "g")]),
+
             ];
             for (prompt, checks) in tests {
                 eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");

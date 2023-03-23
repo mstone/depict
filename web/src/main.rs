@@ -3,7 +3,7 @@
 use std::{default::Default, panic::catch_unwind};
 
 use depict::{graph_drawing::{
-    frontend::{dom::{draw, Drawing}, dioxus::default_css},
+    frontend::{dom::{draw, Drawing}, dioxus::DEFAULT_CSS},
     frontend::dioxus::{render, as_data_svg}
 }};
 
@@ -307,8 +307,8 @@ fn main() {
     let document = window.document().unwrap();
     let head = document.get_elements_by_tag_name("head").item(0).unwrap();
     let style = document.create_element("style").unwrap();
-    style.set_inner_html(default_css);
-    head.append_child(&style);
+    style.set_inner_html(DEFAULT_CSS);
+    head.append_child(&style).unwrap();
 
     dioxus_web::launch_with_props(
         app,

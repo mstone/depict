@@ -6,7 +6,7 @@ use depict::graph_drawing::error::{Error, Kind};
 use depict::graph_drawing::eval::{Val, Body};
 use depict::graph_drawing::frontend::log::Record;
 use depict::graph_drawing::frontend::dom::{draw, Drawing, Rect};
-use depict::graph_drawing::frontend::dioxus::{render, as_data_svg, default_css};
+use depict::graph_drawing::frontend::dioxus::{render, as_data_svg, DEFAULT_CSS};
 
 use dioxus::prelude::*;
 use dioxus_desktop::{self, Config, WindowBuilder};
@@ -376,7 +376,7 @@ pub fn app(cx: Scope<AppProps>) -> Element {
 
     let syntax_guide = depict::graph_drawing::frontend::dioxus::syntax_guide(cx)?;
 
-    let style_default = format!("{default_css}\n.content {{margin-top: 240px; }}");
+    let style_default = format!("{DEFAULT_CSS}\n.content {{margin-top: 240px; }}");
     cx.render(rsx!{
         head {
             style {
