@@ -116,7 +116,7 @@ says:
 
 For more detailed examples, please see these articles:
 
-* [Introducing *depict](https://mstone.info/posts/introducing-depict/()
+* [Introducing *depict](https://mstone.info/posts/introducing-depict/)
 * [Real-world system depictions with *depict*](https://mstone.info/posts/real-world-system-depictions/)
 
 ## Syntax
