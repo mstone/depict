@@ -6114,7 +6114,7 @@ pub mod frontend {
             nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
             for node in nodes {
                 match node {
-                    Node::Div{key, label, hpos, vpos, width, height, z_index, ..} => {
+                    Node::Div{key, label, hpos, vpos, width, height, z_index, ..} if label.len() > 0 => {
                         children.push(cx.render(rsx! {
                             div {
                                 key: "{key}",
@@ -6214,6 +6214,7 @@ pub mod frontend {
                             }
                         }));
                     },
+                    _ => {},
                 }
             }
             // dbg!(cx.render(rsx!(children)))
