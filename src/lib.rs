@@ -265,7 +265,7 @@ pub mod parser {
                 match (ikind, ekind, jkind) {
                     (Seq  , Text  | Br | Sq            , Slash | Colon | At | Seq) |
                     (Seq  , Slash | Colon | Comma , Colon                   ) |
-                    (Colon, Text  | Br | Sq | Comma, Slash | Colon | Seq    ) => {
+                    (Colon | At, Text  | Br | Sq | Comma, Slash | Colon | Seq    ) => {
                         // we eat end; i eats us.
                         self.left().insert(0, end);
                     },
@@ -491,6 +491,8 @@ pub mod parser {
         pub fn test_parse() {
             let tests: Vec<(&str, Model)> = vec![
                 ("a : b @ c", vi(&[at(&[col(&[t(a)], &[t(b)])], &[t(c)])])),
+                ("@: a", vi(&[at(&[], &[col(&[], &[t(a)])])])),
+                ("@a: b", vi(&[at(&[], &[col(&[t(a)], &[t(b)])])])),
             ];
             for (prompt, goal) in tests {
                 eprintln!("PROMPT: {prompt}. GOAL: {goal:?}");
