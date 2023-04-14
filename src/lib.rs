@@ -484,6 +484,7 @@ pub mod parser {
         fn t<'s>(x: &'static str) -> Item<'s> { Item::Text(Cow::from(x)) }
         fn vi<'s>(x: &[Item<'static>]) -> Vec<Item<'s>> { x.iter().cloned().collect::<Vec<_>>() }
         fn sq<'s>(x: &[Item<'static>]) -> Item<'s>{ Item::Sq(vi(x)) }
+        fn br<'s>(x: &[Item<'static>]) -> Item<'s>{ Item::Br(vi(x)) }
         fn seq<'s>(x: &[Item<'static>]) -> Item<'s> { Item::Seq(vi(x)) }
         fn col<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Colon(vi(x), vi(y)) }
         fn at<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::At(vi(x), vi(y)) }
@@ -496,6 +497,7 @@ pub mod parser {
                 ("@: a", vi(&[at(&[], &[col(&[], &[t(a)])])])),
                 ("@a: b", vi(&[at(&[], &[col(&[t(a)], &[t(b)])])])),
                 ("a b: c / d @ e", vi(&[at(&[col(&[t(a), t(b)], &[sl(&[t(c)], &[t(d)])])], &[t(e)])])),
+                ("@ { a }", vi(&[at(&[], &[br(&[t(a)])])])),
             ];
             for (prompt, goal) in tests {
                 eprintln!("PROMPT: {prompt}. GOAL: {goal:?}");
