@@ -44,6 +44,11 @@ pub mod printer {
                 v.push(Cow::from("/"));
                 v.extend(r.iter().map(|i| Cow::from(print1(i))));
             },
+            Item::At(l, r) => {
+                v.extend(l.iter().map(|i| Cow::from(print1(i))));
+                v.push(Cow::from("@"));
+                v.extend(r.iter().map(|i| Cow::from(print1(i))));
+            },
             Item::Sq(s) => {
                 v.push(Cow::from("["));
                 v.extend(s.iter().map(|i| Cow::from(print1(i))));
@@ -104,6 +109,8 @@ pub mod printer {
                             )),
 
                         (inner.clone(), inner.clone()).prop_map(|(i, j)| Item::Slash(deseq(vec![i]), deseq(vec![j]))),
+
+                        (inner.clone(), inner.clone()).prop_map(|(i, j)| Item::At(deseq(vec![i]), deseq(vec![j]))),
 
                         inner.clone().prop_map(|i| Item::Br(vec![i])),
 
@@ -202,6 +209,7 @@ pub mod parser {
         Comma(Vec<Item<'s>>),
         Colon(Vec<Item<'s>>, Vec<Item<'s>>),
         Slash(Vec<Item<'s>>, Vec<Item<'s>>),
+        At(Vec<Item<'s>>, Vec<Item<'s>>),
         Sq(Vec<Item<'s>>),
         Br(Vec<Item<'s>>),
     }
@@ -243,7 +251,7 @@ pub mod parser {
             if matches!(i, Item::Text(..)  | Item::Sq(..) | Item::Br(..)) {
                 i = Item::Seq(vec![i]);
             }
-            if matches!(i, Item::Comma(..)) && matches!(self, Item::Slash(..) | Item::Colon(..)) {
+            if matches!(i, Item::Comma(..)) && matches!(self, Item::Slash(..) | Item::Colon(..) | Item::At(..)) {
                 self.left().insert(0, i);
                 return self;
             }
@@ -255,9 +263,9 @@ pub mod parser {
                 let mut end = i.right().pop().unwrap();
                 let ekind = ItemKind::from(&end);
                 match (ikind, ekind, jkind) {
-                    (Seq  , Text  | Br | Sq        , Slash | Colon | Seq) |
-                    (Seq  , Slash | Colon | Comma  , Colon              ) |
-                    (Colon, Text  | Br | Sq | Comma, Slash | Colon | Seq) => {
+                    (Seq  , Text  | Br | Sq            , Slash | Colon | At | Seq) |
+                    (Seq  , Slash | Colon | Comma , Colon                   ) |
+                    (Colon, Text  | Br | Sq | Comma, Slash | Colon | Seq    ) => {
                         // we eat end; i eats us.
                         self.left().insert(0, end);
                     },
@@ -289,6 +297,11 @@ pub mod parser {
                         end.right().push(self);
                         i.right().push(end);
                         return i
+                    },
+                    (Colon, _, At) => {
+                        i.right().push(end);
+                        self.left().insert(0, i);
+                        return self;
                     },
                     _ => {
                         i.right().push(end);
@@ -329,6 +342,7 @@ pub mod parser {
                 Item::Comma(ref mut r) => r,
                 Item::Colon(_, ref mut r) => r,
                 Item::Slash(_, ref mut r) => r,
+                Item::At(_, ref mut r) => r,
                 _ => unreachable!(),
             }
         }
@@ -340,6 +354,7 @@ pub mod parser {
                 Item::Comma(ref mut l) => l,
                 Item::Colon(ref mut l, _) => l,
                 Item::Slash(ref mut l, _) => l,
+                Item::At(ref mut l, _) => l,
                 _ => unreachable!(),
             }
         }
@@ -375,6 +390,7 @@ pub mod parser {
         %type #[token("/")] Slash;
         // %type #[token("|")] Pipe;
         // %type #[token("-")] Dash;
+        %type #[token("@")] At;
         %type #[token("!")] Bang;
         %type #[regex("[\r\n;]+")] Nl;
         %type #[regex(r#"[\p{XID_Start}$<>\-()_0-9][\p{XID_Continue}().\-_>&&[^:/]]*(\\/[\p{XID_Continue}().\-_>&&[^:/]]*)*"#)] Text &'s str;
@@ -391,6 +407,7 @@ pub mod parser {
         %left Nl;
         %right Slash;
         %right Colon;
+        %right At;
         %left Dash;
         %right Comma;
         %right Lsq Lbr;
@@ -416,6 +433,7 @@ pub mod parser {
         expr3 ::= Text(t) { Item::Text(Cow::Borrowed(t)) };
         expr3 ::= Slash { Item::Slash(vec![], vec![]) };
         expr3 ::= Colon { Item::Colon(vec![], vec![]) };
+        expr3 ::= At { Item::At(vec![], vec![])};
         expr3 ::= Comma { Item::Comma(vec![]) };
         expr3 ::= expr1(i) expr1(j) [Text] { merge_item(i, j) };
     }
@@ -436,6 +454,50 @@ pub mod parser {
     /// use logos::Logos;
     /// ```
     pub use fact::Token;
+
+    #[cfg(test)]
+    mod tests {
+        use pretty_assertions::{assert_eq};
+        use super::{Parser, Item, Token, Model};
+        use std::fmt::Debug;
+        use logos::Logos;
+        use std::borrow::Cow;
+
+        fn check(model: &str, goal: Model) {
+            let mut p = Parser::new();
+            let mut lex = Token::lexer(model);
+
+            while let Some(tk) = lex.next() {
+                p.parse(tk).unwrap();
+            }
+
+            let items = p.end_of_input().unwrap();
+
+            assert_eq!(goal, items);
+        }
+
+        const a: &'static str = "a";
+        const b: &'static str = "b";
+        const c: &'static str = "c";
+        const d: &'static str = "d";
+        fn t<'s>(x: &'static str) -> Item<'s> { Item::Text(Cow::from(x)) }
+        fn vi<'s>(x: &[Item<'static>]) -> Vec<Item<'s>> { x.iter().cloned().collect::<Vec<_>>() }
+        fn sq<'s>(x: &[Item<'static>]) -> Item<'s>{ Item::Sq(vi(x)) }
+        fn seq<'s>(x: &[Item<'static>]) -> Item<'s> { Item::Seq(vi(x)) }
+        fn col<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Colon(vi(x), vi(y)) }
+        fn at<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::At(vi(x), vi(y)) }
+
+        #[test]
+        pub fn test_parse() {
+            let tests: Vec<(&str, Model)> = vec![
+                ("a : b @ c", vi(&[at(&[col(&[t(a)], &[t(b)])], &[t(c)])])),
+            ];
+            for (prompt, goal) in tests {
+                eprintln!("PROMPT: {prompt}. GOAL: {goal:?}");
+                check(prompt, goal);
+            }
+        }
+    }
 }
 
 #[cfg(any(feature="osqp", feature="osqp-rust"))]
