@@ -293,15 +293,15 @@ pub mod parser {
                     (_, Slash, Colon) => {
                         self.left().insert(0, end);
                     },
-                    (_, Slash, _) => {
-                        end.right().push(self);
-                        i.right().push(end);
-                        return i
-                    },
                     (Colon, _, At) => {
                         i.right().push(end);
                         self.left().insert(0, i);
                         return self;
+                    },
+                    (_, Slash, _) => {
+                        end.right().push(self);
+                        i.right().push(end);
+                        return i
                     },
                     _ => {
                         i.right().push(end);
@@ -480,12 +480,14 @@ pub mod parser {
         const b: &'static str = "b";
         const c: &'static str = "c";
         const d: &'static str = "d";
+        const e: &'static str = "e";
         fn t<'s>(x: &'static str) -> Item<'s> { Item::Text(Cow::from(x)) }
         fn vi<'s>(x: &[Item<'static>]) -> Vec<Item<'s>> { x.iter().cloned().collect::<Vec<_>>() }
         fn sq<'s>(x: &[Item<'static>]) -> Item<'s>{ Item::Sq(vi(x)) }
         fn seq<'s>(x: &[Item<'static>]) -> Item<'s> { Item::Seq(vi(x)) }
         fn col<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Colon(vi(x), vi(y)) }
         fn at<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::At(vi(x), vi(y)) }
+        fn sl<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Slash(vi(x), vi(y)) }
 
         #[test]
         pub fn test_parse() {
@@ -493,6 +495,7 @@ pub mod parser {
                 ("a : b @ c", vi(&[at(&[col(&[t(a)], &[t(b)])], &[t(c)])])),
                 ("@: a", vi(&[at(&[], &[col(&[], &[t(a)])])])),
                 ("@a: b", vi(&[at(&[], &[col(&[t(a)], &[t(b)])])])),
+                ("a b: c / d @ e", vi(&[at(&[col(&[t(a), t(b)], &[sl(&[t(c)], &[t(d)])])], &[t(e)])])),
             ];
             for (prompt, goal) in tests {
                 eprintln!("PROMPT: {prompt}. GOAL: {goal:?}");
