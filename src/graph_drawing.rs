@@ -465,21 +465,39 @@ pub mod eval {
         Process {
             /// Maybe this process is named?
             name: Option<V>,
+
             /// Maybe this process has a label?
             label: Option<V>,
+
             /// Maybe this process has nested parts?
             body: Option<Body<V>>,
+
+            /// Maybe this process is styled?
+            style: Option<Vec<V>>,
         },
         Chain {
             /// Maybe this chain is named?
             name: Option<V>,
+
             /// How are the given processes related?
             rel: Rel,
+
             /// What processes are in the chain?
             path: Vec<Self>,
+
             /// What labels separate and connect the processes in the chain?
-            labels: Vec<Level<V>>
+            labels: Vec<Level<V>>,
+
+            /// What style applies to the chain?
+            style: Option<Vec<V>>,
         },
+        Style {
+            /// What is this style block named?
+            name: Option<V>,
+
+            /// What style information does this style block contain?
+            body: Option<Body<V>>,
+        }
     }
 
     impl<V> Default for Val<V> {
@@ -488,6 +506,7 @@ pub mod eval {
                 name: None,
                 label: None,
                 body: None,
+                style: None,
             }
         }
     }
@@ -497,6 +516,7 @@ pub mod eval {
             match self {
                 Val::Process { name, .. } => name.as_ref(),
                 Val::Chain { name, .. } => name.as_ref(),
+                Val::Style { name, .. } => name.as_ref(),
             }
         }
 
@@ -504,6 +524,7 @@ pub mod eval {
             match self {
                 Val::Process { name: n, .. } => { *n = Some(name); },
                 Val::Chain { name: n, .. } => { *n = Some(name); },
+                Val::Style { name: n, .. } => { *n = Some(name); },
             }
             self
         }
@@ -512,6 +533,7 @@ pub mod eval {
             match self {
                 Val::Process { label, .. } => label.as_ref(),
                 Val::Chain { .. } => None,
+                Val::Style{ .. } => None,
             }
         }
 
@@ -519,13 +541,15 @@ pub mod eval {
             match self {
                 Val::Process { label: l, .. } => { *l = label; },
                 Val::Chain { .. } => {},
+                Val::Style { .. } => {},
             }
             self
         }
 
         pub fn set_body(&mut self, body: Option<Body<V>>) -> &mut Self {
             match self {
-                Val::Process{ body: b, .. } => { *b = body; }
+                Val::Process{ body: b, .. } => { *b = body; },
+                Val::Style{ body: b, .. } => { *b = body; },
                 _ => {},
             }
             self
@@ -546,7 +570,7 @@ pub mod eval {
     impl<'s, 't> log::Log<Cow<'s, str>> for &'t Val<Cow<'s, str>> {
         fn log(&self, _cx: Cow<'s, str>, l: &mut log::Logger) -> Result<(), log::Error> {
             match self {
-                Val::Process { name, label, body } => {
+                Val::Process { name, label, body, style } => {
                     let pname = &as_string2(name, label, "");
                     l.with_group(
                         "Process",
@@ -574,9 +598,9 @@ pub mod eval {
                                 },
                                 _ => Ok(()),
                             }
-                        })
+                    })
                 },
-                Val::Chain { name, rel, path, labels } => {
+                Val::Chain { name, rel, path, labels, style } => {
                     let name = as_string1(name, "").clone();
                     l.with_group("Chain", name, Vec::<String>::new(), |l| {
                         l.log_string("rel", rel)?;
@@ -591,6 +615,37 @@ pub mod eval {
                         }
                         Ok(())
                     })
+                },
+                Val::Style { name, body } => {
+                    let sname = &as_string1(name, "");
+                    l.with_group(
+                        "Style",
+                        sname.clone(),
+                        vec![sname.to_string()],
+                        |l| {
+                            match body {
+                                Some(body) if body.len() > 0 => match body {
+                                    Body::Any(bs) => {
+                                        l.with_group("", "Body: Any", Vec::<String>::new(), |l| {
+                                            for b in bs.iter() {
+                                                b.log(sname.clone(), l)?
+                                            }
+                                            Ok(())
+                                        })
+                                    },
+                                    Body::All(bs) => {
+                                        l.with_group("", "Body: All", Vec::<String>::new(), |l| {
+                                            for b in bs.iter() {
+                                                b.log(sname.clone(), l)?
+                                            }
+                                            Ok(())
+                                        })
+                                    },
+                                }
+                                _ => Ok(())
+                            }
+                        }
+                    )
                 },
             }
         }
@@ -610,6 +665,7 @@ pub mod eval {
                 name: None,
                 label: Some(label),
                 body: None,
+                style: None,
             }
         }).collect::<Vec<_>>()
     }
@@ -698,6 +754,7 @@ pub mod eval {
                     rel: eval_rel(&ls[..]),
                     path: eval_path(&ls[..]),
                     labels: vec![],
+                    style: None,
                 });
             }
             return body;
@@ -727,6 +784,7 @@ pub mod eval {
                                     }
                                 }), " ").into()),
                                 body: Some(nest_val),
+                                style: None,
                             });
                             return body;
                         }
@@ -748,6 +806,7 @@ pub mod eval {
                             name: None,
                             label: None,
                             body: Some(nest_val),
+                            style: None,
                         });
                     }
                 },
@@ -756,6 +815,7 @@ pub mod eval {
                         name: None,
                         label: Some(s.clone()),
                         body: None,
+                        style: None,
                     })
                 },
                 _ => {},
@@ -795,6 +855,9 @@ pub mod eval {
                     current_scope.pop();
                 }
             },
+            Val::Style { name, body } => {
+                todo!()
+            }
         }
     }
 
@@ -857,6 +920,9 @@ pub mod eval {
                     current_path.pop();
                 }
             },
+            Val::Style { name, body } => {
+                todo!()
+            }
         }
         // eprintln!("RESOLVE resolution: {resolution:?}");
         if let Some(resolution) = resolution {
@@ -905,6 +971,9 @@ pub mod eval {
                         return
                     }
                 },
+                Val::Style { name, .. } => {
+                    todo!()
+                }
             };
             let index_entry = self.names.entry(rhs_name.clone());
             match index_entry {
@@ -985,6 +1054,7 @@ pub mod eval {
                                     name: None,
                                     label: Some(name.clone()),
                                     body: None,
+                                    style: None,
                                 })
                             }
                         }
@@ -996,6 +1066,7 @@ pub mod eval {
                                     rel: eval_rel(&ls[..]),
                                     path: eval_path(&ls[..]),
                                     labels: eval_labels(None, &r[..]),
+                                    style: None,
                                 });
                             }
                             _ => {
@@ -1004,6 +1075,7 @@ pub mod eval {
                                     rel: eval_rel(&l[..]),
                                     path: eval_path(&l[..]),
                                     labels: eval_labels(None, &r[..]),
+                                    style: None,
                                 });
                             }
                         }
@@ -1039,6 +1111,7 @@ pub mod eval {
                             name: None,
                             label: None,
                             body: Some(nest_val),
+                            style: None,
                         });
                     }
                 }
@@ -1047,6 +1120,7 @@ pub mod eval {
                         name: None,
                         label: Some(s.clone()),
                         body: None,
+                        style: None,
                     })
                 }
                 _ => {},
@@ -1062,6 +1136,7 @@ pub mod eval {
             name: Some("root".into()),
             label: None,
             body,
+            style: None,
         }
     }
 
@@ -1076,15 +1151,15 @@ pub mod eval {
         const c: &'static str = "c";
         const d: &'static str = "d";
         const dash: &'static str = "-";
-        fn r<'s>() -> Val<Cow<'s, str>> { Val::Process{name: Some("root".into()), label: None, body: None} }
-        fn p<'s>() -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: None} }
+        fn r<'s>() -> Val<Cow<'s, str>> { Val::Process{name: Some("root".into()), label: None, body: None, style: None,} }
+        fn p<'s>() -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: None, style: None, } }
         fn l<'s>(x: &'static str) -> Val<Cow<'s, str>> { p().set_label(Some(x.into())).clone() }
-        fn mp<'s>(p: &Val<Cow<'s, str>>) -> Val<Cow<'s, str>> { Val::Process{name: Some("root".into()), label: None, body: Some(Body::All(vec![p.clone()]))}}
+        fn mp<'s>(p: &Val<Cow<'s, str>>) -> Val<Cow<'s, str>> { Val::Process{name: Some("root".into()), label: None, body: Some(Body::All(vec![p.clone()])), style: None,}}
         fn t<'s>(x: &'static str) -> Item<'s> { Item::Text(Cow::from(x)) }
         fn vi<'s>(x: &[Item<'static>]) -> Vec<Item<'s>> { x.iter().cloned().collect::<Vec<_>>() }
         fn sq<'s>(x: &[Item<'static>]) -> Item<'s>{ Item::Sq(vi(x)) }
         fn seq<'s>(x: &[Item<'static>]) -> Item<'s> { Item::Seq(vi(x)) }
-        fn hc<'s>(x: &[Val<Cow<'s, str>>]) -> Val<Cow<'s, str>> { Val::Chain{ name: None, rel: Rel::Horizontal, path: x.iter().cloned().collect::<Vec<_>>(), labels: vec![], }}
+        fn hc<'s>(x: &[Val<Cow<'s, str>>]) -> Val<Cow<'s, str>> { Val::Chain{ name: None, rel: Rel::Horizontal, path: x.iter().cloned().collect::<Vec<_>>(), labels: vec![], style: None, }}
         fn col<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Colon(vi(x), vi(y)) }
 
         #[test]
@@ -1719,9 +1794,11 @@ pub mod layout {
                                 calculate_hcg(vcg, part)?;
                             }
                         },
+                        Val::Style{..} => {},
                     }
                 }
             }
+            Val::Style{..} => {},
         }
         Ok(())
     }
