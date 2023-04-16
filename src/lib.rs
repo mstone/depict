@@ -455,6 +455,165 @@ pub mod parser {
     /// ```
     pub use fact::Token;
 
+    pub mod visit {
+
+        use crate::parser::{Item, Model};
+        use std::borrow::Cow;
+
+        pub trait Visit<'ast> {
+            fn visit_model(&mut self, model: &'ast Model) {
+                visit_model(self, model);
+            }
+
+            fn visit_items(&mut self, items: &'ast Vec<Item<'ast>>) {
+                visit_items(self, items);
+            }
+
+            fn visit_item(&mut self, item: &'ast Item<'ast>) {
+                visit_item(self, item);
+            }
+
+            fn visit_text(&mut self, text: &'ast Cow<'ast, str>) {
+                visit_text(self, text);
+            }
+
+            fn visit_seq(&mut self, seq: &'ast Vec<Item<'ast>>) {
+                visit_seq(self, seq);
+            }
+
+            fn visit_comma(&mut self, comma: &'ast Vec<Item<'ast>>) {
+                visit_comma(self, comma);
+            }
+
+            fn visit_colon(&mut self, lhs: &'ast Vec<Item<'ast>>, rhs: &'ast Vec<Item<'ast>>) {
+                visit_colon(self, lhs, rhs);
+            }
+
+            fn visit_colon_lhs(&mut self, lhs: &'ast Vec<Item<'ast>>) {
+                visit_colon_lhs(self, lhs);
+            }
+
+            fn visit_colon_rhs(&mut self, rhs: &'ast Vec<Item<'ast>>) {
+                visit_colon_rhs(self, rhs);
+            }
+
+            fn visit_slash(&mut self, lhs: &'ast Vec<Item<'ast>>, rhs: &'ast Vec<Item<'ast>>) {
+                visit_slash(self, lhs, rhs);
+            }
+
+            fn visit_slash_lhs(&mut self, lhs: &'ast Vec<Item<'ast>>) {
+                visit_slash_lhs(self, lhs);
+            }
+
+            fn visit_slash_rhs(&mut self, rhs: &'ast Vec<Item<'ast>>) {
+                visit_slash_rhs(self, rhs);
+            }
+
+            fn visit_at(&mut self, lhs: &'ast Vec<Item<'ast>>, rhs: &'ast Vec<Item<'ast>>) {
+                visit_at(self, lhs, rhs);
+            }
+
+            fn visit_at_lhs(&mut self, lhs: &'ast Vec<Item<'ast>>) {
+                visit_at_lhs(self, lhs);
+            }
+
+            fn visit_at_rhs(&mut self, rhs: &'ast Vec<Item<'ast>>) {
+                visit_at_rhs(self, rhs);
+            }
+
+            fn visit_sq(&mut self, sq: &'ast Vec<Item<'ast>>) {
+                visit_sq(self, sq);
+            }
+
+            fn visit_br(&mut self, br: &'ast Vec<Item<'ast>>) {
+                visit_br(self, br);
+            }
+        }
+
+        pub fn visit_model<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, model: &'ast Model) {
+            v.visit_items(model);
+        }
+
+        pub fn visit_items<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, items: &'ast Vec<Item<'ast>>) {
+            for item in items {
+                v.visit_item(item);
+            }
+        }
+
+        pub fn visit_item<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, item: &'ast Item<'ast>) {
+            match item {
+                Item::Text(s) => visit_text(v, s),
+                Item::Seq(s) => visit_seq(v, s),
+                Item::Comma(s) => visit_comma(v, s),
+                Item::Colon(lhs, rhs) => visit_colon(v, lhs, rhs),
+                Item::Slash(lhs, rhs) => visit_slash(v, lhs, rhs),
+                Item::At(lhs, rhs) => visit_at(v, lhs, rhs),
+                Item::Sq(s) => visit_sq(v, s),
+                Item::Br(s) => visit_br(v, s),
+            }
+        }
+
+        pub fn visit_text<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, text: &'ast Cow<'ast, str>) {
+
+        }
+
+        pub fn visit_seq<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, seq: &'ast Vec<Item<'ast>>) {
+            v.visit_items(seq);
+        }
+
+        pub fn visit_comma<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, comma: &'ast Vec<Item<'ast>>) {
+            v.visit_items(comma);
+        }
+
+        pub fn visit_colon<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, lhs: &'ast Vec<Item<'ast>>, rhs: &'ast Vec<Item<'ast>>) {
+            v.visit_colon_lhs(lhs);
+            v.visit_colon_rhs(rhs);
+        }
+
+        pub fn visit_colon_lhs<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, lhs: &'ast Vec<Item<'ast>>) {
+            v.visit_items(lhs);
+        }
+
+        pub fn visit_colon_rhs<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, rhs: &'ast Vec<Item<'ast>>) {
+            v.visit_items(rhs);
+        }
+
+        pub fn visit_slash<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, lhs: &'ast Vec<Item<'ast>>, rhs: &'ast Vec<Item<'ast>>) {
+            v.visit_slash_lhs(lhs);
+            v.visit_slash_rhs(rhs);
+        }
+
+        pub fn visit_slash_lhs<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, lhs: &'ast Vec<Item<'ast>>) {
+            v.visit_items(lhs);
+        }
+
+        pub fn visit_slash_rhs<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, rhs: &'ast Vec<Item<'ast>>) {
+            v.visit_items(rhs);
+        }
+
+        pub fn visit_at<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, lhs: &'ast Vec<Item<'ast>>, rhs: &'ast Vec<Item<'ast>>) {
+            v.visit_at_lhs(lhs);
+            v.visit_at_rhs(rhs);
+        }
+
+        pub fn visit_at_lhs<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, lhs: &'ast Vec<Item<'ast>>) {
+            v.visit_items(lhs);
+        }
+
+        pub fn visit_at_rhs<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, rhs: &'ast Vec<Item<'ast>>) {
+            v.visit_items(rhs);
+        }
+
+        pub fn visit_sq<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, sq: &'ast Vec<Item<'ast>>) {
+            v.visit_items(sq);
+        }
+
+        pub fn visit_br<'ast, V: Visit<'ast> + ?Sized>(v: &mut V, br: &'ast Vec<Item<'ast>>) {
+            v.visit_items(br);
+        }
+
+    }
+
     #[cfg(test)]
     mod tests {
         use pretty_assertions::{assert_eq};
