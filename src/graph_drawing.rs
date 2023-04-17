@@ -885,6 +885,182 @@ pub mod eval {
         p
     }
 
+
+    pub mod visit {
+        use super::{Val, Body, Level, Rel};
+
+        pub trait Visit<V> {
+            fn visit_val(&mut self, val: &Val<V>) {
+                visit_val(self, val);
+            }
+
+            fn visit_vals(&mut self, vals: &Vec<Val<V>>) {
+                visit_vals(self, vals);
+            }
+
+            fn visit_process(&mut self, name: &Option<V>, label: &Option<V>, body: &Option<Body<V>>, style: &Option<Vec<V>>) {
+                visit_process(self, name, label, body, style);
+            }
+
+            fn visit_chain(&mut self, name: &Option<V>, rel: &Rel, path: &Vec<Val<V>>, labels: &Vec<Level<V>>, style: &Option<Vec<V>>) {
+                visit_chain(self, name, rel, path, labels, style);
+            }
+
+            fn visit_style(&mut self, name: &Option<V>, body: &Option<Body<V>>) {
+                visit_style(self, name, body);
+            }
+
+            fn visit_style_inline(&mut self, style: &Option<Vec<V>>) {
+                visit_style_inline(self, style);
+            }
+
+            fn visit_name(&mut self, name: &Option<V>) {
+                visit_name(self, name);
+            }
+
+            fn visit_label(&mut self, label: &V) {
+                visit_label(self, label);
+            }
+
+            fn visit_body(&mut self, body: &Option<Body<V>>) {
+                visit_body(self, body);
+            }
+
+            fn visit_body_any(&mut self, body: &Vec<Val<V>>) {
+                visit_body_any(self, body);
+            }
+
+            fn visit_body_all(&mut self, body: &Vec<Val<V>>) {
+                visit_body_all(self, body);
+            }
+
+            fn visit_rel(&mut self, rel: &Rel) {
+                visit_rel(self, rel);
+            }
+
+            fn visit_path(&mut self, path: &Vec<Val<V>>) {
+                visit_path(self, path);
+            }
+
+            fn visit_labels(&mut self, labels: &Vec<Level<V>>) {
+                visit_labels(self, labels);
+            }
+
+            fn visit_level(&mut self, level: &Level<V>) {
+                visit_level(self, level);
+            }
+
+            fn visit_level_forward(&mut self, forward: &Option<Vec<V>>) {
+                visit_level_forward(self, forward);
+            }
+
+            fn visit_level_reverse(&mut self, reverse: &Option<Vec<V>>) {
+                visit_level_reverse(self, reverse);
+            }
+        }
+
+        pub fn visit_val<V, T: Visit<V> + ?Sized>(v: &mut T, val: &Val<V>) {
+            match val {
+                Val::Process { name, label, body, style } => v.visit_process(name, label, body, style),
+                Val::Chain { name, rel, path, labels, style } => v.visit_chain(name, rel, path, labels, style),
+                Val::Style { name, body } => v.visit_style(name, body),
+            };
+        }
+
+        pub fn visit_vals<V, T: Visit<V> + ?Sized>(v: &mut T, vals: &Vec<Val<V>>) {
+            for val in vals {
+                v.visit_val(val);
+            }
+        }
+
+        pub fn visit_process<V, T: Visit<V> + ?Sized>(v: &mut T, name: &Option<V>, label: &Option<V>, body: &Option<Body<V>>, style: &Option<Vec<V>>) {
+            v.visit_name(name);
+            if let Some(label) = label {
+                v.visit_label(label);
+            }
+            v.visit_body(body);
+            v.visit_style_inline(style);
+        }
+
+        pub fn visit_chain<V, T: Visit<V> + ?Sized>(v: &mut T, name: &Option<V>, rel: &Rel, path: &Vec<Val<V>>, labels: &Vec<Level<V>>, style: &Option<Vec<V>>) {
+            v.visit_name(name);
+            v.visit_rel(rel);
+            v.visit_path(path);
+            v.visit_labels(labels);
+            v.visit_style_inline(style);
+        }
+
+        pub fn visit_style<V, T: Visit<V> + ?Sized>(v: &mut T, name: &Option<V>, body: &Option<Body<V>>) {
+            v.visit_name(name);
+            v.visit_body(body);
+        }
+
+        pub fn visit_style_inline<V, T: Visit<V> + ?Sized>(v: &mut T, style: &Option<Vec<V>>) {
+            for s in style.iter().flatten() {
+                v.visit_label(s);
+            }
+        }
+
+        pub fn visit_name<V, T: Visit<V> + ?Sized>(v: &mut T, name: &Option<V>) {
+            if let Some(name) = name {
+                v.visit_label(name);
+            }
+        }
+
+        pub fn visit_label<V, T: Visit<V> + ?Sized>(v: &mut T, label: &V) {
+
+        }
+
+        pub fn visit_body<V, T: Visit<V> + ?Sized>(v: &mut T, body: &Option<Body<V>>) {
+            if let Some(body) = body {
+                match body {
+                    Body::Any(bs) => v.visit_body_any(bs),
+                    Body::All(bs) => v.visit_body_all(bs),
+                }
+            }
+        }
+
+        pub fn visit_body_any<V, T: Visit<V> + ?Sized>(v: &mut T, body: &Vec<Val<V>>) {
+            v.visit_vals(body);
+        }
+
+        pub fn visit_body_all<V, T: Visit<V> + ?Sized>(v: &mut T, body: &Vec<Val<V>>) {
+            v.visit_vals(body);
+        }
+
+        pub fn visit_rel<V, T: Visit<V> + ?Sized>(v: &mut T, rel: &Rel) {
+
+        }
+
+        pub fn visit_path<V, T: Visit<V> + ?Sized>(v: &mut T, path: &Vec<Val<V>>) {
+            v.visit_vals(path);
+        }
+
+        pub fn visit_labels<V, T: Visit<V> + ?Sized>(v: &mut T, labels: &Vec<Level<V>>) {
+            for level in labels {
+                v.visit_level(level);
+            }
+        }
+
+        pub fn visit_level<V, T: Visit<V> + ?Sized>(v: &mut T, level: &Level<V>) {
+            v.visit_level_forward(&level.forward);
+            v.visit_level_reverse(&level.reverse);
+        }
+
+        pub fn visit_level_forward<V, T: Visit<V> + ?Sized>(v: &mut T, forward: &Option<Vec<V>>) {
+            for label in forward.iter().flatten() {
+                v.visit_label(label);
+            }
+        }
+
+        pub fn visit_level_reverse<V, T: Visit<V> + ?Sized>(v: &mut T, reverse: &Option<Vec<V>>) {
+            for label in reverse.iter().flatten() {
+                v.visit_label(label);
+            }
+        }
+    }
+
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -5298,7 +5474,7 @@ pub mod frontend {
 
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub enum Node {
-            Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, loc: VarRank, estimated_size: NodeSize },
+            Div { key: String, label: String, hpos: f64, vpos: f64, width: f64, height: f64, z_index: usize, classes: String, loc: VarRank, estimated_size: NodeSize },
             Svg { key: String, path: String, z_index: usize, dir: String, rel: String, label: Option<Label>, hops: Vec<VarRank>, classes: String, estimated_size: HopSize, control_points: Vec<(f64, f64)> },
         }
 
@@ -5514,7 +5690,8 @@ pub mod frontend {
                     //     label = label.to_title_case();
                     // }
                     let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
-                    texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: n, estimated_size});
+                    let classes = "".into();
+                    texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, classes, loc: n, estimated_size});
                 }
             }
 
@@ -5540,7 +5717,8 @@ pub mod frontend {
                 if label.starts_with("_") { label = String::new(); };
 
                 let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
-                texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, loc: cn, estimated_size});
+                let classes = "".into();
+                texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, classes, loc: cn, estimated_size});
             }
 
             let mut arrows = vec![];
