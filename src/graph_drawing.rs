@@ -1072,10 +1072,10 @@ pub mod eval {
         const c: &'static str = "c";
         const d: &'static str = "d";
         const dash: &'static str = "-";
-        fn r<'s>() -> Val<Cow<'s, str>> { Val::Process{name: Some("root".into()), label: None, body: None, style: None,} }
+        fn r<'s>() -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: Some(Body::All(vec![])), style: None,} }
         fn p<'s>() -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: None, style: None, } }
         fn l<'s>(x: &'static str) -> Val<Cow<'s, str>> { p().set_label(Some(x.into())).clone() }
-        fn mp<'s>(p: &Val<Cow<'s, str>>) -> Val<Cow<'s, str>> { Val::Process{name: Some("root".into()), label: None, body: Some(Body::All(vec![p.clone()])), style: None,}}
+        fn mp<'s>(p: &Val<Cow<'s, str>>) -> Val<Cow<'s, str>> { Val::Process{name: None, label: None, body: Some(Body::All(vec![p.clone()])), style: None,}}
         fn t<'s>(x: &'static str) -> Item<'s> { Item::Text(Cow::from(x)) }
         fn vi<'s>(x: &[Item<'static>]) -> Vec<Item<'s>> { x.iter().cloned().collect::<Vec<_>>() }
         fn sq<'s>(x: &[Item<'static>]) -> Item<'s>{ Item::Sq(vi(x)) }
