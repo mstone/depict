@@ -4966,7 +4966,9 @@ pub mod frontend {
 
     use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, rank, calculate_locs_and_hops, ObjNode}, eval::{eval}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
-    use super::{layout::{Vcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution, ObjContainer}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val, index::OriginalHorizontalRank};
+    use self::styling::Styling;
+
+    use super::{layout::{Vcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution, ObjContainer}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::{Val}, index::OriginalHorizontalRank};
 
     use log::{names};
 
@@ -5102,10 +5104,37 @@ pub mod frontend {
         Ok(())
     }
 
+    pub mod styling {
+        use std::collections::HashMap;
+
+        use crate::graph_drawing::{eval::{visit::{*}, Val}, error::Error, layout::Graphic};
+
+        #[derive(Clone, Debug, Default)]
+        pub struct Styling<V: Graphic> {
+            pub style_by_name: HashMap<V, Vec<V>>,
+        }
+
+        impl<V: Graphic> Visit<V> for Styling<V> {
+
+        }
+
+        impl<V: Graphic> Styling<V> {
+            pub fn new(val: &Val<V>) -> Result<Self, Error> {
+                let mut s = Self {
+                    style_by_name: Default::default(),
+                };
+                s.visit_val(val);
+                Ok(s)
+            }
+        }
+    }
+
+
     #[derive(Default)]
     pub struct Depiction<'s> {
         pub items: Vec<Item<'s>>,
         pub val: Val<Cow<'s, str>>,
+        pub styling: Styling<Cow<'s, str>>,
         pub vcg: Vcg<Cow<'s, str>, Cow<'s, str>>,
         pub paths_by_rank: RankedPaths<Cow<'s, str>>,
         pub layout_problem: LayoutProblem<Cow<'s, str>>,
@@ -5146,6 +5175,8 @@ pub mod frontend {
             let mut val = eval(&items);
 
             eprintln!("EVAL {val:#?}");
+
+            let styling = Styling::new(&val)?;
 
             let vcg = calculate_vcg(&val, logs)?;
 
@@ -5238,6 +5269,7 @@ pub mod frontend {
             Ok(Depiction{
                 items,
                 val,
+                styling,
                 vcg,
                 paths_by_rank,
                 layout_problem,
