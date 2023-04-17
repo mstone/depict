@@ -5105,17 +5105,32 @@ pub mod frontend {
     }
 
     pub mod styling {
-        use std::collections::HashMap;
+        use std::collections::{HashMap, BTreeSet};
 
-        use crate::graph_drawing::{eval::{visit::{*}, Val}, error::Error, layout::Graphic};
+        use crate::graph_drawing::{eval::{visit::{*}, Val, Body}, error::Error, layout::Graphic};
 
         #[derive(Clone, Debug, Default)]
         pub struct Styling<V: Graphic> {
-            pub style_by_name: HashMap<V, Vec<V>>,
+            pub style_by_name: HashMap<V, BTreeSet<V>>,
         }
 
         impl<V: Graphic> Visit<V> for Styling<V> {
-
+            fn visit_process(&mut self, name: &Option<V>, label: &Option<V>, body: &Option<Body<V>>, style: &Option<Vec<V>>) {
+                eprintln!("STYLE PROCESS: {name:?} {label:?} {body:?} {style:?}");
+                visit_process(self, name, label, body, style);
+                // TODO: correctly construct nested keys.
+                let key = if let Some(name) = name {
+                    name
+                } else if let Some(label) = label {
+                    label
+                } else {
+                    return;
+                };
+                let Some(style) = style else { return };
+                for style in style {
+                    self.style_by_name.entry(key.clone()).or_default().insert(style.clone());
+                }
+            }
         }
 
         impl<V: Graphic> Styling<V> {
@@ -5124,6 +5139,7 @@ pub mod frontend {
                     style_by_name: Default::default(),
                 };
                 s.visit_val(val);
+                eprintln!("STYLING: {s:#?}");
                 Ok(s)
             }
         }
@@ -5627,6 +5643,7 @@ pub mod frontend {
             let depiction = render_cell.borrow_dependent();
 
             let val = &depiction.val;
+            let styling = &depiction.styling;
             let geometry_solution = &depiction.geometry_solution;
             let rs = &depiction.geometry_solution.rs;
             let ls = &depiction.geometry_solution.ls;
@@ -5722,7 +5739,7 @@ pub mod frontend {
                     //     label = label.to_title_case();
                     // }
                     let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
-                    let classes = "".into();
+                    let classes = itertools::join(styling.style_by_name.get(vl).iter().copied().flatten(), " ");
                     texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, classes, loc: n, estimated_size});
                 }
             }
@@ -5749,7 +5766,7 @@ pub mod frontend {
                 if label.starts_with("_") { label = String::new(); };
 
                 let estimated_size = size_by_loc[&(*ovr, *ohr)].clone();
-                let classes = "".into();
+                let classes = itertools::join(styling.style_by_name.get(container).iter().copied().flatten(), " ");;
                 texts.push(Node::Div{key, label, hpos, vpos, width, height, z_index, classes, loc: cn, estimated_size});
             }
 
@@ -6138,11 +6155,11 @@ pub mod frontend {
             nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
             for node in nodes {
                 match node {
-                    Node::Div{key, label, hpos, vpos, width, height, z_index, ..} if label.len() > 0 => {
+                    Node::Div{key, label, hpos, vpos, width, height, z_index, classes, ..} if label.len() > 0 => {
                         children.push(cx.render(rsx! {
                             div {
                                 key: "{key}",
-                                class: "box highlight_{label}",
+                                class: "box highlight_{label} {classes}",
                                 style: "position: absolute; top: {vpos}px; left: {hpos}px; width: {width}px; height: {height}px; z-index: {z_index}; padding-top: 3px; padding-bottom: 3px; box-sizing: border-box; border: 1px solid black; text-align: center;", // bg-opacity-50
                                 span {
                                     "{label}"
@@ -6479,6 +6496,7 @@ pub mod frontend {
                 .svg text { fill: #aaa; }
                 .svg ellipse { stroke: #aaa; }
             }
+            .red { background-color: red; }
         "#;
     }
 
