@@ -329,7 +329,7 @@ pub mod index {
 pub mod eval {
     //! The main "value" type of depiction parts.
 
-    use std::{collections::{HashMap}, borrow::{Cow}, vec::IntoIter, ops::Deref, slice::Iter};
+    use std::{collections::{HashMap}, borrow::{Cow, Borrow}, vec::IntoIter, ops::Deref, slice::Iter};
 
     use crate::{parser::Item};
 
@@ -554,6 +554,33 @@ pub mod eval {
             }
             self
         }
+
+        pub fn path_mut(&mut self) -> Option<&mut Vec<Self>> {
+            match self {
+                Val::Chain{ path, .. } => {
+                    Some(path)
+                },
+                _ => None,
+            }
+        }
+
+        pub fn labels_mut(&mut self) -> Option<&mut Vec<Level<V>>> {
+            match self {
+                Val::Chain{ labels, .. } => {
+                    Some(labels)
+                },
+                _ => None,
+            }
+        }
+
+        pub fn style_mut(&mut self) -> Option<&mut Vec<V>> {
+            match self {
+                Val::Process{ style, ..} | Val::Chain { style, .. } => {
+                    Some(style.get_or_insert_with(Default::default))
+                },
+                _ => None,
+            }
+        }
     }
 
     fn as_string1<'s>(o1: &Option<Cow<'s, str>>, o2: &'static str) -> Cow<'s, str> {
@@ -651,493 +678,211 @@ pub mod eval {
         }
     }
 
-    fn eval_path<'s, 't>(path: &'t [Item<'s>]) -> Vec<Val<Cow<'s, str>>> {
-        // eprintln!("EVAL_PATH: {path:?}");
-        path.iter().filter_map(|i| {
-            match i {
-                Item::Text(s) if s == "LEFT" || s == "<" || s == ">" || s == "-" => None,
-                Item::Text(s) => Some(s.clone()),
-                Item::Seq(s) => Some(itertools::join(s, " ").into()),
-                _ => None
-            }
-        }).map(|label| {
-            Val::Process{
-                name: None,
-                label: Some(label),
-                body: None,
-                style: None,
-            }
-        }).collect::<Vec<_>>()
-    }
+    use crate::parser::visit::{*};
 
-    fn eval_slash<'s, 't>(forward: Option<&'t [Item<'s>]>, reverse: Option<&'t [Item<'s>]>) -> Option<Vec<Cow<'s, str>>> {
-        let mut res: Option<Vec<Cow<'s, str>>> = None;
-        if let Some(side) = forward.or(reverse) {
-            for item in side {
-                match item {
-                    Item::Text(s) => {
-                        res.get_or_insert_with(Default::default).push(s.clone())
-                    },
-                    Item::Seq(s) | Item::Comma(s) => {
-                        res.get_or_insert_with(Default::default).append(&mut s
-                            .iter()
-                            .map(|c| Cow::from(crate::printer::print1(c)))
-                            .collect::<Vec<_>>()
-                        );
-                    },
-                    _ => {},
-                }
-            }
-        }
-        res
-    }
-
-    fn eval_labels<'s, 't>(labels: Option<Vec<Level<Cow<'s, str>>>>, r: &'t [Item<'s>]) -> Vec<Level<Cow<'s, str>>> {
-        let mut labels = labels.unwrap_or_default();
-        match r.first() {
-            Some(_f @ Item::Colon(rl, rr)) => {
-                labels = eval_labels(Some(labels), rl);
-                labels = eval_labels(Some(labels), rr);
-            }
-            Some(Item::Slash(rl, rr)) => {
-                labels.push(Level{
-                    forward: eval_slash(Some(&rl[..]), None),
-                    reverse: eval_slash(None, Some(&rr[..])),
-                });
-            },
-            Some(Item::Text(_)) | Some(Item::Seq(_)) | Some(Item::Comma(_)) => {
-                labels.push(Level{
-                    forward: eval_slash(Some(r), None),
-                    reverse: None,
-                });
-            },
-            _ => {},
-        }
-        labels
-    }
-
-    fn eval_rel<'s, 't>(path: &'t [Item<'s>]) -> Rel {
-        if path.len() > 0 {
-            if let Item::Text(t) = &path[0] {
-                let t = t.as_ref();
-                match t {
-                    "LEFT" | "<" | ">" | "-" => { return Rel::Horizontal; }
-                    _ => {}
-                }
-            }
-            if let Item::Text(t) = &path[path.len()-1] {
-                let t = t.as_ref();
-                match t {
-                    "LEFT" | "<" | ">" | "-" => { return Rel::Horizontal; }
-                    _ => {}
-                }
-            }
-        }
-        Rel::Vertical
-    }
-
-    fn eval_seq<'s, 't>(mut ls: &'t [Item<'s>]) -> Option<Body<Cow<'s, str>>> {
-        // eprintln!("EVAL_SEQ: {ls:?}");
-        let mut body: Option<Body<_>> = None;
-
-        if ls.len() == 1 {
-            if let Item::Comma(ls) = &ls[0] {
-                return eval_seq(ls);
-            }
-        }
-        if ls.iter().all(|l| matches!(l, Item::Text(_) | Item::Seq(_))) {
-            if ls.len() == 1 {
-                body.get_or_insert_with(Default::default).append(&mut eval_path(&ls[..]));
-            } else {
-                body.get_or_insert_with(Default::default).push(Val::Chain{
-                    name: None,
-                    rel: eval_rel(&ls[..]),
-                    path: eval_path(&ls[..]),
-                    labels: vec![],
-                    style: None,
-                });
-            }
-            return body;
-        }
-        if ls.len() > 0 {
-            if matches!(&ls[ls.len()-1], Item::Comma(v) if v.is_empty()) {
-                ls = &ls[0..ls.len()-1];
-            }
-        }
-        if ls.len() > 1 {
-            if ls[0..ls.len()-1].iter().all(|l| matches!(l, Item::Text(_) | Item::Seq(_))) {
-                match &ls[ls.len()-1] {
-                    Item::Sq(nest) | Item::Br(nest) => {
-                        if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
-                            let nest_val = if matches!(ls[ls.len()-1], Item::Sq(_)) {
-                                Body::All(nest_val.into())
-                            } else {
-                                Body::Any(nest_val.into())
-                            };
-                            body.get_or_insert_with(Default::default).push(Val::Process{
-                                name: None,
-                                label: Some(itertools::join(ls[0..ls.len()-1].iter().filter_map(|i| {
-                                    match i {
-                                        Item::Text(s) => Some(s.clone()),
-                                        Item::Seq(s) => Some(itertools::join(s, " ").into()),
-                                        _ => None
-                                    }
-                                }), " ").into()),
-                                body: Some(nest_val),
-                                style: None,
-                            });
-                            return body;
-                        }
-                    },
-                    _ => {},
-                }
-            }
-        }
-        for expr in ls {
-            match expr {
-                Item::Sq(nest) | Item::Br(nest) => {
-                    if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
-                        let nest_val = if matches!(expr, Item::Sq(_)) {
-                            Body::All(nest_val.into())
-                        } else {
-                            Body::Any(nest_val.into())
-                        };
-                        body.get_or_insert_with(Default::default).push(Val::Process{
-                            name: None,
-                            label: None,
-                            body: Some(nest_val),
-                            style: None,
-                        });
-                    }
-                },
-                Item::Text(s) => {
-                    body.get_or_insert_with(Default::default).push(Val::Process{
-                        name: None,
-                        label: Some(s.clone()),
-                        body: None,
-                        style: None,
-                    })
-                },
-                _ => {},
-            }
-        }
-
-        body
-    }
-
-    pub fn index<'s, 't, 'u>(
-        val: &'t Val<Cow<'s, str>>,
-        current_scope: &'u mut Vec<Cow<'s, str>>,
-        scopes: &'u mut HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
-    ) {
-        match val {
-            Val::Process { name, body, .. } => {
-                if let Some(name) = name {
-                    current_scope.push(name.clone());
-                    scopes.insert(current_scope.clone(), &val);
-                }
-                if let Some(body) = body {
-                    for val in body.iter() {
-                        index(val, current_scope, scopes);
-                    }
-                }
-                if let Some(_name) = name {
-                    current_scope.pop();
-                }
-            },
-            Val::Chain { name, path, .. } => {
-                if let Some(name) = name {
-                    current_scope.push(name.clone());
-                    scopes.insert(current_scope.clone(), &val);
-                    for val in path.iter() {
-                        index(val, current_scope, scopes);
-                    }
-                    current_scope.pop();
-                }
-            },
-            Val::Style { name, body } => {
-                todo!()
-            }
-        }
-    }
-
-    pub fn resolve<'s, 't, 'u>(
-        val: &'t mut Val<Cow<'s, str>>,
-        current_path: &'u mut Vec<Cow<'s, str>>,
-        scopes: &'u HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
-    ) {
-        // eprintln!("RESOLVE {current_path:?}");
-        let mut resolution = None;
-        match val {
-            Val::Process { name, body, label, .. } => {
-                if let Some(name) = name {
-                    current_path.push(name.clone());
-                }
-                if name.is_none() && body.is_none() {
-                    if let Some(label) = label {
-                        // eprintln!("RESOLVE {current_path:?} found reference: {label}");
-                        let label = label.to_string();
-                        let mut base_path = current_path.clone();
-                        let path = label.split(".").map(|s| s.to_string()).map(Cow::Owned).collect::<Vec<Cow<'s, str>>>();
-                        while !base_path.is_empty() {
-                            let mut test_path = base_path.clone();
-                            test_path.append(&mut path.clone());
-                            // eprintln!("RESOLVE test path: {test_path:?}");
-                            if let Some(val) = scopes.get(&test_path).copied() {
-                                resolution = Some(val.clone());
-                                break
-                            }
-                            base_path.pop();
-                        }
-                        if resolution.is_none() {
-                            if let Some(val) = scopes.get(&path).copied() {
-                                resolution = Some(val.clone())
-                            }
-                        }
-                    }
-                }
-                if let Some(body) = body {
-                    let bs = match body {
-                        Body::Any(bs) => bs,
-                        Body::All(bs) => bs,
-                    };
-                    for val in bs.iter_mut() {
-                        resolve(val, current_path, scopes);
-                    }
-                }
-                if let Some(_name) = name {
-                    current_path.pop();
-                }
-            },
-            Val::Chain { name, path, .. } => {
-                if let Some(name) = name {
-                    current_path.push(name.clone());
-                }
-                for val in path.iter_mut() {
-                    resolve(val, current_path, scopes);
-                }
-                if let Some(_name) = name {
-                    current_path.pop();
-                }
-            },
-            Val::Style { name, body } => {
-                todo!()
-            }
-        }
-        // eprintln!("RESOLVE resolution: {resolution:?}");
-        if let Some(resolution) = resolution {
-            *val = resolution;
-        }
-    }
-
-    fn merge<'s>(existing_process: &mut Val<Cow<'s, str>>, rhs: &mut Val<Cow<'s, str>>) {
-        // eprintln!("EVAL_MERGE: {existing_process:#?} {rhs:#?}");
-        if let (Val::Process { body, .. }, Val::Process { body: rbody, .. }) = (existing_process, rhs) {
-            let rbody = <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(rbody.get_or_insert_with(Default::default).as_mut());
-            <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(body.get_or_insert_with(Default::default).as_mut()).append(rbody);
-        }
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum State {
+        Init,
+        InitWithStyle,
+        Process,
+        Chain,
+        ChainLabel,
+        Slash,
+        SlashReverse,
+        Definition,
+        BlockStyle,
+        InlineStyle,
+        Nest,
     }
 
     #[derive(Clone, Debug)]
-    struct Model<'s> {
-        processes: Vec<Val<Cow<'s, str>>>,
-        names: HashMap<Cow<'s, str>, usize>,
+    struct Eval<'s> {
+        s: State,
+        v: Val<Cow<'s, str>>,
+        m: Vec<Val<Cow<'s, str>>>,
     }
 
-    impl<'s> Model<'s> {
-        fn append(&mut self, rhs: &mut Vec<Val<Cow<'s, str>>>) {
-            for val in rhs.drain(..) {
-                self.push(val)
+    impl<'s> Eval<'s> {
+        fn set_state(&mut self, state: State) {
+            eprintln!("STATE: {:?} -> {:?}", self.s, state);
+            self.s = state;
+        }
+    }
+
+    impl<'s, 't> Visit<'s, 't> for Eval<'s> {
+        fn visit_items(&mut self, items: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT ITEMS: {items:?}");
+            visit_items(self, items);
+        }
+
+        fn visit_item(&mut self, item: &'t Item<'s>) {
+            eprintln!("VISIT ITEM: {item:?}");
+            visit_item(self, item);
+            eprintln!("...");
+            if self.s == State::Init {
+                eprintln!("POP");
+                let mut vd = Default::default();
+                std::mem::swap(&mut self.v, &mut vd);
+                self.m.push(vd);
             }
         }
 
-        fn push(&mut self, mut rhs: Val<Cow<'s, str>>) {
-            use std::collections::hash_map::Entry::*;
-            // eprintln!("PUSH {rhs:#?}");
-            let rhs_name = match &rhs {
-                Val::Process { name, label, .. } => {
-                    // the only unnamed process is the administrative / top-level wrapper process
-                    if name.is_none() && label.is_none() {
-                        self.processes.push(rhs);
-                        return
-                    }
-                    name.clone().or_else(|| label.as_ref().cloned()).unwrap().clone()
-                },
-                Val::Chain { name, .. } => {
-                    if let Some(name) = name {
-                        name.clone()
-                    } else {
-                        self.processes.push(rhs);
-                        return
-                    }
-                },
-                Val::Style { name, .. } => {
-                    todo!()
+        fn visit_at(&mut self, lhs: &'t Vec<Item<'s>>, rhs: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT AT: {lhs:?} {rhs:?}");
+            if self.s == State::Init {
+                match lhs.len() {
+                    0 => {
+                        self.set_state(State::BlockStyle);
+                        visit_at_rhs(self, rhs);
+                    },
+                    n => {
+                        self.set_state(State::InitWithStyle);
+                        visit_at_lhs(self, lhs);
+                        self.set_state(State::InlineStyle);
+                        visit_at_rhs(self, rhs);
+                    },
                 }
-            };
-            let index_entry = self.names.entry(rhs_name.clone());
-            match index_entry {
-                Occupied(oe) => {
-                    let existing_process = self.processes.get_mut(*oe.get()).unwrap();
-                    merge(existing_process, &mut rhs);
-                },
-                Vacant(ve) => {
-                    // if we have no names entry for rhs_name, that could be because
-                    // rhs is really new, or it could be because rhs is renaming an existing
-                    // process.
-                    if let Val::Process { name: Some(_), label: Some(rhs_label), .. } = &rhs {
-                        let index_entry2 = self.names.entry(rhs_label.clone());
-                        match index_entry2 {
-                            Occupied(oe2) => {
-                                let existing_process_index = *oe2.get();
-                                let mut existing_process = self.processes.get_mut(existing_process_index).unwrap();
-                                std::mem::swap(existing_process, &mut rhs);
-                                merge(&mut existing_process, &mut rhs);
-                                self.names.insert(rhs_name, existing_process_index);
-                            },
-                            Vacant(_) => {
-                                self.names.insert(rhs_name, self.processes.len());
-                                self.processes.push(rhs);
-                            },
-                        }
+                self.set_state(State::Init);
+            }
+        }
+
+        fn visit_colon(&mut self, lhs: &'t Vec<Item<'s>>, rhs: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT COLON: {lhs:?} {rhs:?}");
+            if matches!(self.s, State::Init | State::InitWithStyle) {
+                let prev_state = self.s;
+                self.set_state(match lhs.len() {
+                    0 => { panic!("zero-lhs colon") },
+                    1 => { State::Definition },
+                    n => { State::Chain },
+                });
+                visit_colon(self, lhs, rhs);
+                self.set_state(prev_state);
+            } else if self.s == State::ChainLabel {
+                visit_colon(self, lhs, rhs);
+            }
+        }
+
+        fn visit_colon_lhs(&mut self, lhs: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT COLON LHS: {lhs:?}");
+            if self.s == State::Chain {
+                if let Some(Item::Text(last)) = lhs.last() {
+                    if last == "-" {
+                        self.v = Val::Chain { name: None, rel: Rel::Horizontal, path: vec![], labels: vec![], style: None };
                     } else {
-                        ve.insert(self.processes.len());
-                        self.processes.push(rhs);
+                        self.v = Val::Chain { name: None, rel: Rel::Vertical, path: vec![], labels: vec![], style: None };
                     }
+                }
+            }
+            visit_colon_lhs(self, lhs);
+            if self.s == State::Definition {
+                self.set_state(State::Init);
+            }
+        }
+
+        fn visit_colon_rhs(&mut self, rhs: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT COLON RHS: {rhs:?}");
+            if self.s == State::Chain {
+                self.set_state(State::ChainLabel);
+                if rhs.len() > 0 {
+                    self.v.labels_mut().map(|labels| labels.push(Level{forward: None, reverse: None}));
+                    visit_colon_rhs(self, rhs);
+                }
+            } else if self.s == State::ChainLabel {
+                if rhs.len() > 0 {
+                    self.v.labels_mut().map(|labels| labels.push(Level{forward: None, reverse: None}));
+                    visit_colon_rhs(self, rhs);
+                }
+            } else {
+                visit_colon_rhs(self, rhs);
+            }
+        }
+
+        fn visit_seq(&mut self, seq: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT SEQ: {seq:?}");
+            let prev_state = self.s;
+            if matches!(self.s, State::Init | State::InitWithStyle) {
+                if seq.len() == 2 && matches!(seq[1], Item::Sq(_)) {
+                    self.set_state(State::Nest);
+                } else {
+                    self.set_state(State::Chain);
+                    if let Some(Item::Text(last)) = seq.last() {
+                        if last == "-" {
+                            self.v = Val::Chain { name: None, rel: Rel::Horizontal, path: vec![], labels: vec![], style: None };
+                        } else {
+                            self.v = Val::Chain { name: None, rel: Rel::Vertical, path: vec![], labels: vec![], style: None };
+                        }
+                    }
+                }
+            }
+            visit_seq(self, seq);
+            self.set_state(prev_state);
+        }
+
+        fn visit_slash(&mut self, lhs: &'t Vec<Item<'s>>, rhs: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT SLASH: {lhs:?} {rhs:?}");
+            if self.s == State::ChainLabel {
+                self.set_state(State::Slash);
+                self.visit_slash_lhs(lhs);
+                self.set_state(State::SlashReverse);
+                self.visit_slash_rhs(rhs);
+                self.set_state(State::ChainLabel);
+            }
+        }
+
+        fn visit_sq(&mut self, sq: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT SQ: {sq:?}");
+            let mut ev = Eval { s: State::Init, v: Default::default(), m: Default::default(), };
+            ev.visit_model(sq);
+            eprintln!("-> {:?}", ev.v);
+            self.v.set_body(Some(Body::All(ev.m)));
+        }
+
+        fn visit_text(&mut self, text: &'t Cow<'s, str>) {
+            eprintln!("VISIT TEXT: {text}");
+            match self.s {
+                State::Definition => {
+                    self.v.set_name(text.clone());
+                },
+                State::InlineStyle => {
+                    self.v.style_mut().map(|style| style.push(text.clone()));
+                }
+                State::Chain => {
+                    if text != "-" {
+                        self.v.path_mut().map(|path| path.push(Val::Process { name: None, label: Some(text.clone()), body: None, style: None }));
+                    }
+                }
+                State::ChainLabel => {
+                    self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.forward.get_or_insert_with(Default::default).push(text.clone())));
+                }
+                State::Slash => {
+                    self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.forward.get_or_insert_with(Default::default).push(text.clone())));
+                },
+                State::SlashReverse => {
+                    self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.reverse.get_or_insert_with(Default::default).push(text.clone())));
+                }
+                State::Nest => {
+                    self.v.set_label(Some(text.clone()));
+                }
+                _ => {
+                    self.v.set_label(Some(text.clone()));
                 },
             }
-            // TODO: cases:
-            //    rhs has name and we have seen it
-            //    rhs has label and we have seen it
-            //    rhs has name and we have not seen it
-            //    rhs has label and we have not seen it
-        }
-
-        fn to_vec(self) -> Vec<Val<Cow<'s, str>>> {
-            self.processes
-        }
-
-        fn is_empty(&self) -> bool {
-            self.processes.is_empty()
-        }
-
-        fn new() -> Self {
-            Self {
-                processes: vec![],
-                names: HashMap::new(),
-            }
+            visit_text(self, text);
         }
     }
 
     /// What depiction do the given depict-expressions denote?
-    pub fn eval<'s, 't>(exprs: &'t [Item<'s>]) -> Val<Cow<'s, str>> {
-        let mut body: Option<Body<_>> = None;
-        let mut model = Model::new();
-
-        for expr in exprs {
-            match expr {
-                Item::Colon(l, r) => {
-                    if l.len() == 1 && matches!(l[0], Item::Text(..)){
-                        if let Item::Text(name) = &l[0] {
-                            let rbody = eval_seq(&r[..]);
-                            // eprintln!("BOOM {l:?} {r:?} {rbody:?}");
-                            if let Some(rbody) = rbody {
-                                let mut rbody: Vec<Val<_>> = rbody.into();
-                                rbody.get_mut(0).map(|fst| {
-                                    fst.set_name(name.clone());
-                                    let label = fst.label().unwrap_or(name);
-                                    fst.set_label(Some(label.clone()));
-                                });
-                                model.append(&mut rbody);
-                            } else {
-                                model.push(Val::Process{
-                                    name: None,
-                                    label: Some(name.clone()),
-                                    body: None,
-                                    style: None,
-                                })
-                            }
-                        }
-                    } else {
-                        match &l[..] {
-                            [Item::Comma(ls)] => {
-                                model.push(Val::Chain{
-                                    name: None,
-                                    rel: eval_rel(&ls[..]),
-                                    path: eval_path(&ls[..]),
-                                    labels: eval_labels(None, &r[..]),
-                                    style: None,
-                                });
-                            }
-                            _ => {
-                                model.push(Val::Chain{
-                                    name: None,
-                                    rel: eval_rel(&l[..]),
-                                    path: eval_path(&l[..]),
-                                    labels: eval_labels(None, &r[..]),
-                                    style: None,
-                                });
-                            }
-                        }
-                    }
-                },
-                Item::Comma(ls) => {
-                    if let Some(seq_body) = eval_seq(ls) {
-                        model.append(&mut seq_body.into());
-                    }
-                }
-                Item::Seq(ls)  => {
-                    match &ls[..] {
-                        [Item::Comma(ls)] => {
-                            if let Some(seq_body) = eval_seq(ls) {
-                                model.append(&mut seq_body.into());
-                            }
-                        },
-                        _ => {
-                            if let Some(seq_body) = eval_seq(ls) {
-                                model.append(&mut seq_body.into());
-                            }
-                        }
-                    }
-                }
-                Item::Sq(nest) | Item::Br(nest) => {
-                    if let Val::Process{body: Some(nest_val), ..} = eval(&nest[..]) {
-                        let nest_val = if matches!(expr, Item::Sq(_)) {
-                            Body::All(nest_val.into())
-                        } else {
-                            Body::Any(nest_val.into())
-                        };
-                        model.push(Val::Process{
-                            name: None,
-                            label: None,
-                            body: Some(nest_val),
-                            style: None,
-                        });
-                    }
-                }
-                Item::Text(s) => {
-                    model.push(Val::Process{
-                        name: None,
-                        label: Some(s.clone()),
-                        body: None,
-                        style: None,
-                    })
-                }
-                _ => {},
-            }
-        }
-
-        // eprintln!("EVAL MODEL: {model:#?}");
-
-        if !model.is_empty() {
-            body = Some(Body::All(model.to_vec()));
-        }
-        Val::Process{
-            name: Some("root".into()),
-            label: None,
-            body,
-            style: None,
-        }
+    pub fn eval<'s, 't>(model: &'t Vec<Item<'s>>) -> Val<Cow<'s, str>> {
+        let mut ev = Eval{
+            s: State::Init,
+            v: Default::default(),
+            m: Default::default(),
+        };
+        ev.visit_model(model);
+        // visit_model(&mut ev, model);
+        let mut p: Val<Cow<'s, str>> = Default::default();
+        p.set_body(Some(Body::All(ev.m)));
+        p
     }
 
     #[cfg(test)]
@@ -1165,21 +910,21 @@ pub mod eval {
         #[test]
         fn test_eval_empty() {
             //
-            assert_eq!(eval(&[]), r());
+            assert_eq!(eval(&vi(&[])), r());
         }
 
 
         #[test]
         fn test_eval_single() {
             // a
-            assert_eq!(eval(&[t(a)]), mp(p().set_label(Some(a.into()))));
+            assert_eq!(eval(&vi(&[t(a)])), mp(p().set_label(Some(a.into()))));
         }
 
         #[test]
         fn test_eval_vert_chain() {
             // [ a b ]
             assert_eq!(
-                eval(&[sq(&[t(a), t(b)])]),
+                eval(&vi(&[sq(&[t(a), t(b)])])),
                 mp(p().set_body(Some(Body::All(vec![ l(a), l(b) ]))))
             );
         }
@@ -1188,7 +933,7 @@ pub mod eval {
         fn test_eval_horz_chain() {
             // a b -
             assert_eq!(
-                eval(&[seq(&[t(a), t(b), t(dash)])]),
+                eval(&vi(&[seq(&[t(a), t(b), t(dash)])])),
                 mp(
                     &hc(&[l(a), l(b)])
                 )
@@ -1199,7 +944,7 @@ pub mod eval {
         fn test_eval_single_nest_horz_chain() {
             // a [ - b c ]
             assert_eq!(
-                eval(&[seq(&[t(a), sq(&[seq(&[t(dash), t(b), t(c)])])])]),
+                eval(&vi(&[seq(&[t(a), sq(&[seq(&[t(dash), t(b), t(c)])])])])),
                 mp(l(a).set_body(Some(Body::All(vec![
                     hc(&[l(b), l(c)])
                 ]))))
@@ -1210,7 +955,7 @@ pub mod eval {
         fn test_eval_nest_merge() {
             // a: b; a [ c ]
             assert_eq!(
-                eval(&[col(&[t(a)], &[t(b)]), seq(&[t(a), sq(&[t(c)])])]),
+                eval(&vi(&[col(&[t(a)], &[t(b)]), seq(&[t(a), sq(&[t(c)])])])),
                 mp(l(b)
                     .set_name(a.into())
                     .set_body(Some(Body::All(vec![l(c)]))))
@@ -5043,7 +4788,7 @@ pub mod frontend {
     use ordered_float::OrderedFloat;
     use self_cell::self_cell;
 
-    use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, rank, calculate_locs_and_hops, ObjNode}, eval::{eval, index, resolve}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
+    use crate::{graph_drawing::{layout::{minimize_edge_crossing, calculate_vcg, rank, calculate_locs_and_hops, ObjNode}, eval::{eval}, geometry::{calculate_sols, position_sols, HopSize}}, parser::{Item, Parser, Token}};
 
     use super::{layout::{Vcg, LayoutProblem, Graphic, Len, Obj, RankedPaths, LayoutSolution, ObjContainer}, geometry::{GeometryProblem, GeometrySolution, NodeSize, OptimizationProblem, AnySol, solve_optimization_problems}, error::{Error, Kind, OrErrExt}, eval::Val, index::OriginalHorizontalRank};
 
@@ -5220,19 +4965,11 @@ pub mod frontend {
                     Kind::PomeloError{span: lex.span(), text: lex.slice().into()}
                 })?;
 
-            // eprintln!("PARSE {items:#?}");
+            eprintln!("PARSE {items:#?}");
 
-            let mut val = eval(&items[..]);
+            let mut val = eval(&items);
 
-            // eprintln!("EVAL {val:#?}");
-
-            let mut scopes = HashMap::new();
-            let val2 = val.clone();
-            index(&val2, &mut vec![], &mut scopes);
-            resolve(&mut val, &mut vec![], &scopes);
-
-            // eprintln!("SCOPES: {scopes:#?}");
-            // eprintln!("RESOLVE: {val:#?}");
+            eprintln!("EVAL {val:#?}");
 
             let vcg = calculate_vcg(&val, logs)?;
 

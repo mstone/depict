@@ -126,7 +126,7 @@ pub fn render_logs<P>(cx: Scope<P>, drawing: Drawing) -> Option<VNode> {
 
 pub fn parse_highlights<'s>(data: &'s str) -> Result<Val<Cow<'s, str>>, Error> {
     use depict::parser::{Parser, Token};
-    use depict::graph_drawing::eval::{eval, index, resolve};
+    use depict::graph_drawing::eval::{eval};
     use logos::Logos;
     use std::collections::HashMap;
 
@@ -150,14 +150,9 @@ pub fn parse_highlights<'s>(data: &'s str) -> Result<Val<Cow<'s, str>>, Error> {
 
     // eprintln!("HIGHLIGHT PARSE {items:#?}");
 
-    let mut val = eval(&items[..]);
+    let mut val = eval(&items);
 
     // eprintln!("HIGHLIGHT EVAL {val:#?}");
-
-    let mut scopes = HashMap::new();
-    let val2 = val.clone();
-    index(&val2, &mut vec![], &mut scopes);
-    resolve(&mut val, &mut vec![], &scopes);
 
     // eprintln!("HIGHLIGHT SCOPES: {scopes:#?}");
     // eprintln!("HIGHLIGHT RESOLVE: {val:#?}");
