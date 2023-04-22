@@ -6446,7 +6446,7 @@ pub mod frontend {
                         children.push(cx.render(rsx!{
                             div {
                                 key: "{key}",
-                                class: "{classes}",
+                                class: "arrow {classes}",
                                 style: "position: absolute; z-index: {z_index};",
                                 svg {
                                     fill: "none",
@@ -6742,6 +6742,7 @@ pub mod frontend {
         }
 
         pub const DEFAULT_CSS: &'static str = r#"
+            .arrow svg { stroke: black; }
             path { stroke-dasharray: none; }
             .main_editor { box-sizing: border-box; position: fixed; top: 0; width: 100%; z-index: 20; padding: 1rem;}
             .main_editor > div { max-width: 36rem; margin-left: auto; margin-right: auto; flex-direction: column; }
@@ -6780,13 +6781,21 @@ pub mod frontend {
                 .svg text { fill: #aaa; }
                 .svg ellipse { stroke: #aaa; }
             }
-            .red { background-color: red; }
+            .red {
+                color: white;
+                background-color: red;
+            }
             g.box.red rect {
                 fill: red;
             }
+            g.box.red text {
+                fill: white;
+            }
             @media (prefers-color-scheme: dark) {
-                .red { color: white; }
-                g.box.red text { fill: white; }
+                .red { color: black; }
+                g.box.red text {
+                    fill: black;
+                }
             }
         "#;
     }
