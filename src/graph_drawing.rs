@@ -6765,11 +6765,13 @@ pub mod frontend {
                 fill: black;
                 stroke: none;
             }
+
             @media only screen and (max-width: 575.98px) {
                 .main_editor > div { max-width: calc(100% - 2em); }
             }
             @media only screen and (min-width: 1200px) {
             }
+
             @media (prefers-color-scheme: dark) {
                 html { color: #aaa; background-color: rgb(32, 32, 32); }
                 a { color: #809fff; }
@@ -6781,6 +6783,7 @@ pub mod frontend {
                 .svg text { fill: #aaa; }
                 .svg ellipse { stroke: #aaa; }
             }
+
             .red {
                 color: white;
                 background-color: red;
@@ -6797,6 +6800,8 @@ pub mod frontend {
                     fill: black;
                 }
             }
+
+            .hidden { display: none; }
         "#;
     }
 
