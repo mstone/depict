@@ -330,6 +330,9 @@ pub mod parser {
                 i
             } else if ikind == Seq && i.right().is_empty() {
                 self
+            } else if ikind == Colon && jkind == At {
+                self.left().insert(0, i);
+                self
             } else {
                 i.right().push(self);
                 i
@@ -658,6 +661,7 @@ pub mod parser {
                 ("@a: b", vi(&[at(&[], &[col(&[t(a)], &[t(b)])])])),
                 ("a b: c / d @ e", vi(&[at(&[col(&[t(a), t(b)], &[sl(&[t(c)], &[t(d)])])], &[t(e)])])),
                 ("@ { a }", vi(&[at(&[], &[br(&[t(a)])])])),
+                ("a b: @ c", vi(&[at(&[col(&[t(a), t(b)], &[])], &[t(c)])]))
             ];
             for (prompt, goal) in tests {
                 eprintln!("PROMPT: {prompt}. GOAL: {goal:?}");

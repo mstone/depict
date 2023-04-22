@@ -343,6 +343,13 @@ pub mod eval {
         Horizontal,
     }
 
+    /// What direction does this label between processes apply to?
+    #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+    pub enum Dir {
+        Forward,
+        Reverse,
+    }
+
     #[non_exhaustive]
     #[derive(Clone, Debug)]
     pub enum Position {
@@ -548,6 +555,10 @@ pub mod eval {
             self
         }
 
+        pub fn key(&self) -> Option<&V> {
+            self.name().or_else(|| self.label())
+        }
+
         pub fn set_body(&mut self, body: Option<Body<V>>) -> &mut Self {
             match self {
                 Val::Process{ body: b, .. } => { *b = body; },
@@ -689,6 +700,7 @@ pub mod eval {
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum Thing {
+        Style,
         StyleBlock,
         StyleInline,
         Definition,
@@ -738,8 +750,14 @@ pub mod eval {
                     visit_at_rhs(self, rhs);
                     self.pop();
                 },
-                n => {
+                1 => {
                     visit_at_lhs(self, lhs);
+                    self.push(Thing::StyleInline);
+                    visit_at_rhs(self, rhs);
+                    self.pop();
+                },
+                n => {
+                    self.visit_seq(lhs);
                     self.push(Thing::StyleInline);
                     visit_at_rhs(self, rhs);
                     self.pop();
@@ -855,7 +873,7 @@ pub mod eval {
                     self.value.set_name(text.clone());
                 },
                 Some(Thing::StyleInline) => {
-                    self.model.last_mut().map(|prev| prev.style_mut().map(|style| style.push(text.clone())));
+                    self.model.last_mut().or_else(|| Some(&mut self.value)).map(|prev| prev.style_mut().map(|style| style.push(text.clone())));
                 }
                 Some(Thing::ChainPath) => {
                     if text != "-" {
@@ -1036,7 +1054,7 @@ pub mod eval {
     struct Model<'s> {
         processes: Vec<Val<Cow<'s, str>>>,
         names: HashMap<Cow<'s, str>, usize>,
-        last_name: Option<Cow<'s, str>>,
+        last_slot: Option<usize>,
     }
 
     impl<'s> Model<'s> {
@@ -1048,12 +1066,13 @@ pub mod eval {
 
         fn push(&mut self, mut rhs: Val<Cow<'s, str>>) {
             use std::collections::hash_map::Entry::*;
-            // eprintln!("PUSH {rhs:#?}");
+            eprintln!("PUSH {rhs:#?}");
             let rhs_name = match &rhs {
                 Val::Process { name, label, .. } => {
                     // the only unnamed process is the administrative / top-level wrapper process
                     if name.is_none() && label.is_none() {
                         self.processes.push(rhs);
+                        self.last_slot = Some(self.processes.len()-1);
                         return
                     }
                     name.clone().or_else(|| label.as_ref().cloned()).unwrap().clone()
@@ -1063,6 +1082,7 @@ pub mod eval {
                         name.clone()
                     } else {
                         self.processes.push(rhs);
+                        self.last_slot = Some(self.processes.len()-1);
                         return
                     }
                 },
@@ -1071,6 +1091,7 @@ pub mod eval {
                         name.clone()
                     } else {
                         self.processes.push(rhs);
+                        self.last_slot = Some(self.processes.len()-1);
                         return
                     }
                 }
@@ -1080,6 +1101,7 @@ pub mod eval {
                 Occupied(oe) => {
                     let existing_process = self.processes.get_mut(*oe.get()).unwrap();
                     merge(existing_process, &mut rhs);
+                    self.last_slot = Some(*oe.get());
                 },
                 Vacant(ve) => {
                     // if we have no names entry for rhs_name, that could be because
@@ -1094,19 +1116,21 @@ pub mod eval {
                                 std::mem::swap(existing_process, &mut rhs);
                                 merge(&mut existing_process, &mut rhs);
                                 self.names.insert(rhs_name.clone(), existing_process_index);
+                                self.last_slot = Some(existing_process_index);
                             },
                             Vacant(_) => {
                                 self.names.insert(rhs_name.clone(), self.processes.len());
                                 self.processes.push(rhs);
+                                self.last_slot = Some(self.processes.len()-1);
                             },
                         }
                     } else {
                         ve.insert(self.processes.len());
                         self.processes.push(rhs);
+                        self.last_slot = Some(self.processes.len()-1);
                     }
                 },
             }
-            self.last_name = Some(rhs_name.clone());
             // TODO: cases:
             //    rhs has name and we have seen it
             //    rhs has label and we have seen it
@@ -1115,7 +1139,8 @@ pub mod eval {
         }
 
         fn last_mut(&mut self) -> Option<&mut Val<Cow<'s, str>>> {
-            self.last_name.as_ref().and_then(|last_name| self.names.get(last_name)).and_then(|last_idx| self.processes.get_mut(*last_idx))
+            eprintln!("LAST SLOT: {:?}", self.last_slot);
+            self.last_slot.and_then(|last_slot| self.processes.get_mut(last_slot))
         }
 
         fn to_vec(self) -> Vec<Val<Cow<'s, str>>> {
@@ -1130,7 +1155,7 @@ pub mod eval {
             Self {
                 processes: vec![],
                 names: HashMap::new(),
-                last_name: None,
+                last_slot: None,
             }
         }
     }
@@ -2143,6 +2168,7 @@ pub mod layout {
             // eprintln!("WALK_BODY CHAIN parent: {parent:?}, chain: {chain:#?}");
             match val {
                 Val::Process{label: Some(node), body: None, ..} => {
+                    if node == ">" || node == "*" { continue; }
                     or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
                     vcg.vert_node_labels.insert(node.clone(), node.clone().into());
                     if let Some(parent) = parent {
@@ -2171,6 +2197,7 @@ pub mod layout {
                     queue.push((path, rel, labels, parent));
                     for val in path {
                         if let Val::Process{label: Some(node), ..} = val {
+                            if node == ">" || node == "*" { continue; }
                             if let Some(parent) = parent {
                                 add_contains_edge(vcg, parent, node);
                             }
@@ -2253,6 +2280,9 @@ pub mod layout {
                 continue
             }
             if path.is_empty() {
+                continue;
+            }
+            if labels_by_level.iter().any(|lvl| lvl.forward.iter().flatten().chain(lvl.reverse.iter().flatten()).any(|label| label == ">" || label == "*")) {
                 continue;
             }
             for n in 0..path.len()-1 {
@@ -5376,11 +5406,14 @@ pub mod frontend {
     pub mod styling {
         use std::collections::{HashMap, BTreeSet};
 
-        use crate::graph_drawing::{eval::{visit::{*}, Val, Body}, error::Error, layout::Graphic};
+        use crate::graph_drawing::{eval::{visit::{*}, Val, Body, Dir, Rel, Level}, error::Error, layout::Graphic};
 
         #[derive(Clone, Debug, Default)]
         pub struct Styling<V: Graphic> {
             pub style_by_name: HashMap<V, BTreeSet<V>>,
+            pub style_by_arrow: HashMap<(V, V, Dir), BTreeSet<V>>,
+            pub style_by_label: HashMap<(V, V, Dir, V), BTreeSet<V>>,
+            pub style_by_label_star: HashMap<(V, V, Dir), BTreeSet<V>>,
         }
 
         impl<V: Graphic> Visit<V> for Styling<V> {
@@ -5400,12 +5433,89 @@ pub mod frontend {
                     self.style_by_name.entry(key.clone()).or_default().insert(style.clone());
                 }
             }
+
+            fn visit_chain(&mut self, name: &Option<V>, rel: &Rel, path: &Vec<Val<V>>, labels: &Vec<Level<V>>, style: &Option<Vec<V>>) {
+                eprintln!("STYLE CHAIN: {name:?} {rel:?} {path:?} {labels:?} {style:?}");
+                visit_chain(self, name, rel, path, labels, style);
+                let Some(style) = style else { return };
+
+                for (n, pair) in path.windows(2).enumerate() {
+                    let Some(p0) = pair[0].key().cloned() else {continue};
+                    let Some(p1) = pair[1].key().cloned() else {continue};
+                    let Some(level) = labels.get(n) else {
+                        for s in style {
+                            self.style_by_name.entry(p0.clone()).or_default().insert(s.clone());
+                            self.style_by_name.entry(p1.clone()).or_default().insert(s.clone());
+                            self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Forward)).or_default().insert(s.clone());
+                            self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Reverse)).or_default().insert(s.clone());
+                            self.style_by_label_star.entry((p0.clone(), p1.clone(), Dir::Forward)).or_default().insert(s.clone());
+                            self.style_by_label_star.entry((p0.clone(), p1.clone(), Dir::Reverse)).or_default().insert(s.clone());
+                        }
+                        return;
+                    };
+                    if let Some(forward) = &level.forward {
+                        for label in forward {
+                            if *label == "*" {
+                                if level.reverse.is_none() {
+                                    for s in style {
+                                        self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Forward)).or_default().insert(s.clone());
+                                        self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Reverse)).or_default().insert(s.clone());
+                                        self.style_by_label_star.entry((p0.clone(), p1.clone(), Dir::Forward)).or_default().insert(s.clone());
+                                        self.style_by_label_star.entry((p0.clone(), p1.clone(), Dir::Reverse)).or_default().insert(s.clone());
+                                    }
+                                } else {
+                                    for s in style {
+                                        self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Forward)).or_default().insert(s.clone());
+                                        self.style_by_label_star.entry((p0.clone(), p1.clone(), Dir::Forward)).or_default().insert(s.clone());
+                                    }
+                                }
+                            } else if *label == ">" {
+                                if level.reverse.is_none() && forward.len() == 1 {
+                                    for s in style {
+                                        self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Forward)).or_default().insert(s.clone());
+                                        self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Reverse)).or_default().insert(s.clone());
+                                    }
+                                } else {
+                                    for s in style {
+                                        self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Forward)).or_default().insert(s.clone());
+                                    }
+                                }
+                            } else {
+                                for s in style {
+                                    self.style_by_label.entry((p0.clone(), p1.clone(), Dir::Forward, label.clone())).or_default().insert(s.clone());
+                                }
+                            }
+                        }
+                    }
+                    if let Some(reverse) = &level.reverse {
+                        for label in reverse {
+                            if *label == "*" {
+                                for s in style {
+                                    self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Reverse)).or_default().insert(s.clone());
+                                    self.style_by_label_star.entry((p0.clone(), p1.clone(), Dir::Reverse)).or_default().insert(s.clone());
+                                }
+                            } else if *label == ">" {
+                                for s in style {
+                                    self.style_by_arrow.entry((p0.clone(), p1.clone(), Dir::Reverse)).or_default().insert(s.clone());
+                                }
+                            } else {
+                                for s in style {
+                                    self.style_by_label.entry((p0.clone(), p1.clone(), Dir::Reverse, label.clone())).or_default().insert(s.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         impl<V: Graphic> Styling<V> {
             pub fn new(val: &Val<V>) -> Result<Self, Error> {
                 let mut s = Self {
                     style_by_name: Default::default(),
+                    style_by_arrow: Default::default(),
+                    style_by_label: Default::default(),
+                    style_by_label_star: Default::default(),
                 };
                 s.visit_val(val);
                 eprintln!("STYLING: {s:#?}");
