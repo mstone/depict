@@ -6744,7 +6744,16 @@ pub mod frontend {
         pub const DEFAULT_CSS: &'static str = r#"
             .arrow svg { stroke: black; }
             path { stroke-dasharray: none; }
-            .main_editor { box-sizing: border-box; position: fixed; top: 0; width: 100%; z-index: 20; padding: 1rem;}
+            .main_editor {
+                box-sizing: border-box;
+                position: fixed;
+                top: 0;
+                width: 100%;
+                z-index: 20;
+                padding: 1rem;
+                -webkit-backdrop-filter: blur(10px);
+                backdrop-filter: blur(10px);
+            }
             .main_editor > div { max-width: 36rem; margin-left: auto; margin-right: auto; flex-direction: column; }
             .content { width: 100%; margin-top: 180px; }
             .keyword { font-weight: bold; color: rgb(207, 34, 46); }
@@ -6776,6 +6785,7 @@ pub mod frontend {
                 html { color: #aaa; background-color: rgb(32, 32, 32); }
                 a { color: #809fff; }
                 textarea { background-color: #aaa; color: #000; }
+                .main_editor { background-color: rgba(32, 32, 32, 0.7); }
                 .box { color: black; background-color: #aaa; }
                 .arrow { color: #eee; }
                 .arrow svg { stroke: #eee; }
