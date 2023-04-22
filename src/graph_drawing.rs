@@ -1012,12 +1012,22 @@ pub mod eval {
     fn merge<'s>(existing_process: &mut Val<Cow<'s, str>>, rhs: &mut Val<Cow<'s, str>>) {
         // eprintln!("EVAL_MERGE: {existing_process:#?} {rhs:#?}");
         match (existing_process, rhs) {
-            (Val::Process { body, .. }, Val::Process { body: rbody, .. })
-            | (Val::Style { body, ..}, Val::Style { body: rbody, ..})
-            => {
-                let rbody = <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(rbody.get_or_insert_with(Default::default).as_mut());
-                <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(body.get_or_insert_with(Default::default).as_mut()).append(rbody);
-            }
+            (Val::Process { body, style, .. }, Val::Process { body: rbody, style: rstyle, .. }) => {
+                if !(body.is_none() && rbody.is_none()) {
+                    let rbody = <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(rbody.get_or_insert_with(Default::default).as_mut());
+                    <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(body.get_or_insert_with(Default::default).as_mut()).append(rbody);
+                }
+                if !(style.is_none() && rstyle.is_none()) {
+                    let rstyle = <Vec<Cow<'s, str>> as AsMut<Vec<_>>>::as_mut(rstyle.get_or_insert_with(Default::default).as_mut());
+                    <Vec<Cow<'s, str>> as AsMut<Vec<_>>>::as_mut(style.get_or_insert_with(Default::default).as_mut()).append(rstyle);
+                }
+            },
+            (Val::Style { body, ..}, Val::Style { body: rbody, ..}) => {
+                if !(body.is_none() && rbody.is_none()) {
+                    let rbody = <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(rbody.get_or_insert_with(Default::default).as_mut());
+                    <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(body.get_or_insert_with(Default::default).as_mut()).append(rbody);
+                }
+            },
             _ => {},
         }
     }
@@ -1026,6 +1036,7 @@ pub mod eval {
     struct Model<'s> {
         processes: Vec<Val<Cow<'s, str>>>,
         names: HashMap<Cow<'s, str>, usize>,
+        last_name: Option<Cow<'s, str>>,
     }
 
     impl<'s> Model<'s> {
@@ -1082,10 +1093,10 @@ pub mod eval {
                                 let mut existing_process = self.processes.get_mut(existing_process_index).unwrap();
                                 std::mem::swap(existing_process, &mut rhs);
                                 merge(&mut existing_process, &mut rhs);
-                                self.names.insert(rhs_name, existing_process_index);
+                                self.names.insert(rhs_name.clone(), existing_process_index);
                             },
                             Vacant(_) => {
-                                self.names.insert(rhs_name, self.processes.len());
+                                self.names.insert(rhs_name.clone(), self.processes.len());
                                 self.processes.push(rhs);
                             },
                         }
@@ -1095,6 +1106,7 @@ pub mod eval {
                     }
                 },
             }
+            self.last_name = Some(rhs_name.clone());
             // TODO: cases:
             //    rhs has name and we have seen it
             //    rhs has label and we have seen it
@@ -1103,7 +1115,7 @@ pub mod eval {
         }
 
         fn last_mut(&mut self) -> Option<&mut Val<Cow<'s, str>>> {
-            self.processes.last_mut()
+            self.last_name.as_ref().and_then(|last_name| self.names.get(last_name)).and_then(|last_idx| self.processes.get_mut(*last_idx))
         }
 
         fn to_vec(self) -> Vec<Val<Cow<'s, str>>> {
@@ -1118,6 +1130,7 @@ pub mod eval {
             Self {
                 processes: vec![],
                 names: HashMap::new(),
+                last_name: None,
             }
         }
     }
