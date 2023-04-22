@@ -37,6 +37,8 @@ self_cell = "0.10.2"
 sorted-vec = "0.7"
 svg = "0.10"
 thiserror = "1.0"
+# depended on by dioxus-*; tokio_support feature is needed to fix "cargo doc"
+interprocess = { version = "1", features = [ "tokio_support" ] }
 typed-index-collections = "3.0"
 
 # osqp

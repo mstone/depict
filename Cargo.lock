@@ -709,6 +709,7 @@ dependencies = [
  "enum-kinds",
  "factorial",
  "include_dir",
+ "interprocess",
  "itertools 0.10.5",
  "logos",
  "ordered-float 3.4.0",
@@ -1896,6 +1897,7 @@ dependencies = [
  "spinning",
  "thiserror",
  "to_method",
+ "tokio",
  "winapi",
 ]
 
@@ -3228,6 +3230,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f67ad224767faa3c7d8b6d91985b78e70a1324408abcb1cfcc2be4c06bc06043"
 
 [[package]]
+name = "socket2"
+version = "0.4.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64a4a911eed85daf18834cfaa86a79b7d266ff93ff5ba14005426219480ed662"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "sorted-vec"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3560,8 +3572,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d9f76183f91ecfb55e1d7d5602bd1d979e38a3a522fe900241cf195624d67ae"
 dependencies = [
  "autocfg",
+ "bytes",
+ "libc",
+ "memchr",
+ "mio",
  "num_cpus",
  "pin-project-lite",
+ "socket2",
  "tokio-macros",
  "windows-sys",
 ]
