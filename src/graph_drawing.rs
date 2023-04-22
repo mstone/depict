@@ -680,47 +680,49 @@ pub mod eval {
 
     use crate::parser::visit::{*};
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    enum State {
-        Init,
-        InitWithStyle,
-        Process,
-        Chain,
-        ChainLabel,
-        Slash,
-        SlashReverse,
-        Definition,
-        BlockStyle,
-        InlineStyle,
-        Nest,
-    }
-
     #[derive(Clone, Debug)]
     struct Eval<'s> {
-        s: State,
+        s: Vec<Thing>,
         v: Val<Cow<'s, str>>,
         m: Vec<Val<Cow<'s, str>>>,
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Thing {
+        StyleBlock,
+        StyleInline,
+        Definition,
+        DefinitionHead,
+        DefinitionBody,
+        Chain,
+        ChainPath,
+        ChainLabels,
+        Level,
+        LevelForward,
+        LevelReverse,
+        Nest,
+        NestHead,
+        NestBody,
+    }
+
     impl<'s> Eval<'s> {
-        fn set_state(&mut self, state: State) {
-            eprintln!("STATE: {:?} -> {:?}", self.s, state);
-            self.s = state;
+        fn push(&mut self, thing: Thing) {
+            self.s.push(thing);
+            eprintln!("STACK: {:?}", self.s);
+        }
+
+        fn pop(&mut self) {
+            self.s.pop();
+            eprintln!("POP");
         }
     }
 
     impl<'s, 't> Visit<'s, 't> for Eval<'s> {
-        fn visit_items(&mut self, items: &'t Vec<Item<'s>>) {
-            eprintln!("VISIT ITEMS: {items:?}");
-            visit_items(self, items);
-        }
-
         fn visit_item(&mut self, item: &'t Item<'s>) {
             eprintln!("VISIT ITEM: {item:?}");
             visit_item(self, item);
             eprintln!("...");
-            if self.s == State::Init {
-                eprintln!("POP");
+            if self.s.is_empty() && self.v != Default::default() {
                 let mut vd = Default::default();
                 std::mem::swap(&mut self.v, &mut vd);
                 self.m.push(vd);
@@ -729,42 +731,52 @@ pub mod eval {
 
         fn visit_at(&mut self, lhs: &'t Vec<Item<'s>>, rhs: &'t Vec<Item<'s>>) {
             eprintln!("VISIT AT: {lhs:?} {rhs:?}");
-            if self.s == State::Init {
-                match lhs.len() {
-                    0 => {
-                        self.set_state(State::BlockStyle);
-                        visit_at_rhs(self, rhs);
-                    },
-                    n => {
-                        self.set_state(State::InitWithStyle);
-                        visit_at_lhs(self, lhs);
-                        self.set_state(State::InlineStyle);
-                        visit_at_rhs(self, rhs);
-                    },
-                }
-                self.set_state(State::Init);
+            match lhs.len() {
+                0 => {
+                    self.push(Thing::StyleBlock);
+                    visit_at_rhs(self, rhs);
+                    self.pop();
+                },
+                n => {
+                    visit_at_lhs(self, lhs);
+                    self.push(Thing::StyleInline);
+                    visit_at_rhs(self, rhs);
+                    self.pop();
+                },
             }
         }
 
         fn visit_colon(&mut self, lhs: &'t Vec<Item<'s>>, rhs: &'t Vec<Item<'s>>) {
             eprintln!("VISIT COLON: {lhs:?} {rhs:?}");
-            if matches!(self.s, State::Init | State::InitWithStyle) {
-                let prev_state = self.s;
-                self.set_state(match lhs.len() {
-                    0 => { panic!("zero-lhs colon") },
-                    1 => { State::Definition },
-                    n => { State::Chain },
-                });
-                visit_colon(self, lhs, rhs);
-                self.set_state(prev_state);
-            } else if self.s == State::ChainLabel {
-                visit_colon(self, lhs, rhs);
-            }
+            match lhs.len() {
+                0 => {
+                    panic!("zero-lhs colon") },
+                1 => {
+                    self.push(Thing::Definition);
+                    self.push(Thing::DefinitionHead);
+                    self.visit_colon_lhs(lhs);
+                    self.pop();
+                    self.push(Thing::DefinitionBody);
+                    self.visit_colon_rhs(rhs);
+                    self.pop();
+                    self.pop();
+                },
+                n => {
+                    self.push(Thing::Chain);
+                    self.push(Thing::ChainPath);
+                    self.visit_colon_lhs(lhs);
+                    self.pop();
+                    self.push(Thing::ChainLabels);
+                    self.visit_colon_rhs(rhs);
+                    self.pop();
+                    self.pop();
+                },
+            };
         }
 
         fn visit_colon_lhs(&mut self, lhs: &'t Vec<Item<'s>>) {
             eprintln!("VISIT COLON LHS: {lhs:?}");
-            if self.s == State::Chain {
+            if self.s.last() == Some(&Thing::ChainPath) {
                 if let Some(Item::Text(last)) = lhs.last() {
                     if last == "-" {
                         self.v = Val::Chain { name: None, rel: Rel::Horizontal, path: vec![], labels: vec![], style: None };
@@ -774,64 +786,60 @@ pub mod eval {
                 }
             }
             visit_colon_lhs(self, lhs);
-            if self.s == State::Definition {
-                self.set_state(State::Init);
-            }
         }
 
         fn visit_colon_rhs(&mut self, rhs: &'t Vec<Item<'s>>) {
             eprintln!("VISIT COLON RHS: {rhs:?}");
-            if self.s == State::Chain {
-                self.set_state(State::ChainLabel);
+            if self.s.last() == Some(&Thing::ChainLabels) {
                 if rhs.len() > 0 {
                     self.v.labels_mut().map(|labels| labels.push(Level{forward: None, reverse: None}));
-                    visit_colon_rhs(self, rhs);
                 }
-            } else if self.s == State::ChainLabel {
-                if rhs.len() > 0 {
-                    self.v.labels_mut().map(|labels| labels.push(Level{forward: None, reverse: None}));
-                    visit_colon_rhs(self, rhs);
-                }
-            } else {
-                visit_colon_rhs(self, rhs);
             }
+            visit_colon_rhs(self, rhs);
         }
 
         fn visit_seq(&mut self, seq: &'t Vec<Item<'s>>) {
             eprintln!("VISIT SEQ: {seq:?}");
-            let prev_state = self.s;
-            if matches!(self.s, State::Init | State::InitWithStyle) {
-                if seq.len() == 2 && matches!(seq[1], Item::Sq(_)) {
-                    self.set_state(State::Nest);
-                } else {
-                    self.set_state(State::Chain);
-                    if let Some(Item::Text(last)) = seq.last() {
-                        if last == "-" {
-                            self.v = Val::Chain { name: None, rel: Rel::Horizontal, path: vec![], labels: vec![], style: None };
-                        } else {
-                            self.v = Val::Chain { name: None, rel: Rel::Vertical, path: vec![], labels: vec![], style: None };
-                        }
+            if seq.len() == 2 && matches!(seq[1], Item::Sq(_)) {
+                self.push(Thing::Nest);
+                self.push(Thing::NestHead);
+                self.visit_item(&seq[0]);
+                self.pop();
+                self.push(Thing::NestBody);
+                self.visit_item(&seq[1]);
+                self.pop();
+                self.pop();
+            } else {
+                self.push(Thing::Chain);
+                self.push(Thing::ChainPath);
+                if let Some(Item::Text(last)) = seq.last() {
+                    if last == "-" {
+                        self.v = Val::Chain { name: None, rel: Rel::Horizontal, path: vec![], labels: vec![], style: None };
+                    } else {
+                        self.v = Val::Chain { name: None, rel: Rel::Vertical, path: vec![], labels: vec![], style: None };
                     }
                 }
+                visit_seq(self, seq);
+                self.pop();
+                self.pop();
             }
-            visit_seq(self, seq);
-            self.set_state(prev_state);
         }
 
         fn visit_slash(&mut self, lhs: &'t Vec<Item<'s>>, rhs: &'t Vec<Item<'s>>) {
             eprintln!("VISIT SLASH: {lhs:?} {rhs:?}");
-            if self.s == State::ChainLabel {
-                self.set_state(State::Slash);
-                self.visit_slash_lhs(lhs);
-                self.set_state(State::SlashReverse);
-                self.visit_slash_rhs(rhs);
-                self.set_state(State::ChainLabel);
-            }
+            self.push(Thing::Level);
+            self.push(Thing::LevelForward);
+            self.visit_slash_lhs(lhs);
+            self.pop();
+            self.push(Thing::LevelReverse);
+            self.visit_slash_rhs(rhs);
+            self.pop();
+            self.pop();
         }
 
         fn visit_sq(&mut self, sq: &'t Vec<Item<'s>>) {
             eprintln!("VISIT SQ: {sq:?}");
-            let mut ev = Eval { s: State::Init, v: Default::default(), m: Default::default(), };
+            let mut ev = Eval { s: vec![], v: Default::default(), m: Default::default(), };
             ev.visit_model(sq);
             eprintln!("-> {:?}", ev.v);
             self.v.set_body(Some(Body::All(ev.m)));
@@ -839,29 +847,26 @@ pub mod eval {
 
         fn visit_text(&mut self, text: &'t Cow<'s, str>) {
             eprintln!("VISIT TEXT: {text}");
-            match self.s {
-                State::Definition => {
+            match self.s.last() {
+                Some(Thing::DefinitionHead) => {
                     self.v.set_name(text.clone());
                 },
-                State::InlineStyle => {
-                    self.v.style_mut().map(|style| style.push(text.clone()));
+                Some(Thing::StyleInline) => {
+                    self.m.last_mut().map(|prev| prev.style_mut().map(|style| style.push(text.clone())));
                 }
-                State::Chain => {
+                Some(Thing::ChainPath) => {
                     if text != "-" {
                         self.v.path_mut().map(|path| path.push(Val::Process { name: None, label: Some(text.clone()), body: None, style: None }));
                     }
                 }
-                State::ChainLabel => {
+                Some(Thing::ChainLabels) => {
                     self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.forward.get_or_insert_with(Default::default).push(text.clone())));
                 }
-                State::Slash => {
+                Some(Thing::LevelForward) => {
                     self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.forward.get_or_insert_with(Default::default).push(text.clone())));
                 },
-                State::SlashReverse => {
+                Some(Thing::LevelReverse) => {
                     self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.reverse.get_or_insert_with(Default::default).push(text.clone())));
-                }
-                State::Nest => {
-                    self.v.set_label(Some(text.clone()));
                 }
                 _ => {
                     self.v.set_label(Some(text.clone()));
@@ -874,7 +879,7 @@ pub mod eval {
     /// What depiction do the given depict-expressions denote?
     pub fn eval<'s, 't>(model: &'t Vec<Item<'s>>) -> Val<Cow<'s, str>> {
         let mut ev = Eval{
-            s: State::Init,
+            s: vec![],
             v: Default::default(),
             m: Default::default(),
         };
