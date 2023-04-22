@@ -6733,6 +6733,30 @@ pub mod frontend {
                                             "controller process: a long action, / a long feedback, another feedback"
                                         },
                                     }
+                                    p {
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "node"
+                                        }
+                                        " "
+                                        span {
+                                            class: "keyword",
+                                            "@"
+                                        }
+                                        " "
+                                        span {
+                                            style: "font-style: italic; background-color: rgba(156, 163, 175, 0.2);",
+                                            "style"
+                                        }
+                                        " "
+                                    }
+                                    p {
+                                        style: "text-align: right;",
+                                        span {
+                                            class: "example",
+                                            "env p - : disturbance; p @ red; env @ hidden"
+                                        },
+                                    }
                                 }
                             }
                         }
