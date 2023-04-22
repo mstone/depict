@@ -6770,6 +6770,9 @@ pub mod frontend {
                 .svg ellipse { stroke: #aaa; }
             }
             .red { background-color: red; }
+            @media (prefers-color-scheme: dark) {
+                .red { color: white; }
+            }
         "#;
     }
 
