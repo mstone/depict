@@ -12,7 +12,7 @@ repository = "https://github.com/mstone/depict"
 
 [features]
 default = ["osqp-rust"]
-desktop = []
+desktop = ["interprocess/tokio_support"]
 server = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 client = ["petgraph/serde-1", "serde", "serde/derive", "serde_json"]
 
@@ -37,8 +37,6 @@ self_cell = "0.10.2"
 sorted-vec = "0.7"
 svg = "0.10"
 thiserror = "1.0"
-# depended on by dioxus-*; tokio_support feature is needed to fix "cargo doc"
-interprocess = { version = "1", features = [ "tokio_support" ] }
 typed-index-collections = "3.0"
 
 # osqp
@@ -52,6 +50,11 @@ serde_json = { version = "1", optional = true }
 # client
 [target.'cfg(all(target_arch = "wasm32", target_os="unknown", target_vendor="unknown"))'.dependencies]
 web-sys = { version = "0.3.4", features = [ "Window", "Performance", "PerformanceTiming" ] }
+
+# depended on by dioxus-*; tokio_support feature is needed to fix "cargo doc", but must not be set on wasm32-unknown-unknown
+[target.'cfg(not(all(target_arch = "wasm32", target_os="unknown", target_vendor="unknown")))'.dependencies]
+interprocess = { version = "1", optional = true }
+
 
 [lib]
 name = "depict"
