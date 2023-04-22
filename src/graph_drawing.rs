@@ -5788,6 +5788,7 @@ pub mod frontend {
         #[derive(Clone, Debug, PartialEq, PartialOrd)]
         pub struct Label {
             pub text: String,
+            pub classes: String,
             pub hpos: f64,
             pub width: f64,
             pub vpos: f64,
@@ -6182,7 +6183,7 @@ pub mod frontend {
                     let mut label = None;
 
                     if let (Some(label_text), Some(label_hpos), Some(label_width), Some(label_vpos)) = (label_text, label_hpos, label_width, label_vpos) {
-                        label = Some(Label{text: label_text, hpos: label_hpos, width: label_width, vpos: label_vpos})
+                        label = Some(Label{text: label_text, classes: "".into(), hpos: label_hpos, width: label_width, vpos: label_vpos})
                     }
                     let classes = format!("arrow vertical {ew} {vl}_{wl} {vl}_{wl}_{ew}");
 
@@ -6214,7 +6215,7 @@ pub mod frontend {
                     let label_text = forward.iter().cloned().map(|f| if f == "_" { "".into() } else { f }).collect::<Vec<_>>().join("\n");
                     let label_width = char_width * forward.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
                     let label = if !forward.is_empty() {
-                        Some(Label{text: label_text, hpos: rl, width: label_width, vpos: vposl })
+                        Some(Label{text: label_text, classes: "".into(), hpos: rl, width: label_width, vpos: vposl })
                     } else {
                         None
                     };
@@ -6239,7 +6240,7 @@ pub mod frontend {
                     let label_text = reverse.iter().cloned().map(|f| if f == "_" { "".into() } else { f }).collect::<Vec<_>>().join("\n");
                     let label_width = char_width * reverse.iter().map(|f| f.len()).max().unwrap_or(0) as f64;
                     let label = if !reverse.is_empty() {
-                        Some(Label{text: label_text, hpos: lr, width: label_width, vpos: vposl })
+                        Some(Label{text: label_text, classes: "".into(), hpos: lr, width: label_width, vpos: vposl })
                     } else {
                         None
                     };
@@ -6295,7 +6296,7 @@ pub mod frontend {
 
         use super::dom::{Drawing, Node, Label};
 
-        use svg::{Document, node::{element::{Group, Marker, Path, Rectangle, Text as TextElt}, Node as _, Text}};
+        use svg::{Document, node::{element::{Group, Marker, Path, Rectangle, Style, Text as TextElt}, Node as _, Text}};
 
         use std::io::BufWriter;
 
@@ -6310,6 +6311,9 @@ pub mod frontend {
                 .set("height", format!("{viewbox_height}"))
                 .set("text-depiction", "optimizeLegibility")
                 .set("preserveAspectRatio", "xMidyMid");
+
+            let escaped_css = DEFAULT_CSS.replace("#", "%23");
+            svg.append(Style::new(format!("<![CDATA[\n{escaped_css}\n]]>")));
 
             svg.append(Marker::new()
                 .set("id", "arrowhead")
@@ -6341,22 +6345,18 @@ pub mod frontend {
             nodes.sort_by(|a, b| a.partial_cmp(b).unwrap());
             for node in nodes {
                 match node {
-                    Node::Div{label, hpos, vpos, width, height, ..} => {
+                    Node::Div{label, hpos, vpos, width, height, classes, ..} => {
                             svg.append(Group::new()
                                 .set("transform", format!("translate({hpos}, {vpos})"))
+                                .set("class", format!("box {classes}"))
                                 .add(Rectangle::new()
                                     .set("width", width)
                                     .set("height", height)
-                                    .set("stroke", "black")
-                                    .set("fill", "none")
                                     .set("viewBox", (-20f64, -20f64, viewbox_width+40., viewbox_height+20.))
                                 )
                                 .add(TextElt::new()
                                     .set("text-anchor", "middle")
                                     .set("transform", format!("translate({}, {})", width / 2., 16.))
-                                    .set("font-family", "serif") // 'Times New Roman', Times, serif
-                                    .set("fill", "black")
-                                    .set("stroke", "none")
                                     .add(Text::new(label)))
                             );
                     },
@@ -6378,7 +6378,7 @@ pub mod frontend {
                             _ => {},
                         };
 
-                        if let Some(Label{text, hpos, width: _, vpos, ..}) = label {
+                        if let Some(Label{text, classes: label_classes, hpos, width: _, vpos, ..}) = label {
                             for (lineno, line) in text.lines().enumerate() {
                                 let translate = match (dir.as_ref(), rel.as_ref()) {
                                     ("vertical", "forward") => format!("translate({}, {})", hpos-12., vpos + 16. + (20. * lineno as f64)),
@@ -6393,10 +6393,8 @@ pub mod frontend {
                                     _ => "start",
                                 };
                                 svg.append(Group::new()
+                                    .set("class", format!("label {dir} {rel} {label_classes}"))
                                     .add(TextElt::new()
-                                        .set("font-family", "ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace")
-                                        .set("fill", "black")
-                                        .set("stroke", "none")
                                         .set("transform", translate)
                                         .set("text-anchor", anchor)
                                         .add(Text::new(line))
@@ -6417,7 +6415,7 @@ pub mod frontend {
             let bytes = buf.into_inner().unwrap();
             let svg_str = String::from_utf8(bytes).unwrap();
             // eprintln!("SVG {svg_str}");
-            format!("data:image/svg+xml;utf8,{svg_str}")
+            format!(r#"data:image/svg+xml;utf8,<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">{svg_str}"#)
         }
 
         pub fn render<P>(cx: Scope<P>, drawing: Drawing)-> Option<VNode> {
@@ -6497,7 +6495,7 @@ pub mod frontend {
                                     }
                                 }
                                 {match label {
-                                    Some(Label{text, hpos, width: _, vpos}) => {
+                                    Some(Label{text, classes, hpos, width: _, vpos}) => {
                                         let translate = match (dir.as_ref(), rel.as_ref()) {
                                             ("vertical", "forward") => "translate(calc(-100% - 1.5ex))",
                                             ("horizontal", "forward") => "translate(calc(-100% - 1.5ex), calc(-100% + 20px))",
@@ -6517,7 +6515,7 @@ pub mod frontend {
                                         rsx!(div {
                                             style: "position: absolute; left: {hpos}px; top: calc({vpos}px + {offset});", // width: "{width}px",
                                             div {
-                                                class: "label {dir} {rel}",
+                                                class: "label {dir} {rel} {classes}",
                                                 style: "transform: {translate};",
                                                 "{text}"
                                             }
@@ -6744,15 +6742,28 @@ pub mod frontend {
         }
 
         pub const DEFAULT_CSS: &'static str = r#"
-            svg { stroke: currentColor; stroke-width: 1; }
             path { stroke-dasharray: none; }
             .main_editor { box-sizing: border-box; position: fixed; top: 0; width: 100%; z-index: 20; padding: 1rem;}
             .main_editor > div { max-width: 36rem; margin-left: auto; margin-right: auto; flex-direction: column; }
             .content { width: 100%; margin-top: 180px; }
             .keyword { font-weight: bold; color: rgb(207, 34, 46); }
-            .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
+            .example { font-size: 0.625rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
             .svg text { stroke: none; fill: black; }
-            div.label { padding: 2px 0px; white-space: pre; z-index: 50; background-color: #fff; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace; }
+            div.label { padding: 2px 0px; white-space: pre; z-index: 50; background-color: white; box-sizing: border-box; font-size: .875rem; line-height: 1.25rem; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
+            g.box rect {
+                stroke: black;
+                fill: none;
+            }
+            g.box text {
+                font-family: serif;
+                fill: black;
+                stroke: none;
+            }
+            g.label {
+                font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+                fill: black;
+                stroke: none;
+            }
             @media only screen and (max-width: 575.98px) {
                 .main_editor > div { max-width: calc(100% - 2em); }
             }
@@ -6770,8 +6781,12 @@ pub mod frontend {
                 .svg ellipse { stroke: #aaa; }
             }
             .red { background-color: red; }
+            g.box.red rect {
+                fill: red;
+            }
             @media (prefers-color-scheme: dark) {
                 .red { color: white; }
+                g.box.red text { fill: white; }
             }
         "#;
     }
