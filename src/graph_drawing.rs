@@ -5886,7 +5886,7 @@ pub mod frontend {
 
         use petgraph::visit::EdgeRef;
 
-        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, ObjContainer, ObjNode, ObjHop, ObjGap}, index::{VarRank}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}}, names};
+        use crate::{graph_drawing::{error::{OrErrExt, Kind, Error}, layout::{Obj, ObjContainer, ObjNode, ObjHop, ObjGap}, index::{VarRank}, geometry::{NodeSize, HopSize, OSQPStatusKind}, frontend::log::{Names}, eval::Dir}, names};
 
         use super::log::{self, Log};
 
@@ -6163,7 +6163,7 @@ pub mod frontend {
 
                 let Some(level) = vert_edge_labels.get(&(vl.clone(), wl.clone())) else {continue};
 
-                for (dir, labels) in &[("forward", level.forward.as_ref()), ("reverse", level.reverse.as_ref())] {
+                for (dir, dir2, labels) in &[("forward", Dir::Forward, level.forward.as_ref()), ("reverse", Dir::Reverse, level.reverse.as_ref())] {
                     if labels.is_none() { continue; }
                     let label_text = labels.map(|labels| labels.iter().cloned().map(|f| if f == "_" { "".into() } else { f }).collect::<Vec<_>>().join("\n"));
                     let hops = hops_by_edge.get(&(vl.clone(), wl.clone()));
@@ -6289,9 +6289,16 @@ pub mod frontend {
                     let mut label = None;
 
                     if let (Some(label_text), Some(label_hpos), Some(label_width), Some(label_vpos)) = (label_text, label_hpos, label_width, label_vpos) {
-                        label = Some(Label{text: label_text, classes: "".into(), hpos: label_hpos, width: label_width, vpos: label_vpos})
+                        let label_classes = itertools::join(
+                            styling.style_by_label.get(&(vl.clone(), wl.clone(), dir2.clone(), Cow::from(label_text.clone()))).iter().copied().flatten().chain(
+                                styling.style_by_label_star.get(&(vl.clone(), wl.clone(), dir2.clone())).iter().copied().flatten()
+                            ),
+                            " "
+                        );
+                        label = Some(Label{text: label_text, classes: label_classes.into(), hpos: label_hpos, width: label_width, vpos: label_vpos})
                     }
-                    let classes = format!("arrow vertical {ew} {vl}_{wl} {vl}_{wl}_{ew}");
+                    let classes = itertools::join(styling.style_by_arrow.get(&(vl.clone(), wl.clone(), dir2.clone())).iter().copied().flatten(), " ");
+                    let classes = format!("arrow vertical {ew} {vl}_{wl} {vl}_{wl}_{ew} {classes}");
 
                     arrows.push(Node::Svg{key, path, z_index, dir: "vertical".into(), rel: dir.to_string(), label, hops: hn0, classes, estimated_size: estimated_size0.unwrap(), control_points});
                 }
@@ -6573,7 +6580,6 @@ pub mod frontend {
                                         view_box: "0 0 10 10",
                                         path {
                                             d: "M 0 0 L 10 5 L 0 10 z",
-                                            fill: "#000",
                                         }
                                     }
                                     {
@@ -6874,6 +6880,7 @@ pub mod frontend {
         pub const DEFAULT_CSS: &'static str = r#"
             .arrow svg { stroke: black; }
             path { stroke-dasharray: none; }
+            marker path { fill: #000; }
             .main_editor {
                 box-sizing: border-box;
                 position: fixed;
@@ -6922,11 +6929,21 @@ pub mod frontend {
                 .arrow div div { color: black; background-color: #aaa; padding: 0px 2px; }
                 .svg text { fill: #aaa; }
                 .svg ellipse { stroke: #aaa; }
+                marker path { fill: #eee; }
             }
 
             .red {
                 color: white;
                 background-color: red;
+            }
+            .arrow.red {
+                background-color: inherit;
+            }
+            .arrow.red path {
+                stroke: red;
+            }
+            .arrow.red marker path {
+                fill: red;
             }
             g.box.red rect {
                 fill: red;
@@ -6935,7 +6952,13 @@ pub mod frontend {
                 fill: white;
             }
             @media (prefers-color-scheme: dark) {
-                .red { color: black; }
+                .red {
+                    background-color: red;
+                    color: black;
+                }
+                div.red.label {
+                    background-color: red;
+                }
                 g.box.red text {
                     fill: black;
                 }
