@@ -133,7 +133,14 @@ Slightly formally though, the current *depict* input language roughly consists o
 |labels       |::=| *label* (**,** *label*)* for multi-word labels
 |nesting      |::=| **[** *model* **]**
 |alternatives |::=| **{** *model* **}**
+|styling      |::=| *relation* **@** *styles*
 
+Currently *depict* supports two builtin styles:
+
+| style |  analogous CSS |
+|-------|--------------------|
+| red | background-color: red; color: white; |
+| hidden| display: none; |
 
 ## License
 
