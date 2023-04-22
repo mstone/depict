@@ -2135,14 +2135,13 @@ pub mod layout {
         body: &'s Body<Cow<'t, str>>,
         parent: &'s Option<Cow<'t, str>>,
         mut parents: Vec<Cow<'t, str>>,
-        mut max_depth: usize,
-    ) -> (Vec<Cow<'t, str>>, usize) {
+    ) -> Vec<Cow<'t, str>> {
         if let Some(parent) = parent {
             parents.push(parent.clone());
         }
-        for chain in body {
+        for val in body {
             // eprintln!("WALK_BODY CHAIN parent: {parent:?}, chain: {chain:#?}");
-            match chain {
+            match val {
                 Val::Process{label: Some(node), body: None, ..} => {
                     or_insert(&mut vcg.vert, &mut vcg.vert_vxmap, node.clone());
                     vcg.vert_node_labels.insert(node.clone(), node.clone().into());
@@ -2166,9 +2165,7 @@ pub mod layout {
                             vcg.containers.insert(node.clone());
                         }
                     }
-                    let (new_parents, new_max_depth) = walk_body(queue, vcg, body, label, parents, 0);
-                    parents = new_parents;
-                    max_depth = std::cmp::max(max_depth, new_max_depth);
+                    parents = walk_body(queue, vcg, body, label, parents);
                 },
                 Val::Chain{path, rel, labels, ..} => {
                     queue.push((path, rel, labels, parent));
@@ -2187,10 +2184,9 @@ pub mod layout {
             }
         }
         if parent.is_some() {
-            max_depth += 1;
             parents.pop();
         }
-        (parents, max_depth)
+        parents
     }
 
     pub fn add_contains_edge<'s, 't>(vcg: &'t mut Vcg<Cow<'s, str>, Cow<'s, str>>, parent: &'t Cow<'s, str>, node: &'t Cow<'s, str>) {
@@ -2240,7 +2236,7 @@ pub mod layout {
 
         let mut queue = vec![];
 
-        walk_body(&mut queue, &mut vcg, body, &None, vec![], 0);
+        walk_body(&mut queue, &mut vcg, body, &None, vec![]);
 
         // eprintln!("QUEUE: {queue:#?}");
 
