@@ -329,9 +329,11 @@ pub mod index {
 pub mod eval {
     //! The main "value" type of depiction parts.
 
-    use std::{collections::{HashMap}, borrow::{Cow, Borrow}, vec::IntoIter, ops::Deref, slice::Iter};
+    use std::{collections::{HashMap, HashSet}, borrow::{Cow, Borrow}, vec::IntoIter, ops::Deref, slice::Iter};
 
     use crate::{parser::Item};
+    use crate::parser::visit::{*, Visit as VisitItem};
+    use crate::graph_drawing::eval::visit::{*, Visit as VisitVal};
 
     /// What kind of relationship between processes does
     /// the containing [Val::Chain] describe?
@@ -678,13 +680,11 @@ pub mod eval {
         }
     }
 
-    use crate::parser::visit::{*};
-
     #[derive(Clone, Debug)]
     struct Eval<'s> {
-        s: Vec<Thing>,
-        v: Val<Cow<'s, str>>,
-        m: Vec<Val<Cow<'s, str>>>,
+        stack: Vec<Thing>,
+        value: Val<Cow<'s, str>>,
+        model: Model<'s>,
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -707,25 +707,26 @@ pub mod eval {
 
     impl<'s> Eval<'s> {
         fn push(&mut self, thing: Thing) {
-            self.s.push(thing);
-            eprintln!("STACK: {:?}", self.s);
+            self.stack.push(thing);
+            eprintln!("STACK: {:?}", self.stack);
         }
 
         fn pop(&mut self) {
-            self.s.pop();
+            self.stack.pop();
             eprintln!("POP");
         }
     }
 
-    impl<'s, 't> Visit<'s, 't> for Eval<'s> {
+    // Eval converts syntax into model parts...
+    impl<'s, 't> VisitItem<'s, 't> for Eval<'s> {
         fn visit_item(&mut self, item: &'t Item<'s>) {
             eprintln!("VISIT ITEM: {item:?}");
             visit_item(self, item);
             eprintln!("...");
-            if self.s.is_empty() && self.v != Default::default() {
+            if self.stack.is_empty() && self.value != Default::default() {
                 let mut vd = Default::default();
-                std::mem::swap(&mut self.v, &mut vd);
-                self.m.push(vd);
+                std::mem::swap(&mut self.value, &mut vd);
+                self.model.push(vd);
             }
         }
 
@@ -776,23 +777,24 @@ pub mod eval {
 
         fn visit_colon_lhs(&mut self, lhs: &'t Vec<Item<'s>>) {
             eprintln!("VISIT COLON LHS: {lhs:?}");
-            if self.s.last() == Some(&Thing::ChainPath) {
-                if let Some(Item::Text(last)) = lhs.last() {
-                    if last == "-" {
-                        self.v = Val::Chain { name: None, rel: Rel::Horizontal, path: vec![], labels: vec![], style: None };
-                    } else {
-                        self.v = Val::Chain { name: None, rel: Rel::Vertical, path: vec![], labels: vec![], style: None };
-                    }
-                }
+            if self.stack.last() == Some(&Thing::ChainPath) {
+                let rel = if matches!(lhs.first(), Some(Item::Text(first)) if first == "-") {
+                    Rel::Horizontal
+                } else if matches!(lhs.last(), Some(Item::Text(last)) if last == "-") {
+                    Rel::Horizontal
+                } else {
+                    Rel::Vertical
+                };
+                self.value = Val::Chain { name: None, rel, path: vec![], labels: vec![], style: None };
             }
             visit_colon_lhs(self, lhs);
         }
 
         fn visit_colon_rhs(&mut self, rhs: &'t Vec<Item<'s>>) {
             eprintln!("VISIT COLON RHS: {rhs:?}");
-            if self.s.last() == Some(&Thing::ChainLabels) {
+            if self.stack.last() == Some(&Thing::ChainLabels) {
                 if rhs.len() > 0 {
-                    self.v.labels_mut().map(|labels| labels.push(Level{forward: None, reverse: None}));
+                    self.value.labels_mut().map(|labels| labels.push(Level{forward: None, reverse: None}));
                 }
             }
             visit_colon_rhs(self, rhs);
@@ -812,13 +814,14 @@ pub mod eval {
             } else {
                 self.push(Thing::Chain);
                 self.push(Thing::ChainPath);
-                if let Some(Item::Text(last)) = seq.last() {
-                    if last == "-" {
-                        self.v = Val::Chain { name: None, rel: Rel::Horizontal, path: vec![], labels: vec![], style: None };
-                    } else {
-                        self.v = Val::Chain { name: None, rel: Rel::Vertical, path: vec![], labels: vec![], style: None };
-                    }
-                }
+                let rel = if matches!(seq.first(), Some(Item::Text(first)) if first == "-") {
+                    Rel::Horizontal
+                } else if matches!(seq.last(), Some(Item::Text(last)) if last == "-") {
+                    Rel::Horizontal
+                } else {
+                    Rel::Vertical
+                };
+                self.value = Val::Chain { name: None, rel, path: vec![], labels: vec![], style: None };
                 visit_seq(self, seq);
                 self.pop();
                 self.pop();
@@ -839,55 +842,307 @@ pub mod eval {
 
         fn visit_sq(&mut self, sq: &'t Vec<Item<'s>>) {
             eprintln!("VISIT SQ: {sq:?}");
-            let mut ev = Eval { s: vec![], v: Default::default(), m: Default::default(), };
+            let mut ev = Eval { stack: vec![], value: Default::default(), model: Default::default(), };
             ev.visit_model(sq);
-            eprintln!("-> {:?}", ev.v);
-            self.v.set_body(Some(Body::All(ev.m)));
+            eprintln!("-> {:?}", ev.value);
+            self.value.set_body(Some(Body::All(ev.model.to_vec())));
         }
 
         fn visit_text(&mut self, text: &'t Cow<'s, str>) {
             eprintln!("VISIT TEXT: {text}");
-            match self.s.last() {
+            match self.stack.last() {
                 Some(Thing::DefinitionHead) => {
-                    self.v.set_name(text.clone());
+                    self.value.set_name(text.clone());
                 },
                 Some(Thing::StyleInline) => {
-                    self.m.last_mut().map(|prev| prev.style_mut().map(|style| style.push(text.clone())));
+                    self.model.last_mut().map(|prev| prev.style_mut().map(|style| style.push(text.clone())));
                 }
                 Some(Thing::ChainPath) => {
                     if text != "-" {
-                        self.v.path_mut().map(|path| path.push(Val::Process { name: None, label: Some(text.clone()), body: None, style: None }));
+                        self.value.path_mut().map(|path| path.push(Val::Process { name: None, label: Some(text.clone()), body: None, style: None }));
                     }
                 }
                 Some(Thing::ChainLabels) => {
-                    self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.forward.get_or_insert_with(Default::default).push(text.clone())));
+                    self.value.labels_mut().map(|labels| labels.last_mut().map(|level| level.forward.get_or_insert_with(Default::default).push(text.clone())));
                 }
                 Some(Thing::LevelForward) => {
-                    self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.forward.get_or_insert_with(Default::default).push(text.clone())));
+                    self.value.labels_mut().map(|labels| labels.last_mut().map(|level| level.forward.get_or_insert_with(Default::default).push(text.clone())));
                 },
                 Some(Thing::LevelReverse) => {
-                    self.v.labels_mut().map(|labels| labels.last_mut().map(|level| level.reverse.get_or_insert_with(Default::default).push(text.clone())));
+                    self.value.labels_mut().map(|labels| labels.last_mut().map(|level| level.reverse.get_or_insert_with(Default::default).push(text.clone())));
                 }
                 _ => {
-                    self.v.set_label(Some(text.clone()));
+                    self.value.set_label(Some(text.clone()));
                 },
             }
             visit_text(self, text);
         }
     }
 
+    pub fn index<'s, 't, 'u>(
+        val: &'t Val<Cow<'s, str>>,
+        current_scope: &'u mut Vec<Cow<'s, str>>,
+        scopes: &'u mut HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
+    ) {
+        match val {
+            Val::Process { name, body, .. } => {
+                if let Some(name) = name {
+                    current_scope.push(name.clone());
+                    scopes.insert(current_scope.clone(), &val);
+                }
+                if let Some(body) = body {
+                    for val in body.iter() {
+                        index(val, current_scope, scopes);
+                    }
+                }
+                if name.is_some() {
+                    current_scope.pop();
+                }
+            },
+            Val::Chain { name, path, .. } => {
+                if let Some(name) = name {
+                    current_scope.push(name.clone());
+                    scopes.insert(current_scope.clone(), &val);
+                    for val in path.iter() {
+                        index(val, current_scope, scopes);
+                    }
+                    current_scope.pop();
+                }
+            },
+            Val::Style { name, body } => {
+                if let Some(name) = name {
+                    current_scope.push(name.clone());
+                    scopes.insert(current_scope.clone(), &val);
+                }
+                if let Some(body) = body {
+                    for val in body.iter() {
+                        index(val, current_scope, scopes);
+                    }
+                }
+                if name.is_some() {
+                    current_scope.pop();
+                }
+            }
+        }
+    }
+
+    pub fn resolve<'s, 't, 'u>(
+        val: &'t mut Val<Cow<'s, str>>,
+        current_path: &'u mut Vec<Cow<'s, str>>,
+        scopes: &'u HashMap<Vec<Cow<'s, str>>, &'t Val<Cow<'s, str>>>,
+    ) {
+        // eprintln!("RESOLVE {current_path:?}");
+        let mut resolution = None;
+        match val {
+            Val::Process { name, body, label, .. } => {
+                if let Some(name) = name {
+                    current_path.push(name.clone());
+                }
+                if name.is_none() && body.is_none() {
+                    if let Some(label) = label {
+                        // eprintln!("RESOLVE {current_path:?} found reference: {label}");
+                        let label = label.to_string();
+                        let mut base_path = current_path.clone();
+                        let path = label.split(".").map(|s| s.to_string()).map(Cow::Owned).collect::<Vec<Cow<'s, str>>>();
+                        while !base_path.is_empty() {
+                            let mut test_path = base_path.clone();
+                            test_path.append(&mut path.clone());
+                            // eprintln!("RESOLVE test path: {test_path:?}");
+                            if let Some(val) = scopes.get(&test_path).copied() {
+                                resolution = Some(val.clone());
+                                break
+                            }
+                            base_path.pop();
+                        }
+                        if resolution.is_none() {
+                            if let Some(val) = scopes.get(&path).copied() {
+                                resolution = Some(val.clone())
+                            }
+                        }
+                    }
+                }
+                if let Some(body) = body {
+                    let bs = match body {
+                        Body::Any(bs) => bs,
+                        Body::All(bs) => bs,
+                    };
+                    for val in bs.iter_mut() {
+                        resolve(val, current_path, scopes);
+                    }
+                }
+                if let Some(_name) = name {
+                    current_path.pop();
+                }
+            },
+            Val::Chain { name, path, .. } => {
+                if let Some(name) = name {
+                    current_path.push(name.clone());
+                }
+                for val in path.iter_mut() {
+                    resolve(val, current_path, scopes);
+                }
+                if let Some(_name) = name {
+                    current_path.pop();
+                }
+            },
+            Val::Style { name, body, .. } => {
+                if let Some(name) = name {
+                    current_path.push(name.clone());
+                }
+                if let Some(body) = body {
+                    let bs = match body {
+                        Body::Any(bs) => bs,
+                        Body::All(bs) => bs,
+                    };
+                    for val in bs.iter_mut() {
+                        resolve(val, current_path, scopes);
+                    }
+                }
+                if name.is_some() {
+                    current_path.pop();
+                }
+            }
+        }
+        // eprintln!("RESOLVE resolution: {resolution:?}");
+        if let Some(resolution) = resolution {
+            *val = resolution;
+        }
+    }
+
+    fn merge<'s>(existing_process: &mut Val<Cow<'s, str>>, rhs: &mut Val<Cow<'s, str>>) {
+        // eprintln!("EVAL_MERGE: {existing_process:#?} {rhs:#?}");
+        match (existing_process, rhs) {
+            (Val::Process { body, .. }, Val::Process { body: rbody, .. })
+            | (Val::Style { body, ..}, Val::Style { body: rbody, ..})
+            => {
+                let rbody = <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(rbody.get_or_insert_with(Default::default).as_mut());
+                <Vec<Val<Cow<'s, str>>> as AsMut<Vec<_>>>::as_mut(body.get_or_insert_with(Default::default).as_mut()).append(rbody);
+            }
+            _ => {},
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct Model<'s> {
+        processes: Vec<Val<Cow<'s, str>>>,
+        names: HashMap<Cow<'s, str>, usize>,
+    }
+
+    impl<'s> Model<'s> {
+        fn append(&mut self, rhs: &mut Vec<Val<Cow<'s, str>>>) {
+            for val in rhs.drain(..) {
+                self.push(val)
+            }
+        }
+
+        fn push(&mut self, mut rhs: Val<Cow<'s, str>>) {
+            use std::collections::hash_map::Entry::*;
+            // eprintln!("PUSH {rhs:#?}");
+            let rhs_name = match &rhs {
+                Val::Process { name, label, .. } => {
+                    // the only unnamed process is the administrative / top-level wrapper process
+                    if name.is_none() && label.is_none() {
+                        self.processes.push(rhs);
+                        return
+                    }
+                    name.clone().or_else(|| label.as_ref().cloned()).unwrap().clone()
+                },
+                Val::Chain { name, .. } => {
+                    if let Some(name) = name {
+                        name.clone()
+                    } else {
+                        self.processes.push(rhs);
+                        return
+                    }
+                },
+                Val::Style { name, body, .. } => {
+                    if let Some(name) = name {
+                        name.clone()
+                    } else {
+                        self.processes.push(rhs);
+                        return
+                    }
+                }
+            };
+            let index_entry = self.names.entry(rhs_name.clone());
+            match index_entry {
+                Occupied(oe) => {
+                    let existing_process = self.processes.get_mut(*oe.get()).unwrap();
+                    merge(existing_process, &mut rhs);
+                },
+                Vacant(ve) => {
+                    // if we have no names entry for rhs_name, that could be because
+                    // rhs is really new, or it could be because rhs is renaming an existing
+                    // process.
+                    if let Val::Process { name: Some(_), label: Some(rhs_label), .. } = &rhs {
+                        let index_entry2 = self.names.entry(rhs_label.clone());
+                        match index_entry2 {
+                            Occupied(oe2) => {
+                                let existing_process_index = *oe2.get();
+                                let mut existing_process = self.processes.get_mut(existing_process_index).unwrap();
+                                std::mem::swap(existing_process, &mut rhs);
+                                merge(&mut existing_process, &mut rhs);
+                                self.names.insert(rhs_name, existing_process_index);
+                            },
+                            Vacant(_) => {
+                                self.names.insert(rhs_name, self.processes.len());
+                                self.processes.push(rhs);
+                            },
+                        }
+                    } else {
+                        ve.insert(self.processes.len());
+                        self.processes.push(rhs);
+                    }
+                },
+            }
+            // TODO: cases:
+            //    rhs has name and we have seen it
+            //    rhs has label and we have seen it
+            //    rhs has name and we have not seen it
+            //    rhs has label and we have not seen it
+        }
+
+        fn last_mut(&mut self) -> Option<&mut Val<Cow<'s, str>>> {
+            self.processes.last_mut()
+        }
+
+        fn to_vec(self) -> Vec<Val<Cow<'s, str>>> {
+            self.processes
+        }
+
+        fn is_empty(&self) -> bool {
+            self.processes.is_empty()
+        }
+
+        fn new() -> Self {
+            Self {
+                processes: vec![],
+                names: HashMap::new(),
+            }
+        }
+    }
+
+    impl<'s> Default for Model<'s> {
+        fn default() -> Self {
+            Model::new()
+        }
+    }
+
     /// What depiction do the given depict-expressions denote?
     pub fn eval<'s, 't>(model: &'t Vec<Item<'s>>) -> Val<Cow<'s, str>> {
         let mut ev = Eval{
-            s: vec![],
-            v: Default::default(),
-            m: Default::default(),
+            stack: vec![],
+            value: Default::default(),
+            model: Default::default(),
         };
         ev.visit_model(model);
-        // visit_model(&mut ev, model);
-        let mut p: Val<Cow<'s, str>> = Default::default();
-        p.set_body(Some(Body::All(ev.m)));
-        p
+        let mut scopes = HashMap::new();
+        let mut val: Val<Cow<'s,str>> = Default::default();
+        val.set_body(Some(Body::All(ev.model.to_vec())));
+        let mut val2 = val.clone();
+        index(&val2, &mut vec![], &mut scopes);
+        resolve(&mut val, &mut vec![], &scopes);
+        val
     }
 
 
