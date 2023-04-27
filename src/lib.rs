@@ -340,7 +340,7 @@ pub mod parser {
         }
 
         /// Get a &mut reference to `self`'s right-most sequence if one exists, or panic.
-        fn right(&mut self) -> &mut Vec<Item<'s>> {
+        pub(crate) fn right(&mut self) -> &mut Vec<Item<'s>> {
             match self {
                 Item::Seq(ref mut r) => r,
                 Item::Comma(ref mut r) => r,
@@ -352,7 +352,7 @@ pub mod parser {
         }
 
         /// Get a &mut reference to `self`'s left-most sequence if one exists, or panic.
-        fn left(&mut self) -> &mut Vec<Item<'s>> {
+        pub(crate) fn left(&mut self) -> &mut Vec<Item<'s>> {
             match self {
                 Item::Seq(ref mut l) => l,
                 Item::Comma(ref mut l) => l,

@@ -596,6 +596,111 @@ pub mod eval {
         }
     }
 
+    impl<'s> From<Body<Cow<'s, str>>> for Item<'s> {
+        fn from(value: Body<Cow<'s, str>>) -> Self {
+            match value {
+                Body::Any(bs) => Item::Br(bs.into_iter().map(|b| b.into()).collect::<Vec<_>>()),
+                Body::All(bs) => Item::Sq(bs.into_iter().map(|b| b.into()).collect::<Vec<_>>()),
+            }
+        }
+    }
+
+    impl<'s> From<Level<Cow<'s, str>>> for Item<'s> {
+        fn from(value: Level<Cow<'s, str>>) -> Self {
+            match (value.forward, value.reverse) {
+                (None, None) => unimplemented!(),
+                (None, Some(rev)) => Item::Slash(vec![], rev.into_iter().map(|r| to_item(r)).collect::<Vec<_>>()),
+                (Some(fwd), None) => {
+                    match fwd.len() {
+                        0 => unreachable!(),
+                        1 => to_item(fwd.get(0).unwrap().clone()),
+                        _ => Item::Seq(fwd.into_iter().map(|f| to_item(f)).collect::<Vec<_>>()),
+                    }
+                },
+                (Some(fwd), Some(rev)) => Item::Slash(
+                    fwd.into_iter().map(|f| to_item(f)).collect::<Vec<_>>(),
+                    rev.into_iter().map(|r| to_item(r)).collect::<Vec<_>>()
+                ),
+            }
+        }
+    }
+
+    fn to_item<'s>(text: Cow<'s, str>) -> Item<'s> {
+        if text.contains(" ") {
+            Item::Comma(vec![Item::Text(text)])
+        } else {
+            Item::Text(text)
+        }
+    }
+
+    impl<'s> From<Val<Cow<'s, str>>> for Item<'s> {
+        fn from(value: Val<Cow<'s, str>>) -> Self {
+            match value {
+                Val::Process { name, label, body, style } => {
+                    let inner = match (name, label, body) {
+                        (None, None, None) => unreachable!(),
+                        (None, None, Some(body)) => body.into(),
+                        (None, Some(label), None) => to_item(label),
+                        (None, Some(label), Some(body)) => {
+                            Item::Seq(vec![to_item(label), body.into()])
+                        },
+                        (Some(name), None, None) => unreachable!(),
+                        (Some(name), None, Some(body)) => {
+                            Item::Colon(vec![to_item(name)], vec![body.into()])
+                        },
+                        (Some(name), Some(label), None) => {
+                            Item::Colon(vec![to_item(name)], vec![to_item(label)])
+                        },
+                        (Some(name), Some(label), Some(body)) => {
+                            Item::Colon(vec![to_item(name)], vec![to_item(label), body.into()])
+                        },
+                    };
+                    if let Some(style) = style {
+                        Item::At(vec![inner], style.into_iter().map(|s| to_item(s)).collect::<Vec<_>>())
+                    } else {
+                        inner
+                    }
+                },
+                Val::Chain { name, rel, path, labels, style } => {
+                    let path = path.into_iter().map(|p| p.into()).collect::<Vec<_>>();
+                    let labels = labels.into_iter().fold(None, |acc, lvl| {
+                        match acc {
+                            Some(acc) => Some(Item::Colon(vec![lvl.into()], vec![acc])),
+                            None => Some(lvl.into()),
+                        }
+                    });
+                    let mut inner = if let Some(labels) = labels {
+                        Item::Colon(path, vec![labels])
+                    } else {
+                        Item::Seq(path)
+                    };
+                    if rel == Rel::Horizontal {
+                        inner.left().push(Item::Text(Cow::from("-")));
+                    }
+                    let inner = if let Some(name) = name {
+                        Item::Colon(vec![to_item(name)], vec![inner])
+                    } else {
+                        inner
+                    };
+                    if let Some(style) = style {
+                        Item::At(vec![inner], style.into_iter().map(|s| to_item(s)).collect::<Vec<_>>())
+                    } else {
+                        inner
+                    }
+                },
+                Val::Style { name, body } => {
+                    let Some(body) = body else { unreachable!() };
+                    let inner = Item::At(vec![], vec![body.into()]);
+                    if let Some(name) = name {
+                        Item::Colon(vec![to_item(name)], vec![inner])
+                    } else {
+                        inner
+                    }
+                },
+            }
+        }
+    }
+
     fn as_string1<'s>(o1: &Option<Cow<'s, str>>, o2: &'static str) -> Cow<'s, str> {
         let o2 = Cow::from(o2);
         o1.as_ref().or_else(|| Some(&o2)).unwrap().clone()
@@ -1434,6 +1539,32 @@ pub mod eval {
                     .set_name(a.into())
                     .set_body(Some(Body::All(vec![l(c)]))))
             );
+        }
+
+        mod prop {
+            use std::borrow::Cow;
+
+            use proptest::prelude::*;
+
+            use crate::{graph_drawing::eval::{Val, eval}, parser::Item};
+
+            fn arb_val() -> impl Strategy<Value = Val<Cow<'static, str>>> {
+                "[a-z]+".prop_map(|s| Val::Process{
+                    name: None,
+                    label: Some(Cow::from(s)),
+                    body: None,
+                    style: None,
+                })
+            }
+
+            proptest! {
+                #[test]
+                fn has_retraction(v in arb_val()) {
+                    let a: Item = v.clone().into();
+                    let b = eval(&vec![a]);
+                    assert_eq!(super::mp(&v), b);
+                }
+            }
         }
     }
 }
@@ -7136,6 +7267,7 @@ pub mod frontend {
                 ("a c; a b; b c; a c", vec![&Above("a", "c"), &Above("a", "b"), &Above("b", "c")]),
                 ("a [ b [ c ]; d ]", vec![&Contains("a", "b"), &Contains("a", "c"), &Contains("b", "c"), &Contains("a", "d")]),
                 ("a [ b c -: dddd / e ]", vec![]),
+                ("a b c : d : e", vec![&Above("a", "b"), &Above("b", "c"), /* Arrow(a, b), Arrow(b, c), Label(...) */]),
                 ("a c: d; b [ c ]", vec![]),
                 ("a [ b ]; a c -; b d -; c d", vec![&Contains("a", "b"), &Left("a", "c"), &Left("b", "d"), &Above("c", "d")]),
                 ("a [ b ]; c [ d ]; a c", vec![&Above("a", "c")]), // not solved-left(a, c)?
