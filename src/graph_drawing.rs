@@ -1546,15 +1546,47 @@ pub mod eval {
 
             use proptest::prelude::*;
 
-            use crate::{graph_drawing::eval::{Val, eval}, parser::Item};
+            use crate::{graph_drawing::eval::{Val, eval, Rel, Level}, parser::Item};
+
+            use super::p;
+
+            fn l<'s>(x: String) -> Val<Cow<'s, str>> { p().set_label(Some(x.into())).clone() }
 
             fn arb_val() -> impl Strategy<Value = Val<Cow<'static, str>>> {
-                "[a-z]+".prop_map(|s| Val::Process{
-                    name: None,
-                    label: Some(Cow::from(s)),
-                    body: None,
-                    style: None,
-                })
+                prop_oneof![
+                    "[a-z]+".prop_map(|s| Val::Process{
+                        name: None,
+                        label: Some(Cow::from(s)),
+                        body: None,
+                        style: None,
+                    }),
+                    ("[a-z]+", "[a-z]+").prop_map(|(s, t)| Val::Chain {
+                        name: None,
+                        rel: Rel::Vertical,
+                        path: vec![l(s), l(t)],
+                        labels: vec![],
+                        style: None,
+                    }),
+                    ("[a-z]+", "[a-z]+", "[a-z]+", "[a-z]+").prop_map(|(p1, p2, f1, r1)| Val::Chain {
+                        name: None,
+                        rel: Rel::Vertical,
+                        path: vec![l(p1), l(p2)],
+                        labels: vec![
+                            Level{forward: Some(vec![f1.into()]), reverse: Some(vec![r1.into()])},
+                        ],
+                        style: None,
+                    }),
+                    ("[a-z]+", "[a-z]+", "[a-z]+", "[a-z]+", "[a-z]+", "[a-z]+", "[a-z]+").prop_map(|(p1, p2, p3, f1, r1, f2, r2)| Val::Chain {
+                        name: None,
+                        rel: Rel::Vertical,
+                        path: vec![l(p1), l(p2), l(p3)],
+                        labels: vec![
+                            Level{forward: Some(vec![f1.into()]), reverse: Some(vec![r1.into()])},
+                            Level{forward: Some(vec![f2.into()]), reverse: Some(vec![r2.into()])}
+                        ],
+                        style: None,
+                    })
+                ]
             }
 
             proptest! {
