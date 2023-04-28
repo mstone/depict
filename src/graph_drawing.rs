@@ -1491,6 +1491,7 @@ pub mod eval {
         fn hc<'s>(x: &[Val<Cow<'s, str>>]) -> Val<Cow<'s, str>> { Val::Chain{ name: None, rel: Rel::Horizontal, path: x.iter().cloned().collect::<Vec<_>>(), labels: vec![], style: None, }}
         fn col<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Colon(vi(x), vi(y)) }
         fn sl<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Slash(vi(x), vi(y)) }
+        fn cm<'s>(x: &[Item<'static>]) -> Item<'s> { Item::Comma(vi(x)) }
 
         #[test]
         fn test_eval_empty() {
@@ -1555,6 +1556,17 @@ pub mod eval {
                 mp(&Val::Chain{name: None, rel: Rel::Vertical, path: vec![l(a), l(b), l(c)], style: None, labels: vec![
                     Level{forward: Some(vec!["d".into()]), reverse: Some(vec!["e".into()])},
                     Level{forward: Some(vec!["f".into()]), reverse: Some(vec!["g".into()])}
+                ]})
+            );
+        }
+
+        #[test]
+        fn test_eval_comma_chain() {
+            // a b: c d, e f
+            assert_eq!(
+                eval(&vi(&[col(&[t(a), t(b)], &[cm(&[seq(&[t("c"), t("d")]), seq(&[t("e"), t("f")])])])])),
+                mp(&Val::Chain{name: None, rel: Rel::Vertical, path: vec![l(a), l(b)], style: None, labels: vec![
+                    Level{forward: Some(vec!["c d".into(), "e f".into()]), reverse: None},
                 ]})
             );
         }
