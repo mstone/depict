@@ -663,7 +663,7 @@ pub mod eval {
                 },
                 Val::Chain { name, rel, path, labels, style } => {
                     let path = path.into_iter().map(|p| p.into()).collect::<Vec<_>>();
-                    let labels = labels.into_iter().fold(None, |acc, lvl| {
+                    let labels = labels.into_iter().rev().fold(None, |acc, lvl| {
                         match acc {
                             Some(acc) => Some(Item::Colon(vec![lvl.into()], vec![acc])),
                             None => Some(lvl.into()),
