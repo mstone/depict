@@ -872,6 +872,11 @@ pub mod eval {
 
         fn visit_colon(&mut self, lhs: &'t Vec<Item<'s>>, rhs: &'t Vec<Item<'s>>) {
             eprintln!("VISIT COLON: {lhs:?} {rhs:?}");
+            if self.stack.last() == Some(&Thing::ChainLabels) {
+                self.visit_colon_lhs(lhs);
+                self.visit_colon_rhs(rhs);
+                return;
+            }
             match lhs.len() {
                 0 => {
                     panic!("zero-lhs colon") },
@@ -1558,6 +1563,8 @@ pub mod eval {
             use std::borrow::Cow;
 
             use proptest::prelude::*;
+
+            use pretty_assertions::{assert_eq};
 
             use crate::{graph_drawing::eval::{Val, eval, Rel, Level}, parser::Item};
 
