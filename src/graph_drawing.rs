@@ -1485,6 +1485,7 @@ pub mod eval {
         fn seq<'s>(x: &[Item<'static>]) -> Item<'s> { Item::Seq(vi(x)) }
         fn hc<'s>(x: &[Val<Cow<'s, str>>]) -> Val<Cow<'s, str>> { Val::Chain{ name: None, rel: Rel::Horizontal, path: x.iter().cloned().collect::<Vec<_>>(), labels: vec![], style: None, }}
         fn col<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Colon(vi(x), vi(y)) }
+        fn sl<'s>(x: &[Item<'static>], y: &[Item<'static>]) -> Item<'s> { Item::Slash(vi(x), vi(y)) }
 
         #[test]
         fn test_eval_empty() {
@@ -1538,6 +1539,18 @@ pub mod eval {
                 mp(l(b)
                     .set_name(a.into())
                     .set_body(Some(Body::All(vec![l(c)]))))
+            );
+        }
+
+        #[test]
+        fn test_eval_long_chain() {
+            // a b c: d / e : f / g
+            assert_eq!(
+                eval(&vi(&[col(&[t(a), t(b), t(c)], &[col(&[sl(&[t("d")], &[t("e")])], &[sl(&[t("f")], &[t("g")])])])])),
+                mp(&Val::Chain{name: None, rel: Rel::Vertical, path: vec![l(a), l(b), l(c)], style: None, labels: vec![
+                    Level{forward: Some(vec!["d".into()]), reverse: Some(vec!["e".into()])},
+                    Level{forward: Some(vec!["f".into()]), reverse: Some(vec!["g".into()])}
+                ]})
             );
         }
 
