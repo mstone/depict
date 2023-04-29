@@ -800,6 +800,7 @@ pub mod eval {
     struct Eval<'s> {
         stack: Vec<Thing>,
         value: Val<Cow<'s, str>>,
+        comma_buffer: Option<Vec<Cow<'s, str>>>,
         model: Model<'s>,
     }
 
@@ -930,6 +931,10 @@ pub mod eval {
 
         fn visit_seq(&mut self, seq: &'t Vec<Item<'s>>) {
             eprintln!("VISIT SEQ: {seq:?}");
+            if self.stack.last() == Some(&Thing::ChainLabels) {
+                visit_seq(self, seq);
+                return;
+            }
             if seq.len() == 2 && matches!(seq[1], Item::Sq(_)) {
                 self.push(Thing::Nest);
                 self.push(Thing::NestHead);
@@ -970,14 +975,29 @@ pub mod eval {
 
         fn visit_sq(&mut self, sq: &'t Vec<Item<'s>>) {
             eprintln!("VISIT SQ: {sq:?}");
-            let mut ev = Eval { stack: vec![], value: Default::default(), model: Default::default(), };
+            let mut ev = Eval { stack: vec![], value: Default::default(), model: Default::default(), comma_buffer: None, };
             ev.visit_model(sq);
             eprintln!("-> {:?}", ev.value);
             self.value.set_body(Some(Body::All(ev.model.to_vec())));
         }
 
+        fn visit_comma(&mut self, comma: &'t Vec<Item<'s>>) {
+            eprintln!("VISIT COMMA: {comma:?}");
+            for item in comma {
+                self.comma_buffer = Some(vec![]);
+                visit_item(self, item);
+                let comma_buffer = self.comma_buffer.take();
+                let label = Cow::from(comma_buffer.unwrap().join(" "));
+                self.visit_text(&label);
+            }
+        }
+
         fn visit_text(&mut self, text: &'t Cow<'s, str>) {
             eprintln!("VISIT TEXT: {text}");
+            if let Some(comma_buffer) = self.comma_buffer.as_mut() {
+                comma_buffer.push(text.clone());
+                return;
+            }
             match self.stack.last() {
                 Some(Thing::DefinitionHead) => {
                     self.value.set_name(text.clone());
@@ -1281,6 +1301,7 @@ pub mod eval {
         let mut ev = Eval{
             stack: vec![],
             value: Default::default(),
+            comma_buffer: None,
             model: Default::default(),
         };
         ev.visit_model(model);
