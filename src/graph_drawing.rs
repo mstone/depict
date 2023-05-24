@@ -7325,6 +7325,22 @@ pub mod frontend {
         }
 
         #[test]
+        pub fn test_syntax_guide() {
+            let tests: Vec<(&str, Vec<&dyn Check>)> = vec![
+                ("person microwave food: open start stop / beep : heat; person food: eat", vec![]),
+                ("- left right: input / reply", vec![]),
+                ("plane [ pilot navigator ]", vec![]),
+                ("c: controller; p: process; c p: setpoint / feedback", vec![]),
+                ("controller process: a long action, / a long feedback, another feedback", vec![]),
+                ("env p - : disturbance; p @ red; env @ hidden", vec![]),
+            ];
+            for (prompt, checks) in tests {
+                eprintln!("PROMPT: {prompt}. CHECKS: {checks:?}");
+                check(prompt, checks);
+            }
+        }
+
+        #[test]
         pub fn test_small_diagrams() {
             let tests: Vec<(&str, Vec<&dyn Check>)> = vec![
                 ("a b", vec![&Above("a", "b")]),
