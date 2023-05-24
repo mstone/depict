@@ -931,7 +931,7 @@ pub mod eval {
 
         fn visit_seq(&mut self, seq: &'t Vec<Item<'s>>) {
             eprintln!("VISIT SEQ: {seq:?}");
-            if self.stack.last() == Some(&Thing::ChainLabels) {
+            if matches!(self.stack.last(), Some(Thing::ChainLabels | Thing::LevelForward | Thing::LevelReverse)) {
                 visit_seq(self, seq);
                 return;
             }
