@@ -1592,6 +1592,17 @@ pub mod eval {
             );
         }
 
+        #[test]
+        fn test_eval_slash_comma_chain() {
+            // a b: c d, / e f,
+            assert_eq!(
+                eval(&vi(&[col(&[t(a), t(b)], &[sl(&[cm(&[seq(&[t("c"), t("d")])])], &[cm(&[seq(&[t("e"), t("f")])])])])])),
+                mp(&Val::Chain{name: None, rel: Rel::Vertical, path: vec![l(a), l(b)], style: None, labels: vec![
+                    Level{forward: Some(vec!["c d".into()]), reverse: Some(vec!["e f".into()])},
+                ]})
+            );
+        }
+
         mod prop {
             use std::borrow::Cow;
 
